@@ -3,8 +3,10 @@
 [ext_resource type="Script" uid="uid://kuxqh057vr5y" path="res://addons/godot-xr-tools/functions/movement_turn.gd" id="1_hqtel"]
 [ext_resource type="PackedScene" uid="uid://l2n30mpbkdyw" path="res://addons/godot-xr-tools/hands/scenes/lowpoly/right_hand_low.tscn" id="2_2hs0m"]
 [ext_resource type="Script" uid="uid://dc4hg8kq5ia5y" path="res://addons/godot-xr-tools/functions/movement_direct.gd" id="2_sweqy"]
+[ext_resource type="Script" uid="uid://b18kkstg643yw" path="res://addons/godot-xr-tools/functions/function_pickup.gd" id="3_1jxqw"]
 [ext_resource type="PackedScene" uid="uid://diyu06cw06syv" path="res://addons/godot-xr-tools/player/player_body.tscn" id="3_2hs0m"]
-[ext_resource type="PackedScene" uid="uid://b4kad2kuba1yn" path="res://addons/godot-xr-tools/hands/scenes/lowpoly/left_hand_low.tscn" id="4_1jxqw"]
+[ext_resource type="Script" uid="uid://ck4yn3hxuobj7" path="res://addons/godot-xr-tools/player/player_body.gd" id="4_1jxqw"]
+[ext_resource type="PackedScene" uid="uid://b4kad2kuba1yn" path="res://addons/godot-xr-tools/hands/scenes/lowpoly/left_hand_low.tscn" id="6_1jxqw"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_vgu37"]
 
@@ -15,6 +17,13 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.3746462, 0)
 
 [node name="XRCamera3D" type="XRCamera3D" parent="XROrigin3D" unique_id=902689131]
 current = true
+
+[node name="XRToolsPlayerBody" type="CharacterBody3D" parent="XROrigin3D/XRCamera3D" unique_id=1715741457]
+script = ExtResource("4_1jxqw")
+player_radius = 0.35
+player_height_min = 1.0
+player_height_max = 2.1
+metadata/_custom_type_script = "uid://ck4yn3hxuobj7"
 
 [node name="RightHand" type="XRController3D" parent="XROrigin3D" unique_id=1618150330]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.478861, 0.468292, -0.241097)
@@ -33,6 +42,11 @@ metadata/_custom_type_script = "uid://kuxqh057vr5y"
 
 [node name="RightHand" parent="XROrigin3D/RightHand" unique_id=848294941 instance=ExtResource("2_2hs0m")]
 
+[node name="XRToolsFunctionPickup" type="Node3D" parent="XROrigin3D/RightHand" unique_id=640286640]
+transform = Transform3D(1, 0, 0, 0, 0.70710677, 0.70710677, 0, -0.70710677, 0.70710677, 0, 0, 0)
+script = ExtResource("3_1jxqw")
+metadata/_custom_type_script = "uid://b18kkstg643yw"
+
 [node name="LeftHand" type="XRController3D" parent="XROrigin3D" unique_id=592496579]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.460909, 0.388594, -0.241118)
 tracker = &"left_hand"
@@ -48,7 +62,12 @@ script = ExtResource("2_sweqy")
 strafe = true
 metadata/_custom_type_script = "uid://dc4hg8kq5ia5y"
 
-[node name="LeftHand" parent="XROrigin3D/LeftHand" unique_id=1980054961 instance=ExtResource("4_1jxqw")]
+[node name="LeftHand" parent="XROrigin3D/LeftHand" unique_id=1980054961 instance=ExtResource("6_1jxqw")]
+
+[node name="XRToolsFunctionPickup" type="Node3D" parent="XROrigin3D/LeftHand" unique_id=2391735]
+transform = Transform3D(1, 0, 0, 0, 0.70710677, 0.70710677, 0, -0.70710677, 0.70710677, 0, 0, 0)
+script = ExtResource("3_1jxqw")
+metadata/_custom_type_script = "uid://b18kkstg643yw"
 
 [node name="PlayerBody" parent="XROrigin3D" unique_id=1302218964 instance=ExtResource("3_2hs0m")]
 
