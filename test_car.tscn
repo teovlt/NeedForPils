@@ -1,0 +1,18 @@
+[gd_scene format=3 uid="uid://doaevwmhv1ltw"]
+
+[ext_resource type="PackedScene" uid="uid://ci52bv1m15cbs" path="res://cars/Doge.tscn" id="1_l10qf"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_gbwcd"]
+size = Vector3(17.057129, 1, 42.823486)
+
+[node name="TestCar" type="Node3D" unique_id=1478440338]
+
+[node name="StaticBody3D" type="StaticBody3D" parent="." unique_id=978063033]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="StaticBody3D" unique_id=1089890324]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5.5183105, 0, -18.356567)
+shape = SubResource("BoxShape3D_gbwcd")
+debug_color = Color(0.7490196, 0.45490196, 0.2, 1)
+
+[node name="car" parent="." unique_id=2130600957 instance=ExtResource("1_l10qf")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.274003, 0.534724, 0.2970047)
