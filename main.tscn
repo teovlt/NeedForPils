@@ -8,6 +8,7 @@
 [ext_resource type="Texture2D" uid="uid://civ8bxmpkabmw" path="res://assets/resized_a945cb106cf174e0221430458e93dd3b.png" id="6_7mycd"]
 [ext_resource type="Shader" uid="uid://dq4udl5a5fk1e" path="res://addons/lowpolyterrain/shader/terrain_paint_overlay.gdshader" id="7_5vw27"]
 [ext_resource type="Script" uid="uid://dxq4p56omxx80" path="res://addons/lowpolyterrain/LowPolyTerrainManager.gd" id="7_272bh"]
+[ext_resource type="AudioStream" uid="uid://b6hbqr8f8q3dp" path="res://assets/Saturday Night Kebab.mp3" id="9_kek77"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_7mycd"]
 albedo_texture = ExtResource("6_7mycd")
@@ -301,3 +302,8 @@ prior_mag = 121.2568
 next_mag = 121.2568
 prior_pt_init = NodePath("../RoadPoint")
 next_pt_init = NodePath("../RoadPoint017")
+
+[node name="AudioStreamPlayer" type="AudioStreamPlayer" parent="." unique_id=2066233701]
+stream = ExtResource("9_kek77")
+volume_db = -10.0
+autoplay = true
