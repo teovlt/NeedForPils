@@ -1,0 +1,38 @@
+[gd_scene format=3 uid="uid://bai6p3alr4tnk"]
+
+[ext_resource type="PackedScene" uid="uid://708yjlrtjs6q" path="res://player.tscn" id="1_qv08e"]
+[ext_resource type="Script" uid="uid://bp5offnkdxsca" path="res://voiture.gd" id="1_rw1m6"]
+[ext_resource type="PackedScene" uid="uid://bnvxqb33lltmj" path="res://addons/godot-xr-tools/interactables/interactable_hinge.tscn" id="2_hs4ok"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_jtmgt"]
+
+[node name="Voiture" type="VehicleBody3D" unique_id=1535085915]
+script = ExtResource("1_rw1m6")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1682215970]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
+shape = SubResource("BoxShape3D_jtmgt")
+
+[node name="Body" type="MeshInstance3D" parent="." unique_id=1570616062]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.50513715, 0)
+
+[node name="WheelFL" type="VehicleWheel3D" parent="." unique_id=1717085145]
+
+[node name="WheelFR" type="VehicleWheel3D" parent="." unique_id=1015339955]
+
+[node name="WheelRL" type="VehicleWheel3D" parent="." unique_id=2130832209]
+
+[node name="WheelRR" type="VehicleWheel3D" parent="." unique_id=1781770847]
+
+[node name="Cockpit" type="Node3D" parent="." unique_id=174979520]
+
+[node name="Player" parent="Cockpit" unique_id=1682639450 instance=ExtResource("1_qv08e")]
+
+[node name="SteeringWheel" parent="Cockpit" unique_id=1824528668 instance=ExtResource("2_hs4ok")]
+hinge_limit_min = -180.0
+hinge_limit_max = 180.0
+
+[node name="ThrottleLever" parent="Cockpit" unique_id=1029130075 instance=ExtResource("2_hs4ok")]
+
+[connection signal="hinge_moved" from="Cockpit/SteeringWheel" to="." method="_on_steering_wheel_hinge_moved"]
+[connection signal="hinge_moved" from="Cockpit/ThrottleLever" to="." method="_on_throttle_lever_hinge_moved"]
