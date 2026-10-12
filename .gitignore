@@ -1,7 +1,7 @@
 # Godot 4.3+ generated cache and build directories.
 .godot/
 /android/
-addons/
+
 
 # Imported translations generated from CSV files.
 *.translation
