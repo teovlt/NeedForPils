@@ -1,0 +1,54 @@
+[gd_scene format=3 uid="uid://708yjlrtjs6q"]
+
+[ext_resource type="Script" uid="uid://kuxqh057vr5y" path="res://addons/godot-xr-tools/functions/movement_turn.gd" id="1_hqtel"]
+[ext_resource type="Script" uid="uid://dc4hg8kq5ia5y" path="res://addons/godot-xr-tools/functions/movement_direct.gd" id="2_sweqy"]
+[ext_resource type="PackedScene" uid="uid://diyu06cw06syv" path="res://addons/godot-xr-tools/player/player_body.tscn" id="3_2hs0m"]
+[ext_resource type="Script" uid="uid://ck4yn3hxuobj7" path="res://addons/godot-xr-tools/player/player_body.gd" id="4_1jxqw"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_vgu37"]
+
+[node name="Player" type="CharacterBody3D" unique_id=206916080]
+
+[node name="XROrigin3D" type="XROrigin3D" parent="." unique_id=755731618]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.3746462, 0)
+
+[node name="XRCamera3D" type="XRCamera3D" parent="XROrigin3D" unique_id=902689131]
+current = true
+
+[node name="RightHand" type="XRController3D" parent="XROrigin3D" unique_id=1618150330]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.478861, 0.468292, -0.241097)
+tracker = &"right_hand"
+pose = &"grip"
+
+[node name="RightControllerFbRenderModel" type="OpenXRFbRenderModel" parent="XROrigin3D/RightHand" unique_id=1781656185]
+render_model_type = 1
+unique_name_in_owner = true
+
+[node name="XRToolsMovementTurn" type="Node3D" parent="XROrigin3D/RightHand" unique_id=858297575]
+script = ExtResource("1_hqtel")
+turn_mode = 2
+metadata/_custom_type_script = "uid://kuxqh057vr5y"
+
+[node name="LeftHand" type="XRController3D" parent="XROrigin3D" unique_id=592496579]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.460909, 0.388594, -0.241118)
+tracker = &"left_hand"
+pose = &"grip"
+
+[node name="LeftControllerFbRenderModel" type="OpenXRFbRenderModel" parent="XROrigin3D/LeftHand" unique_id=999869325]
+unique_name_in_owner = true
+
+[node name="XRToolsMovementDirect" type="Node3D" parent="XROrigin3D/LeftHand" unique_id=753452940]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.93977, 0.07969797, 2.0995736e-05)
+script = ExtResource("2_sweqy")
+metadata/_custom_type_script = "uid://dc4hg8kq5ia5y"
+
+[node name="PlayerBody" type="CharacterBody3D" parent="XROrigin3D" unique_id=1302218964 groups=["player_body"] instance=ExtResource("3_2hs0m")]
+process_priority = -100
+process_physics_priority = -100
+collision_layer = 524288
+collision_mask = 1023
+script = ExtResource("4_1jxqw")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1873710787]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+shape = SubResource("CapsuleShape3D_vgu37")
