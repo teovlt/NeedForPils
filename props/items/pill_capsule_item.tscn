@@ -1,0 +1,26 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://props/pill_capsule.glb" id="1_model"]
+[ext_resource type="Script" path="res://interaction/vr_pickable.gd" id="2_pick"]
+
+[sub_resource type="BoxShape3D" id="Box_item"]
+size = Vector3(0.02, 0.007, 0.007)
+
+[node name="PillCapsule" type="RigidBody3D"]
+collision_layer = 0
+collision_mask = 0
+mass = 0.05
+continuous_cd = true
+freeze = true
+freeze_mode = 1
+
+[node name="Model" parent="." instance=ExtResource("1_model")]
+
+[node name="Shape" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
+shape = SubResource("Box_item")
+
+[node name="Grab" type="Node3D" parent="."]
+script = ExtResource("2_pick")
+item_name = "Gélule"
+rest_up_axis = -1
