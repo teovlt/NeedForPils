@@ -36,3 +36,6 @@ builds/
 # Uncomment these only when the project still generates them.
 # .import/
 # export.cfg
+
+# Réglages locaux de test (par ex. OpenXR désactivé sans casque).
+override.cfg
