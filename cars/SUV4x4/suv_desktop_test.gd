@@ -7,7 +7,7 @@ extends Node3D
 
 @export var autotest := false
 ## Scénario du test automatique : "objets" (rangements) ou "arbres".
-@export_enum("objets", "arbres", "aleatoire", "phares", "retros", "portes", "boite", "combine", "essuie", "plafonnier", "nature") var autotest_scenario := "objets"
+@export_enum("objets", "arbres", "aleatoire", "phares", "retros", "portes", "boite", "combine", "essuie", "plafonnier", "nature", "pluie", "balayage", "menu", "lunette") var autotest_scenario := "objets"
 
 @onready var car: SUV4x4 = $SUV4x4
 @onready var cam: Camera3D = $Camera3D
@@ -54,6 +54,14 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_dome(delta)
 		elif autotest_scenario == "nature":
 			_run_autotest_nature(delta)
+		elif autotest_scenario == "pluie":
+			_run_autotest_rain(delta)
+		elif autotest_scenario == "balayage":
+			_run_autotest_sweep(delta)
+		elif autotest_scenario == "menu":
+			_run_autotest_menu(delta)
+		elif autotest_scenario == "lunette":
+			_run_autotest_rear_window(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -821,3 +829,180 @@ func _run_autotest_nature(delta: float) -> void:
 			_log("AUTOTEST nature t=%.0f vitesse=%.0f biome sapins=%.2f mixte=%.2f prairie=%.2f montagne=%.2f altitude=%.0f" % [_t, car.forward_speed * 3.6, bw[0], bw[1], bw[2], bw[3], car.global_position.y])
 			_shot("nature_%d" % i)
 	if at.call(56.5): get_tree().quit()
+
+
+
+# --- Test de la pluie et des essuie-glaces ----------------------------------------
+# Roule à 80 km/h sous les 3 niveaux de pluie avec différents modes d'essuie-glace et
+# mesure l'eau restante sur le pare-brise côté conducteur (moyenne et maxi par étape).
+const RAIN_STEPS := [
+	# [début (s), météo, cran d'essuie-glace, nom]
+	[0.0, "pluie_legere", 0, "legere_off"],
+	[8.0, "pluie_legere", 1, "legere_int"],
+	[22.0, "pluie", 1, "forte_int"],
+	[32.0, "pluie", 2, "forte_lent"],
+	[44.0, "pluie", 3, "forte_rapide"],
+	[56.0, "orage", 3, "orage_rapide"],
+	[68.0, "", 0, "fin"],
+]
+var _rain_stats := {}
+
+func _run_autotest_rain(delta: float) -> void:
+	var w: WeatherSystem = $Weather
+	var road: RoadGenerator = $RoadGenerator
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	w.random_events = false
+	w.transition_time = 0.5
+	$FallingTrees.enabled = false
+	car.external_input = true
+	if at.call(0.05):
+		w.hour = 13.0
+		car.handbrake_lever.set_angle_deg(0.0, true)
+		car.gear_lever.set_notch(2, true)
+	# pilote automatique, voie de droite, 80 km/h
+	var fwd := car.global_basis.z
+	var info := road.sample_road(car.global_position + fwd * 14.0)
+	if info["found"]:
+		var target: Vector3 = info["point"] + info["right"] * 1.75
+		var to_t := target - car.global_position
+		to_t.y = 0.0
+		car._kb_steer = clampf(fwd.cross(to_t.normalized()).y * 2.0, -1.0, 1.0)
+	car.throttle_input = 1.0 if car.forward_speed * 3.6 < 80.0 else 0.0
+	car.brake_input = 0.0
+	_inside = false
+	cam.fov = 75.0
+	# vue du conducteur, sauf un instant de l'extérieur pour voir la pluie sur le toit
+	var outside := (_t > 50.0 and _t < 53.0)
+	if outside:
+		cam.fov = 60.0
+		_cabin_cam(Vector3(-2.6, 2.6, -1.0), Vector3(0.0, 1.6, 0.4))
+	elif _t > 60.0 and _t < 63.0:
+		_cabin_cam(Vector3(-0.1, 1.45, -0.35), Vector3(2.0, 1.25, 0.2))   # vitre conducteur
+	else:
+		_cabin_cam(Vector3(0.42, 1.52, -0.2), Vector3(0.42, 1.25, 4.0))
+	for k in RAIN_STEPS.size():
+		var st: Array = RAIN_STEPS[k]
+		if at.call(st[0] + 0.05):
+			if st[1] != "":
+				w.set_weather(st[1], true)
+				car.wiper_stalk.set_notch(st[2], true)
+			if k > 0:
+				var prev: String = RAIN_STEPS[k - 1][3]
+				var sd: Dictionary = _rain_stats.get(prev, {"sum": 0.0, "n": 0, "max": 0.0})
+				_log("AUTOTEST pluie %s : eau moyenne=%.2f maxi=%.2f (niveau de pluie %d, essuie-glace %s)" % [prev, sd["sum"] / maxf(sd["n"], 1), sd["max"], w.get_rain_level(), car.wiper_stalk.get_notch_label()])
+		# mesure sur la seconde moitié de chaque étape (régime établi)
+		if k < RAIN_STEPS.size() - 1:
+			var t_end: float = RAIN_STEPS[k + 1][0]
+			if _t > (st[0] + t_end) * 0.5 and _t < t_end:
+				var wv: float = car._windshield.get_view_wetness()
+				var sd2: Dictionary = _rain_stats.get(st[3], {"sum": 0.0, "n": 0, "max": 0.0})
+				sd2["sum"] += wv
+				sd2["n"] += 1
+				sd2["max"] = maxf(sd2["max"], wv)
+				_rain_stats[st[3]] = sd2
+			if at.call(t_end - 0.6):
+				_shot("pluie_" + st[3])
+	if at.call(51.5): _shot("pluie_toit")
+	if at.call(62.5): _shot("pluie_vitre_laterale")
+	if at.call(68.5): get_tree().quit()
+
+
+# Pare-brise mouillé à l'arrêt, puis un seul aller-retour des essuie-glaces : vue de
+# face pour vérifier que la zone essuyée correspond bien au passage des balais.
+func _run_autotest_sweep(delta: float) -> void:
+	var w: WeatherSystem = $Weather
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	w.random_events = false
+	w.transition_time = 0.5
+	$FallingTrees.enabled = false
+	car.external_input = true
+	car.throttle_input = 0.0
+	car.brake_input = 1.0
+	_inside = false
+	cam.fov = 50.0
+	if at.call(0.05):
+		w.hour = 13.0
+		w.set_weather("pluie", true)
+	if _t < 12.0:
+		_cabin_cam(Vector3(0.0, 3.2, 4.2), Vector3(0.0, 1.45, 0.75))
+	else:
+		_cabin_cam(Vector3(0.42, 1.52, -0.2), Vector3(0.42, 1.25, 4.0))
+	if at.call(8.0): _shot("balayage_1_mouille")
+	if at.call(8.1): car.wiper_stalk.set_notch(2, true)
+	if at.call(8.8): _shot("balayage_2_milieu")
+	if at.call(8.85): car.wiper_stalk.set_notch(0, true)   # finit le cycle puis se gare
+	if at.call(10.5):
+		_shot("balayage_3_essuye")
+		_log("AUTOTEST balayage : eau zone conducteur=%.2f" % car._windshield.get_view_wetness())
+	if at.call(13.0): _shot("balayage_4_conducteur")
+	if at.call(13.5): get_tree().quit()
+
+
+# Menu météo/heure (F1) : ouverture, choix d'une météo et d'une heure.
+func _run_autotest_menu(delta: float) -> void:
+	var w: WeatherSystem = $Weather
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	$FallingTrees.enabled = false
+	car.external_input = true
+	car.throttle_input = 0.0
+	car.brake_input = 1.0
+	var menu = w.get_node("WeatherMenu")
+	if at.call(1.0):
+		var ev := InputEventKey.new()
+		ev.keycode = KEY_F1
+		ev.pressed = true
+		Input.parse_input_event(ev)
+	if at.call(2.0):
+		_log("AUTOTEST menu ouvert=%s" % menu.visible)
+		_shot("menu_1_ouvert")
+		menu._on_weather("orage")
+		menu._set_hour(21.0)
+	if at.call(4.0):
+		_log("AUTOTEST menu : %s %s niveau=%d" % [w.get_time_string(), w.get_weather_name(), w.get_rain_level()])
+		_shot("menu_2_orage_nuit")
+		menu._on_weather("degage")
+		menu._set_hour(12.0)
+		(menu._speed_buttons[60.0] as Button).pressed.emit()
+	if at.call(6.0):
+		_log("AUTOTEST menu : %s %s vitesse=%.0f" % [w.get_time_string(), w.get_weather_name(), w.time_scale])
+		_shot("menu_3_midi")
+	if at.call(6.5): get_tree().quit()
+
+
+# Lunette arrière mouillée à l'arrêt, puis un aller-retour de l'essuie-glace arrière :
+# vues de derrière et de l'intérieur.
+func _run_autotest_rear_window(delta: float) -> void:
+	var w: WeatherSystem = $Weather
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	w.random_events = false
+	$FallingTrees.enabled = false
+	car.external_input = true
+	car.throttle_input = 0.0
+	car.brake_input = 1.0
+	_inside = false
+	cam.fov = 60.0
+	if at.call(0.05):
+		w.hour = 13.0
+		w.set_weather("pluie", true)
+	var inside_view := fmod(_t, 2.0) > 1.0
+	if _t > 13.0:
+		inside_view = true
+	if inside_view:
+		_cabin_cam(Vector3(0.0, 1.55, -0.6), Vector3(0.0, 1.45, -4.0))
+	else:
+		_cabin_cam(Vector3(0.6, 2.0, -5.2), Vector3(0.0, 1.5, -2.25))
+	if at.call(9.6): _shot("lunette_1_mouillee_dehors")
+	if at.call(10.6): _shot("lunette_2_mouillee_dedans")
+	if at.call(10.7): car.wiper_stalk.set_notch(2, true)
+	if at.call(11.2): car.wiper_stalk.set_notch(0, true)   # finit son aller-retour puis se gare
+	if at.call(11.55): _shot("lunette_3_balai_dedans")
+	if at.call(13.6): _shot("lunette_4_essuyee_dedans")
+	if at.call(14.0): get_tree().quit()
