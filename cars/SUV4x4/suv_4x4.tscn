@@ -1,0 +1,586 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://cars/SUV4x4/suv_4x4.gd" id="1_suv"]
+[ext_resource type="PackedScene" path="res://cars/SUV4x4/suv_4x4.glb" id="2_glb"]
+[ext_resource type="Script" path="res://interaction/vr_steering_wheel.gd" id="3_wheel"]
+[ext_resource type="Script" path="res://interaction/vr_hinge_interactable.gd" id="4_hinge"]
+[ext_resource type="Script" path="res://interaction/vr_notched_lever.gd" id="5_notch"]
+[ext_resource type="Script" path="res://cars/SUV4x4/windshield_rain.gd" id="6_rain"]
+[ext_resource type="Script" path="res://interaction/car_storage.gd" id="7_storage"]
+[ext_resource type="Script" path="res://interaction/storage_zone.gd" id="8_zone"]
+[ext_resource type="PackedScene" path="res://props/items/pill_capsule_item.tscn" id="9_capsule"]
+[ext_resource type="PackedScene" path="res://props/items/pill_smiley_item.tscn" id="10_smiley"]
+[ext_resource type="PackedScene" path="res://props/items/cigarette_item.tscn" id="11_cig"]
+[ext_resource type="PackedScene" path="res://props/items/joint_item.tscn" id="12_joint"]
+[ext_resource type="PackedScene" path="res://props/items/phone_item.tscn" id="13_phone"]
+[ext_resource type="PackedScene" path="res://props/items/gps_item.tscn" id="14_gps"]
+[ext_resource type="PackedScene" path="res://props/items/thermos_item.tscn" id="15_thermos"]
+[ext_resource type="Script" path="res://interaction/vr_mirror.gd" id="16_mirror"]
+[ext_resource type="Script" path="res://interaction/vr_door_handle.gd" id="17_handle"]
+[ext_resource type="Script" path="res://cars/SUV4x4/instrument_cluster.gd" id="18_cluster"]
+
+[sub_resource type="StandardMaterial3D" id="Mat_mirror_plastic"]
+albedo_color = Color(0.035, 0.035, 0.035, 1)
+roughness = 0.6
+
+[sub_resource type="BoxMesh" id="Mesh_mirror_housing"]
+material = SubResource("Mat_mirror_plastic")
+size = Vector3(0.265, 0.088, 0.03)
+
+[sub_resource type="BoxMesh" id="Mesh_mirror_stem"]
+material = SubResource("Mat_mirror_plastic")
+size = Vector3(0.022, 0.15, 0.022)
+
+[sub_resource type="BoxMesh" id="Mesh_mirror_link"]
+material = SubResource("Mat_mirror_plastic")
+size = Vector3(0.018, 0.018, 0.034)
+
+[sub_resource type="BoxShape3D" id="Box_lower"]
+size = Vector3(2, 0.75, 5.05)
+
+[sub_resource type="BoxShape3D" id="Box_cabin"]
+size = Vector3(1.9, 0.78, 3.6)
+
+[node name="SUV4x4" type="VehicleBody3D"]
+mass = 1300.0
+center_of_mass_mode = 1
+center_of_mass = Vector3(0, 0.45, 0)
+script = ExtResource("1_suv")
+
+[node name="Model" parent="." instance=ExtResource("2_glb")]
+
+[node name="CollisionLower" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.75, -0.065)
+shape = SubResource("Box_lower")
+
+[node name="CollisionCabin" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.51, -0.7)
+shape = SubResource("Box_cabin")
+
+[node name="WheelFL" type="VehicleWheel3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.8, 0.55, 1.55)
+use_as_traction = true
+use_as_steering = true
+wheel_roll_influence = 0.2
+wheel_radius = 0.4
+wheel_rest_length = 0.2
+wheel_friction_slip = 3.0
+suspension_travel = 0.25
+suspension_stiffness = 50.0
+suspension_max_force = 8000.0
+damping_compression = 0.9
+damping_relaxation = 1.0
+
+[node name="WheelFR" type="VehicleWheel3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.8, 0.55, 1.55)
+use_as_traction = true
+use_as_steering = true
+wheel_roll_influence = 0.2
+wheel_radius = 0.4
+wheel_rest_length = 0.2
+wheel_friction_slip = 3.0
+suspension_travel = 0.25
+suspension_stiffness = 50.0
+suspension_max_force = 8000.0
+damping_compression = 0.9
+damping_relaxation = 1.0
+
+[node name="WheelRL" type="VehicleWheel3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.8, 0.55, -1.55)
+use_as_traction = true
+wheel_roll_influence = 0.2
+wheel_radius = 0.4
+wheel_rest_length = 0.2
+wheel_friction_slip = 3.0
+suspension_travel = 0.25
+suspension_stiffness = 50.0
+suspension_max_force = 8000.0
+damping_compression = 0.9
+damping_relaxation = 1.0
+
+[node name="WheelRR" type="VehicleWheel3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.8, 0.55, -1.55)
+use_as_traction = true
+wheel_roll_influence = 0.2
+wheel_radius = 0.4
+wheel_rest_length = 0.2
+wheel_friction_slip = 3.0
+suspension_travel = 0.25
+suspension_stiffness = 50.0
+suspension_max_force = 8000.0
+damping_compression = 0.9
+damping_relaxation = 1.0
+
+[node name="SteeringWheel" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.45, 1.08, 0.58)
+script = ExtResource("3_wheel")
+highlight_distance = 0.18
+grab_distance = 0.07
+outline_width = 0.005
+
+[node name="Doors" type="Node3D" parent="."]
+
+[node name="DoorFL" type="Node3D" parent="Doors"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.95, 0.6, 0.98)
+script = ExtResource("4_hinge")
+min_angle_deg = -70.0
+max_angle_deg = 0.0
+
+[node name="DoorFR" type="Node3D" parent="Doors"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.95, 0.6, 0.98)
+script = ExtResource("4_hinge")
+max_angle_deg = 70.0
+
+[node name="DoorRL" type="Node3D" parent="Doors"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.95, 0.6, -0.105)
+script = ExtResource("4_hinge")
+min_angle_deg = -70.0
+max_angle_deg = 0.0
+
+[node name="DoorRR" type="Node3D" parent="Doors"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.95, 0.6, -0.105)
+script = ExtResource("4_hinge")
+max_angle_deg = 70.0
+
+[node name="GloveboxLid" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.775, 0.805, 0.7)
+script = ExtResource("4_hinge")
+hinge_axis = Vector3(1, 0, 0)
+min_angle_deg = -80.0
+max_angle_deg = 0.0
+outline_width = 0.005
+
+[node name="ConsoleLid" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.135, 0.86, -0.25)
+script = ExtResource("4_hinge")
+hinge_axis = Vector3(1, 0, 0)
+min_angle_deg = -105.0
+max_angle_deg = 0.0
+outline_width = 0.005
+
+[node name="DriverSeat" type="Marker3D" parent="."]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0.45, 1.45, -0.05)
+
+[node name="GearLever" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.77, 0.53)
+script = ExtResource("5_notch")
+notch_angles_deg = PackedFloat32Array(20, 10, 0, -10, -20)
+notch_labels = PackedStringArray("R", "N", "D", "2", "1")
+initial_notch = 1
+hinge_axis = Vector3(1, 0, 0)
+highlight_distance = 0.15
+grab_distance = 0.06
+outline_width = 0.004
+
+[node name="GearGateLabels" type="Node3D" parent="."]
+
+[node name="R" type="Label3D" parent="GearGateLabels"]
+transform = Transform3D(-1, 0, 0, 0, 0, 1, 0, 1, 0, 0.05, 0.773, 0.59)
+pixel_size = 0.00055
+modulate = Color(0.55, 0.55, 0.55, 1)
+text = "R"
+font_size = 48
+outline_size = 8
+
+[node name="N" type="Label3D" parent="GearGateLabels"]
+transform = Transform3D(-1, 0, 0, 0, 0, 1, 0, 1, 0, 0.05, 0.773, 0.56)
+pixel_size = 0.00055
+modulate = Color(0.55, 0.55, 0.55, 1)
+text = "N"
+font_size = 48
+outline_size = 8
+
+[node name="D" type="Label3D" parent="GearGateLabels"]
+transform = Transform3D(-1, 0, 0, 0, 0, 1, 0, 1, 0, 0.05, 0.773, 0.53)
+pixel_size = 0.00055
+modulate = Color(0.55, 0.55, 0.55, 1)
+text = "D"
+font_size = 48
+outline_size = 8
+
+[node name="G2" type="Label3D" parent="GearGateLabels"]
+transform = Transform3D(-1, 0, 0, 0, 0, 1, 0, 1, 0, 0.05, 0.773, 0.5)
+pixel_size = 0.00055
+modulate = Color(0.55, 0.55, 0.55, 1)
+text = "2"
+font_size = 48
+outline_size = 8
+
+[node name="G1" type="Label3D" parent="GearGateLabels"]
+transform = Transform3D(-1, 0, 0, 0, 0, 1, 0, 1, 0, 0.05, 0.773, 0.47)
+pixel_size = 0.00055
+modulate = Color(0.55, 0.55, 0.55, 1)
+text = "1"
+font_size = 48
+outline_size = 8
+
+[node name="Handbrake" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.165, 0.8, -0.05)
+script = ExtResource("4_hinge")
+hinge_axis = Vector3(1, 0, 0)
+min_angle_deg = -35.0
+max_angle_deg = 0.0
+snap_closed_deg = 4.0
+highlight_distance = 0.15
+grab_distance = 0.06
+outline_width = 0.004
+
+[node name="WiperStalk" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.43, 0.96, 0.6)
+script = ExtResource("5_notch")
+notch_angles_deg = PackedFloat32Array(0, 10, 20, 30)
+notch_labels = PackedStringArray("OFF", "INT", "LENT", "RAPIDE")
+hinge_axis = Vector3(0, 0.423, -0.906)
+highlight_distance = 0.12
+grab_distance = 0.05
+outline_width = 0.004
+pick_bonus = 0.03
+
+[node name="LightStalk" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.47, 0.96, 0.6)
+script = ExtResource("5_notch")
+notch_angles_deg = PackedFloat32Array(0, -8, -16, -24, -32)
+notch_labels = PackedStringArray("OFF", "AUTO", "CODES", "PHARES", "PHARES + BARRE")
+initial_notch = 1
+hinge_axis = Vector3(0, 0.423, -0.906)
+highlight_distance = 0.12
+grab_distance = 0.05
+outline_width = 0.004
+pick_bonus = 0.03
+
+[node name="Wipers" type="Node3D" parent="."]
+
+[node name="WiperDriver" type="Node3D" parent="Wipers"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.55, 1.19, 0.985)
+
+[node name="WiperPassenger" type="Node3D" parent="Wipers"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.05, 1.19, 0.985)
+
+[node name="WiperRear" type="Node3D" parent="Wipers"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.695, -2.275)
+
+[node name="InstrumentCluster" type="Node3D" parent="."]
+transform = Transform3D(-1, 0, 0, 0, 0.94, 0.342, 0, 0.342, -0.94, 0.45, 1.1707, 0.7081)
+script = ExtResource("18_cluster")
+
+[node name="WindshieldRain" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.749, 0.662, 0, -0.662, 0.749, 0, 1.4526, 0.738)
+script = ExtResource("6_rain")
+
+[node name="Headlights" type="Node3D" parent="."]
+
+[node name="Left" type="SpotLight3D" parent="Headlights"]
+transform = Transform3D(-1, 0, 0, 0, 0.9925, 0.122, 0, 0.122, -0.9925, 0.725, 0.92, 2.25)
+light_color = Color(1, 0.95, 0.82, 1)
+light_energy = 4.0
+spot_range = 45.0
+spot_angle = 32.0
+spot_attenuation = 0.6
+
+[node name="Right" type="SpotLight3D" parent="Headlights"]
+transform = Transform3D(-1, 0, 0, 0, 0.9925, 0.122, 0, 0.122, -0.9925, -0.725, 0.92, 2.25)
+light_color = Color(1, 0.95, 0.82, 1)
+light_energy = 4.0
+spot_range = 45.0
+spot_angle = 32.0
+spot_attenuation = 0.6
+
+[node name="HighLeft" type="SpotLight3D" parent="Headlights"]
+transform = Transform3D(-1, 0, 0, 0, 0.99966, 0.0262, 0, 0.0262, -0.99966, 0.725, 0.93, 2.25)
+visible = false
+light_color = Color(1, 0.96, 0.86, 1)
+light_energy = 7.0
+spot_range = 120.0
+spot_angle = 16.0
+spot_attenuation = 0.5
+
+[node name="HighRight" type="SpotLight3D" parent="Headlights"]
+transform = Transform3D(-1, 0, 0, 0, 0.99966, 0.0262, 0, 0.0262, -0.99966, -0.725, 0.93, 2.25)
+visible = false
+light_color = Color(1, 0.96, 0.86, 1)
+light_energy = 7.0
+spot_range = 120.0
+spot_angle = 16.0
+spot_attenuation = 0.5
+
+[node name="BarLeft" type="SpotLight3D" parent="Headlights"]
+transform = Transform3D(-1, 0, 0, 0, 0.9976, 0.0698, 0, 0.0698, -0.9976, 0.32, 1.985, 0.47)
+visible = false
+light_color = Color(0.95, 0.97, 1, 1)
+light_energy = 6.0
+spot_range = 90.0
+spot_angle = 40.0
+spot_attenuation = 0.7
+
+[node name="BarRight" type="SpotLight3D" parent="Headlights"]
+transform = Transform3D(-1, 0, 0, 0, 0.9976, 0.0698, 0, 0.0698, -0.9976, -0.32, 1.985, 0.47)
+visible = false
+light_color = Color(0.95, 0.97, 1, 1)
+light_energy = 6.0
+spot_range = 90.0
+spot_angle = 40.0
+spot_attenuation = 0.7
+
+[node name="Storage" type="Node3D" parent="."]
+script = ExtResource("7_storage")
+surfaces = Array[AABB]([AABB(-0.87, 0.55, -2.4, 1.74, 0, 3.4), AABB(0.2, 0.85, -0.3, 0.5, 0, 0.65), AABB(-0.7, 0.85, -0.3, 0.5, 0, 0.65), AABB(-0.87, 1.14, 0.6, 1.74, 0, 0.4), AABB(-0.135, 0.93, -0.245, 0.27, 0, 0.6)])
+
+[node name="Glovebox" type="Node3D" parent="Storage"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.525, 0.82, 0.83)
+script = ExtResource("8_zone")
+zone_name = "Boîte à gants"
+size = Vector3(0.49, 0.15, 0.22)
+access_hinge = NodePath("../../GloveboxLid")
+
+[node name="PillCapsule" parent="Storage/Glovebox" instance=ExtResource("9_capsule")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.1, 0, 0.02)
+
+[node name="PillSmiley" parent="Storage/Glovebox" instance=ExtResource("10_smiley")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.08, 0, -0.04)
+
+[node name="Console" type="Node3D" parent="Storage"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.62, 0.05)
+script = ExtResource("8_zone")
+zone_name = "Accoudoir"
+size = Vector3(0.19, 0.22, 0.52)
+access_hinge = NodePath("../../ConsoleLid")
+
+[node name="Phone" parent="Storage/Console" instance=ExtResource("13_phone")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.05, 0, -0.08)
+
+[node name="Joint" parent="Storage/Console" instance=ExtResource("12_joint")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.055, 0, 0.12)
+
+[node name="GPSMount" type="Node3D" parent="Storage"]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0.12, 1.261, 0.782)
+script = ExtResource("8_zone")
+zone_name = "Support GPS"
+size = Vector3(0.15, 0.1, 0.1)
+exact_snap = true
+random_fill = false
+
+[node name="GPS" parent="Storage/GPSMount" instance=ExtResource("14_gps")]
+
+[node name="Pocket" type="Node3D" parent="Doors/DoorFL"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.155, 0.04, -0.45)
+script = ExtResource("8_zone")
+zone_name = "Vide-poche conducteur"
+size = Vector3(0.1, 0.12, 0.6)
+
+[node name="Thermos" parent="Doors/DoorFL/Pocket" instance=ExtResource("15_thermos")]
+
+[node name="Pocket" type="Node3D" parent="Doors/DoorFR"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.155, 0.04, -0.45)
+script = ExtResource("8_zone")
+zone_name = "Vide-poche passager"
+size = Vector3(0.1, 0.12, 0.6)
+
+[node name="Cigarette" parent="Doors/DoorFR/Pocket" instance=ExtResource("11_cig")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.1)
+
+[node name="RearMirrorStem" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.73, 0.48)
+mesh = SubResource("Mesh_mirror_stem")
+
+[node name="RearMirror" type="Node3D" parent="."]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0, 1.655, 0.42)
+script = ExtResource("16_mirror")
+mirror_size = Vector2(0.245, 0.072)
+resolution = 120
+aim_target = Vector3(0, 1.45, -30)
+view_distance = 290.0
+highlight_distance = 0.15
+grab_distance = 0.07
+outline_width = 0.004
+
+[node name="Housing" type="MeshInstance3D" parent="RearMirror"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -0.0165)
+mesh = SubResource("Mesh_mirror_housing")
+
+[node name="Link" type="MeshInstance3D" parent="RearMirror"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -0.046)
+mesh = SubResource("Mesh_mirror_link")
+
+[node name="Mirror" type="Node3D" parent="Doors/DoorFL"]
+transform = Transform3D(-0.9511, 0.0269, -0.3078, 0.0000, 0.9962, 0.0872, 0.3090, 0.0829, -0.9474, 0.1431, 0.6269, -0.1713)
+script = ExtResource("16_mirror")
+mirror_size = Vector2(0.145, 0.13)
+free_aim = false
+max_adjust_deg = 9.0
+resolution = 150
+aim_target = Vector3(1.9, 1.0, -30)
+view_distance = 290.0
+highlight_distance = 0.15
+grab_distance = 0.07
+outline_width = 0.004
+
+[node name="Mirror" type="Node3D" parent="Doors/DoorFR"]
+transform = Transform3D(-0.8660, -0.0436, 0.4981, 0.0000, 0.9962, 0.0872, -0.5000, 0.0755, -0.8627, -0.1388, 0.6269, -0.1694)
+script = ExtResource("16_mirror")
+mirror_size = Vector2(0.145, 0.13)
+free_aim = false
+max_adjust_deg = 9.0
+resolution = 150
+aim_target = Vector3(-1.9, 1.0, -30)
+view_distance = 290.0
+highlight_distance = 0.15
+grab_distance = 0.07
+outline_width = 0.004
+
+[node name="HandleIn" type="Node3D" parent="Doors/DoorFL"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.114, 0.4, -0.465)
+script = ExtResource("17_handle")
+door_path = NodePath("..")
+hinge_axis = Vector3(0, 1, 0)
+min_angle_deg = 0
+max_angle_deg = 35
+highlight_distance = 0.13
+grab_distance = 0.06
+outline_width = 0.004
+pick_bonus = 0.03
+
+[node name="HandleOut" type="Node3D" parent="Doors/DoorFL"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.006, 0.478, -0.84)
+script = ExtResource("17_handle")
+door_path = NodePath("..")
+hinge_axis = Vector3(0, 0, 1)
+min_angle_deg = 0
+max_angle_deg = 30
+highlight_distance = 0.13
+grab_distance = 0.06
+outline_width = 0.004
+pick_bonus = 0.03
+
+[node name="HandleIn" type="Node3D" parent="Doors/DoorRL"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.114, 0.4, -0.162)
+script = ExtResource("17_handle")
+door_path = NodePath("..")
+hinge_axis = Vector3(0, 1, 0)
+min_angle_deg = 0
+max_angle_deg = 35
+highlight_distance = 0.13
+grab_distance = 0.06
+outline_width = 0.004
+pick_bonus = 0.03
+
+[node name="HandleOut" type="Node3D" parent="Doors/DoorRL"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.006, 0.478, -0.755)
+script = ExtResource("17_handle")
+door_path = NodePath("..")
+hinge_axis = Vector3(0, 0, 1)
+min_angle_deg = 0
+max_angle_deg = 30
+highlight_distance = 0.13
+grab_distance = 0.06
+outline_width = 0.004
+pick_bonus = 0.03
+
+[node name="HandleIn" type="Node3D" parent="Doors/DoorFR"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.114, 0.4, -0.465)
+script = ExtResource("17_handle")
+door_path = NodePath("..")
+hinge_axis = Vector3(0, 1, 0)
+min_angle_deg = -35
+max_angle_deg = 0
+highlight_distance = 0.13
+grab_distance = 0.06
+outline_width = 0.004
+pick_bonus = 0.03
+
+[node name="HandleOut" type="Node3D" parent="Doors/DoorFR"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.006, 0.478, -0.84)
+script = ExtResource("17_handle")
+door_path = NodePath("..")
+hinge_axis = Vector3(0, 0, 1)
+min_angle_deg = -30
+max_angle_deg = 0
+highlight_distance = 0.13
+grab_distance = 0.06
+outline_width = 0.004
+pick_bonus = 0.03
+
+[node name="HandleIn" type="Node3D" parent="Doors/DoorRR"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.114, 0.4, -0.162)
+script = ExtResource("17_handle")
+door_path = NodePath("..")
+hinge_axis = Vector3(0, 1, 0)
+min_angle_deg = -35
+max_angle_deg = 0
+highlight_distance = 0.13
+grab_distance = 0.06
+outline_width = 0.004
+pick_bonus = 0.03
+
+[node name="HandleOut" type="Node3D" parent="Doors/DoorRR"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.006, 0.478, -0.755)
+script = ExtResource("17_handle")
+door_path = NodePath("..")
+hinge_axis = Vector3(0, 0, 1)
+min_angle_deg = -30
+max_angle_deg = 0
+highlight_distance = 0.13
+grab_distance = 0.06
+outline_width = 0.004
+pick_bonus = 0.03
+
+[node name="Handle" type="Node3D" parent="GloveboxLid"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.25, 0.157, -0.017)
+script = ExtResource("17_handle")
+door_path = NodePath("..")
+open_on_release = true
+pull_travel = 0.025
+hinge_axis = Vector3(1, 0, 0)
+max_angle_deg = 35.0
+highlight_distance = 0.13
+grab_distance = 0.06
+outline_width = 0.004
+pick_bonus = 0.03
+
+[node name="Button" type="Node3D" parent="GearLever"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.15, -0.033)
+
+[node name="Button" type="Node3D" parent="Handbrake"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.0802, 0.2994)
+
+[node name="DomeLights" type="Node3D" parent="."]
+
+[node name="FrontLens" type="Node3D" parent="DomeLights"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.736, 0.25)
+script = ExtResource("5_notch")
+notch_angles_deg = PackedFloat32Array(-7, 0, 7)
+notch_labels = PackedStringArray("ON", "PORTE", "OFF")
+initial_notch = 1
+hinge_axis = Vector3(0, 0, 1)
+highlight_distance = 0.12
+grab_distance = 0.06
+outline_width = 0.004
+pick_bonus = 0.02
+
+[node name="RearLens" type="Node3D" parent="DomeLights"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.736, -0.85)
+script = ExtResource("5_notch")
+notch_angles_deg = PackedFloat32Array(-7, 0, 7)
+notch_labels = PackedStringArray("ON", "PORTE", "OFF")
+initial_notch = 1
+hinge_axis = Vector3(0, 0, 1)
+highlight_distance = 0.12
+grab_distance = 0.06
+outline_width = 0.004
+pick_bonus = 0.02
+
+[node name="FrontLight" type="OmniLight3D" parent="DomeLights"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.69, 0.25)
+visible = false
+light_color = Color(1, 0.86, 0.64, 1)
+light_energy = 0.0
+omni_range = 1.9
+omni_attenuation = 1.3
+
+[node name="RearLight" type="OmniLight3D" parent="DomeLights"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.69, -0.85)
+visible = false
+light_color = Color(1, 0.86, 0.64, 1)
+light_energy = 0.0
+omni_range = 1.9
+omni_attenuation = 1.3
+
