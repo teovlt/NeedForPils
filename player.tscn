@@ -7,6 +7,8 @@
 [ext_resource type="PackedScene" uid="uid://diyu06cw06syv" path="res://addons/godot-xr-tools/player/player_body.tscn" id="3_2hs0m"]
 [ext_resource type="PackedScene" uid="uid://b4kad2kuba1yn" path="res://addons/godot-xr-tools/hands/scenes/lowpoly/left_hand_low.tscn" id="6_1jxqw"]
 
+[ext_resource type="Script" path="res://interaction/vr_hand_interactor.gd" id="9_hand"]
+
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_vgu37"]
 
 [node name="Player" type="CharacterBody3D" unique_id=206916080]
@@ -38,6 +40,9 @@ transform = Transform3D(1, 0, 0, 0, 0.70710677, 0.70710677, 0, -0.70710677, 0.70
 script = ExtResource("3_1jxqw")
 metadata/_custom_type_script = "uid://b18kkstg643yw"
 
+[node name="HandInteractor" type="Node3D" parent="XROrigin3D/RightHand"]
+script = ExtResource("9_hand")
+
 [node name="LeftHand" type="XRController3D" parent="XROrigin3D" unique_id=592496579]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.460909, 0.388594, -0.241118)
 tracker = &"left_hand"
@@ -59,6 +64,9 @@ metadata/_custom_type_script = "uid://dc4hg8kq5ia5y"
 transform = Transform3D(1, 0, 0, 0, 0.70710677, 0.70710677, 0, -0.70710677, 0.70710677, 0, 0, 0)
 script = ExtResource("3_1jxqw")
 metadata/_custom_type_script = "uid://b18kkstg643yw"
+
+[node name="HandInteractor" type="Node3D" parent="XROrigin3D/LeftHand"]
+script = ExtResource("9_hand")
 
 [node name="PlayerBody" parent="XROrigin3D" unique_id=1302218964 instance=ExtResource("3_2hs0m")]
 
