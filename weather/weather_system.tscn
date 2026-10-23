@@ -1,0 +1,90 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://weather/weather_system.gd" id="1_weather"]
+[ext_resource type="Shader" path="res://weather/weather_sky.gdshader" id="2_sky"]
+
+[sub_resource type="FastNoiseLite" id="Noise_clouds"]
+frequency = 0.008
+fractal_octaves = 4
+
+[sub_resource type="NoiseTexture2D" id="NoiseTex_clouds"]
+width = 512
+height = 512
+seamless = true
+noise = SubResource("Noise_clouds")
+
+[sub_resource type="ShaderMaterial" id="SkyMat"]
+shader = ExtResource("2_sky")
+shader_parameter/noise_tex = SubResource("NoiseTex_clouds")
+
+[sub_resource type="Sky" id="Sky_dyn"]
+sky_material = SubResource("SkyMat")
+radiance_size = 0
+process_mode = 3
+
+[sub_resource type="Environment" id="Env_dyn"]
+background_mode = 2
+sky = SubResource("Sky_dyn")
+ambient_light_source = 2
+ambient_light_color = Color(0.5, 0.56, 0.68, 1)
+reflected_light_source = 1
+fog_enabled = true
+fog_density = 0.001
+fog_sky_affect = 0.35
+
+[sub_resource type="ParticleProcessMaterial" id="RainProcess"]
+emission_shape = 6
+emission_ring_axis = Vector3(0, 1, 0)
+emission_ring_height = 2.0
+emission_ring_radius = 16.0
+emission_ring_inner_radius = 2.8
+direction = Vector3(0, -1, 0)
+spread = 2.0
+initial_velocity_min = 10.0
+initial_velocity_max = 13.0
+gravity = Vector3(0, -9.8, 0)
+particle_flag_align_y = true
+
+[sub_resource type="StandardMaterial3D" id="RainMat"]
+transparency = 1
+shading_mode = 0
+albedo_color = Color(0.78, 0.82, 0.9, 0.35)
+
+[sub_resource type="BoxMesh" id="RainMesh"]
+material = SubResource("RainMat")
+size = Vector3(0.012, 0.5, 0.012)
+
+[sub_resource type="AudioStreamGenerator" id="AudioGen"]
+mix_rate = 22050.0
+buffer_length = 0.25
+
+[node name="Weather" type="Node3D"]
+script = ExtResource("1_weather")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Env_dyn")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+light_color = Color(1, 0.97, 0.92, 1)
+
+[node name="Moon" type="DirectionalLight3D" parent="."]
+light_color = Color(0.6, 0.7, 1, 1)
+light_energy = 0.0
+
+[node name="Lightning" type="DirectionalLight3D" parent="."]
+light_color = Color(0.8, 0.85, 1, 1)
+light_energy = 0.0
+visible = false
+
+[node name="Rain" type="GPUParticles3D" parent="."]
+emitting = false
+amount = 3000
+lifetime = 1.4
+local_coords = true
+visibility_aabb = AABB(-20, -26, -20, 40, 30, 40)
+process_material = SubResource("RainProcess")
+draw_pass_1 = SubResource("RainMesh")
+
+[node name="Audio" type="AudioStreamPlayer" parent="."]
+stream = SubResource("AudioGen")
+volume_db = -4.0
