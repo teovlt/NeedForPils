@@ -5,10 +5,12 @@ extends Node3D
 ##
 ## - Le soleil, la lune, le ciel, la lumière ambiante et le brouillard suivent l'heure.
 ## - Des événements météo aléatoires s'enchaînent avec des transitions douces :
-##   ciel dégagé, éclaircies, nuageux, couvert, brouillard, pluie, orage.
+##   ciel dégagé, éclaircies, nuageux, couvert, brouillard, pluie légère,
+##   pluie forte, orage (avec éclairs).
 ## - Pluie (particules autour de la caméra), éclairs et tonnerre (son généré par code).
 ## Les autres scripts lisent : rain, get_darkness(), get_weather_name(), get_time_string().
-## Clavier (test) : F5 événement aléatoire, F6 +2 h, F7 météo suivante, F8 temps accéléré.
+## Clavier (test) : F1 menu météo/heure, F5 événement aléatoire, F6 +2 h, F7 météo suivante,
+## F8 temps accéléré.
 
 signal weather_changed(id: String, display_name: String)
 signal lightning_strike(distance_m: float)
@@ -24,20 +26,26 @@ const PRESETS := {
 	"nuageux":    {"name": "Nuageux",     "clouds": 0.62, "dark": 0.3,  "rain": 0.0, "fog": 0.0014, "wind": 0.55, "storm": 0.0},
 	"couvert":    {"name": "Couvert",     "clouds": 0.92, "dark": 0.55, "rain": 0.0, "fog": 0.0028, "wind": 0.7,  "storm": 0.0},
 	"brouillard": {"name": "Brouillard",  "clouds": 0.8,  "dark": 0.3,  "rain": 0.0, "fog": 0.035,  "wind": 0.1,  "storm": 0.0},
-	"pluie":      {"name": "Pluie",       "clouds": 0.95, "dark": 0.65, "rain": 0.6, "fog": 0.007,  "wind": 0.8,  "storm": 0.0},
+	"pluie_legere": {"name": "Pluie légère", "clouds": 0.85, "dark": 0.45, "rain": 0.3, "fog": 0.004, "wind": 0.5, "storm": 0.0},
+	"pluie":      {"name": "Pluie forte", "clouds": 0.95, "dark": 0.65, "rain": 0.7, "fog": 0.007,  "wind": 0.8,  "storm": 0.0},
 	"orage":      {"name": "Orage",       "clouds": 1.0,  "dark": 0.92, "rain": 1.0, "fog": 0.011,  "wind": 1.2,  "storm": 1.0},
 }
 ## Probabilités (poids) de passer d'une météo à une autre.
 const TRANSITIONS := {
 	"degage":     {"eclaircies": 3.0, "nuageux": 1.0, "brouillard": 0.5},
-	"eclaircies": {"degage": 2.0, "nuageux": 2.0, "pluie": 0.5},
-	"nuageux":    {"eclaircies": 2.0, "couvert": 2.0, "pluie": 1.0},
-	"couvert":    {"nuageux": 1.5, "pluie": 2.0, "orage": 1.0, "brouillard": 0.5},
+	"eclaircies": {"degage": 2.0, "nuageux": 2.0, "pluie_legere": 0.6},
+	"nuageux":    {"eclaircies": 2.0, "couvert": 2.0, "pluie_legere": 1.0},
+	"couvert":    {"nuageux": 1.5, "pluie_legere": 1.5, "pluie": 1.0, "orage": 0.5, "brouillard": 0.5},
 	"brouillard": {"degage": 1.0, "nuageux": 1.0, "couvert": 1.0},
-	"pluie":      {"couvert": 2.0, "orage": 1.0, "nuageux": 1.0},
-	"orage":      {"pluie": 2.0, "couvert": 1.0},
+	"pluie_legere": {"nuageux": 1.5, "couvert": 1.0, "pluie": 1.5},
+	"pluie":      {"pluie_legere": 1.5, "couvert": 1.0, "orage": 1.0},
+	"orage":      {"pluie": 2.0, "couvert": 0.5},
 }
-const ORDER := ["degage", "eclaircies", "nuageux", "couvert", "brouillard", "pluie", "orage"]
+const ORDER := ["degage", "eclaircies", "nuageux", "couvert", "brouillard", "pluie_legere", "pluie", "orage"]
+## Seuils d'intensité des 3 niveaux de pluie (voir get_rain_level).
+const RAIN_LIGHT := 0.05
+const RAIN_HEAVY := 0.5
+const RAIN_STORM := 0.85
 
 @export_group("Jour / nuit")
 @export_range(0.0, 24.0) var hour := 10.0
@@ -49,7 +57,7 @@ const ORDER := ["degage", "eclaircies", "nuageux", "couvert", "brouillard", "plu
 @export var sun_shadows := false
 
 @export_group("Météo")
-@export_enum("degage", "eclaircies", "nuageux", "couvert", "brouillard", "pluie", "orage") var start_weather := "eclaircies"
+@export_enum("degage", "eclaircies", "nuageux", "couvert", "brouillard", "pluie_legere", "pluie", "orage") var start_weather := "eclaircies"
 @export var random_events := true
 ## Intervalle (s) entre deux changements de météo.
 @export var event_interval_min := 90.0
@@ -57,6 +65,8 @@ const ORDER := ["degage", "eclaircies", "nuageux", "couvert", "brouillard", "plu
 ## Durée (s) des transitions.
 @export var transition_time := 25.0
 @export var keyboard_debug := true
+## Menu de test ouvrable avec F1 (météo, heure, vitesse du temps).
+@export var debug_menu := true
 
 @export_group("Son")
 @export_range(0.0, 1.0) var rain_volume := 0.35
@@ -93,6 +103,8 @@ var _next_strike := 5.0
 var _pending_thunder: Array = []   # [délai restant, force]
 var _last_cam_pos := Vector3.ZERO
 var _rng := RandomNumberGenerator.new()
+var _rain_mat: ShaderMaterial
+var _shelter_frame := -10
 
 # Son procédural
 var _playback: AudioStreamGeneratorPlayback
@@ -107,6 +119,17 @@ func _ready() -> void:
 	add_to_group(GROUP)
 	_rng.randomize()
 	_rain_fx.top_level = true
+	# Gouttes : shader qui les coupe dans le volume de la voiture (toit, capot).
+	_rain_mat = ShaderMaterial.new()
+	_rain_mat.shader = preload("res://weather/rain_drop.gdshader")
+	(_rain_fx.draw_pass_1 as PrimitiveMesh).material = _rain_mat
+	# Les gouttes peuvent maintenant tomber tout près de la caméra (autour de la voiture).
+	(_rain_fx.process_material as ParticleProcessMaterial).emission_ring_inner_radius = 0.4
+	if debug_menu:
+		var menu: CanvasLayer = preload("res://weather/weather_menu.gd").new()
+		menu.name = "WeatherMenu"
+		menu.set("weather", self)
+		add_child(menu)
 	_apply_preset_now(start_weather)
 	_schedule_next_event()
 	_audio.play()
@@ -121,6 +144,24 @@ func get_weather_name() -> String:
 
 func get_time_string() -> String:
 	return "%02d:%02d" % [int(hour), int(fmod(hour, 1.0) * 60.0)]
+
+
+## Niveau de pluie : 0 = pas de pluie, 1 = pluie légère, 2 = pluie forte, 3 = orage.
+func get_rain_level() -> int:
+	if rain >= RAIN_STORM:
+		return 3
+	if rain >= RAIN_HEAVY:
+		return 2
+	return 1 if rain >= RAIN_LIGHT else 0
+
+
+## Abri contre la pluie (la voiture) : à appeler à chaque image avec sa transformation
+## globale. Les gouttes qui entrent dans son volume ne sont pas dessinées.
+func set_rain_shelter(xf: Transform3D) -> void:
+	_shelter_frame = Engine.get_process_frames()
+	if _rain_mat:
+		_rain_mat.set_shader_parameter("shelter_on", 1.0)
+		_rain_mat.set_shader_parameter("shelter_inv", Projection(xf.affine_inverse()))
 
 
 ## 0 = plein jour ensoleillé, 1 = nuit noire (sert à allumer les phares).
@@ -254,6 +295,8 @@ func _update_rain(delta: float) -> void:
 	_rain_fx.global_position = pos + Vector3.UP * 9.0
 	_rain_fx.emitting = rain > 0.01
 	_rain_fx.amount_ratio = clampf(rain, 0.0, 1.0)
+	if _rain_mat and Engine.get_process_frames() - _shelter_frame > 2:
+		_rain_mat.set_shader_parameter("shelter_on", 0.0)   # plus d'abri (voiture supprimée)
 	# Les gouttes suivent la caméra : on penche leur chute pour simuler le vent relatif.
 	var pm := _rain_fx.process_material as ParticleProcessMaterial
 	pm.gravity = Vector3(-vel.x * 0.8 + wind * 1.5, -9.8, -vel.z * 0.8)
