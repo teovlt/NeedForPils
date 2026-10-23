@@ -1,0 +1,52 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://cars/SUV4x4/suv_desktop_test.gd" id="1_test"]
+[ext_resource type="PackedScene" path="res://cars/SUV4x4/suv_4x4.tscn" id="2_suv"]
+[ext_resource type="PackedScene" path="res://weather/weather_system.tscn" id="4_weather"]
+[ext_resource type="PackedScene" path="res://world/road/road_generator.tscn" id="5_road"]
+[ext_resource type="Script" path="res://world/hazards/falling_tree_manager.gd" id="6_trees"]
+
+[sub_resource type="StandardMaterial3D" id="Mat_ground"]
+albedo_color = Color(0.33, 0.36, 0.3, 1)
+roughness = 0.95
+
+[sub_resource type="BoxShape3D" id="Box_ground"]
+size = Vector3(400, 1, 400)
+
+[sub_resource type="BoxMesh" id="Mesh_ground"]
+size = Vector3(400, 1, 400)
+
+[sub_resource type="ProceduralSkyMaterial" id="Sky_mat"]
+
+[sub_resource type="Sky" id="Sky_res"]
+sky_material = SubResource("Sky_mat")
+
+[sub_resource type="Environment" id="Env"]
+background_mode = 2
+sky = SubResource("Sky_res")
+ambient_light_source = 3
+
+[node name="SUVDesktopTest" type="Node3D"]
+script = ExtResource("1_test")
+
+[node name="SUV4x4" parent="." instance=ExtResource("2_suv")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.75, 0.5, 4)
+start_gear = 2
+start_handbrake_engaged = false
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3, -7)
+current = true
+
+[node name="Weather" parent="." instance=ExtResource("4_weather")]
+
+[node name="RoadGenerator" parent="." instance=ExtResource("5_road")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -320)
+straight_start = 410.0
+keep_behind = 320.0
+target_path = NodePath("../SUV4x4")
+
+[node name="FallingTrees" type="Node" parent="."]
+script = ExtResource("6_trees")
+road_path = NodePath("../RoadGenerator")
+car_path = NodePath("../SUV4x4")
