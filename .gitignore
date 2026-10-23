@@ -39,3 +39,16 @@ builds/
 
 # Réglages locaux de test (par ex. OpenXR désactivé sans casque).
 override.cfg
+
+# Fichiers temporaires de Windows (copies faites quand un fichier est remplacé
+# alors qu'il est utilisé, par ex. la DLL OpenXR pendant que Godot tourne).
+*.tmp
+*.TMP
+
+# Sauvegardes automatiques de Blender.
+*.blend[0-9]
+
+# Fichiers créés par les systèmes d'exploitation.
+Thumbs.db
+desktop.ini
+.DS_Store
