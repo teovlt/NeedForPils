@@ -131,6 +131,8 @@ var _recenter_down := false
 var _wiper_phase := 0.0
 var _wiper_pause := 0.0
 var _wiper_angle := 0.0
+var _rear_wiper_angle := 0.0
+var _rear_rain: WindshieldRain   # pluie sur la lunette, effacée par l'essuie-glace arrière
 var _weather: WeatherSystem
 var _auto_low_on := false
 var _lights_state := -1   # combinaison allumée (bits : 1 codes, 2 pleins phares, 4 barre)
@@ -145,6 +147,8 @@ var debug_max_suspension_speed := 0.0
 
 func _ready() -> void:
 	_attach_parts()
+	_make_glass_clearer()
+	_setup_rear_window_rain()
 	_find_lamp_materials()
 	light_stalk.set_notch(start_light_mode, true)
 	_apply_lights()
@@ -293,6 +297,50 @@ func _update_drive() -> void:
 		w.brake = rear
 
 
+## Vitres plus transparentes que dans le modèle : le matériau SUV_Glass du glb est
+## remplacé par un verre presque incolore (car_glass.gdshader), qui devient flou quand
+## il pleut (sauf le pare-brise, qui a sa propre couche effacée par les essuie-glaces).
+@export_range(0.0, 1.0) var glass_opacity := 0.1
+## Flou maxi des vitres latérales et arrière par orage (0-1).
+@export_range(0.0, 1.0) var side_glass_max_wet := 0.65
+var _glass_mats: Array[ShaderMaterial] = []
+var _glass_wet := 0.0
+
+
+func _make_glass_clearer() -> void:
+	var done := {}
+	for mi in find_children("*", "MeshInstance3D", true, false):
+		var m := mi as MeshInstance3D
+		if m.mesh == null:
+			continue
+		for si in m.mesh.get_surface_count():
+			var mat := m.get_active_material(si) as BaseMaterial3D
+			if mat == null or not mat.resource_name.begins_with("SUV_Glass"):
+				continue
+			if not done.has(mat):
+				var glass := ShaderMaterial.new()
+				glass.shader = preload("res://cars/SUV4x4/car_glass.gdshader")
+				glass.set_shader_parameter("opacity", glass_opacity)
+				_glass_mats.append(glass)
+				done[mat] = glass
+			m.set_surface_override_material(si, done[mat])
+
+
+## Pluie sur la lunette arrière (vitre verticale 1,64 × 0,47 m, z = −2,25), effacée par
+## l'essuie-glace arrière : pivot en haut au centre, balai garé vers +X, balaie vers
+## le bas sur 165° (même géométrie que `Wipers/WiperRear`, balai de 0,375 m).
+func _setup_rear_window_rain() -> void:
+	_rear_rain = WindshieldRain.new()
+	_rear_rain.name = "RearWindowRain"
+	_rear_rain.size = Vector2(1.64, 0.47)
+	_rear_rain.resolution = Vector2i(40, 12)
+	_rear_rain.wiper_pivots = PackedVector2Array([Vector2(0.0, 0.21)])
+	_rear_rain.blade_range = Vector2(0.03, 0.37)
+	_rear_rain.park_angle = 0.0
+	_rear_rain.position = Vector3(0.0, 1.485, -2.258)
+	add_child(_rear_rain)
+
+
 func _update_wipers(delta: float) -> void:
 	var mode := wiper_stalk.notch
 	if mode == 0 and _wiper_phase == 0.0:
@@ -313,6 +361,7 @@ func _update_wipers(delta: float) -> void:
 		w.transform.basis = Basis(WIPER_AXIS.normalized(), a)
 	# Essuie-glace arrière : même phase (part, s'arrête et repart en même temps que l'avant).
 	_rear_wiper.transform.basis = Basis(REAR_WIPER_AXIS, deg_to_rad(rear_wiper_sweep_deg) * k)
+	_rear_wiper_angle = -deg_to_rad(rear_wiper_sweep_deg) * k
 
 
 @export_group("Vibrations")
@@ -351,9 +400,28 @@ func _update_weather_effects(delta: float) -> void:
 		_weather = get_tree().get_first_node_in_group(WeatherSystem.GROUP) as WeatherSystem
 	var rain := _weather.rain if _weather else 0.0
 	var darkness := _weather.get_darkness() if _weather else 0.0
-	# Plus on roule vite, plus la pluie frappe le pare-brise.
-	var impact := rain * (1.0 + clampf(forward_speed / 15.0, 0.0, 1.5))
-	_windshield.update_rain(impact, _wiper_angle, 1.0 - darkness, delta)
+	# Plus on roule vite, plus la pluie frappe le pare-brise (x2,5 à 80 km/h et plus).
+	# L'impact croît bien plus vite que l'intensité, pour que chaque niveau de pluie
+	# demande son cran d'essuie-glace (réglé avec WindshieldRain.fill_time) :
+	# pluie légère 0,3 -> 0,15 (le mode intermittent suffit) ; pluie forte 0,7 -> 1,6
+	# (il faut le mode rapide) ; orage 1 -> 2 (il reste de l'eau même en rapide).
+	var impact := minf(4.4 * pow(rain, 2.83), 2.0) * (1.0 + clampf(forward_speed / 15.0, 0.0, 1.5))
+	var storm := _weather.storm if _weather else 0.0
+	_windshield.update_rain(impact, _wiper_angle, 1.0 - darkness, delta, storm)
+	# Lunette : moins exposée (pas de vent de face), la vitesse n'y change rien.
+	if _rear_rain:
+		_rear_rain.update_rain(minf(4.4 * pow(rain, 2.83), 2.0) * 0.7, _rear_wiper_angle, 1.0 - darkness, delta, storm)
+	# Vitres latérales et arrière : flou léger qui monte avec la pluie (~10 s) et
+	# disparaît quand elle s'arrête (~40 s).
+	var target := 0.0
+	if rain > 0.02:
+		target = side_glass_max_wet * clampf(0.3 + 0.7 * rain, 0.0, 1.0)
+	_glass_wet = move_toward(_glass_wet, target, delta * (0.08 if target > _glass_wet else 0.02))
+	for g in _glass_mats:
+		g.set_shader_parameter("wet", _glass_wet)
+		g.set_shader_parameter("light", 1.0 - darkness)
+	if _weather:
+		_weather.set_rain_shelter(global_transform)
 	# Mode AUTO : hystérésis pour éviter de clignoter au crépuscule.
 	if not _auto_low_on and darkness > headlights_threshold:
 		_auto_low_on = true
