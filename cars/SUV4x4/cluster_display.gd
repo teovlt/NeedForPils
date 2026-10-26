@@ -114,6 +114,21 @@ func _draw_right_panel() -> void:
 	var addiction: PillAddiction = car.get_addiction() if car.has_method("get_addiction") else null
 	if addiction:
 		_draw_pills(addiction)
+	var pursuer := get_tree().get_first_node_in_group(Pursuer.GROUP) as Pursuer
+	if pursuer and pursuer.state == Pursuer.State.CHASE:
+		_draw_pursuer(pursuer, cx)
+
+
+## Écart avec la voiture de l'Essaim, à droite de l'heure (rouge clignotant de près).
+func _draw_pursuer(p: Pursuer, cx: float) -> void:
+	var g := maxf(p.gap, 0.0)
+	var col := Color(0.8, 0.82, 0.86)
+	if g < 100.0:
+		col = Color(1.0, 0.2, 0.15)
+		if g < 40.0 and fmod(_blink, 0.4) < 0.2:
+			col.a = 0.3
+	var txt := "◄ %d m" % roundi(g) if g < 999.0 else "◄ ---"
+	_text(cx + 62.0, 100.0, txt, 20, col)
 
 
 # --- Pilules : jauge de manque, nombre de pilules, assimilation --------------------

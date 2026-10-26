@@ -287,7 +287,8 @@ func sample_road(world_pos: Vector3) -> Dictionary:
 	}
 
 
-## Point de route situé `distance` m plus loin (le long de la route) que world_pos.
+## Point de route situé `distance` m plus loin (le long de la route) que world_pos
+## (distance négative = en arrière).
 ## Renvoie {found, chunk, i, point, right, dir, s} (vecteurs en coordonnées monde).
 func sample_ahead(world_pos: Vector3, distance: float) -> Dictionary:
 	var ci := -1
@@ -319,6 +320,17 @@ func sample_ahead(world_pos: Vector3, distance: float) -> Dictionary:
 			i = 0
 			if ci >= _chunks.size():
 				return {"found": false}
+	# Distance négative : on remonte la route (vers l'arrière).
+	while steps < 0:
+		if -steps <= i:
+			i += steps
+			steps = 0
+		else:
+			steps += i
+			ci -= 1
+			if ci < 0:
+				return {"found": false}
+			i = (_chunks[ci]["rows_p"] as PackedVector3Array).size() - 1
 	var c: Dictionary = _chunks[ci]
 	var node2: Node3D = c["node"]
 	var right: Vector3 = (c["rows_r"] as PackedVector3Array)[i]

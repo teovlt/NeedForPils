@@ -10,6 +10,7 @@ uniform float blackout = 0.0;
 uniform float flash = 0.0;
 uniform float pulse = 0.0;
 uniform float assimilation = 0.0;
+uniform float chase = 0.0;   // poursuivante proche : bords qui clignotent rose / bleu
 
 vec3 palette(float h) {
 	return 0.5 + 0.5 * cos(6.2832 * (h + vec3(0.0, 0.33, 0.67)));
@@ -39,6 +40,10 @@ void fragment() {
 	float inner = mix(0.9, 0.25, craving);
 	float av = smoothstep(inner, inner + 0.7, r) * smoothstep(0.15, 1.0, craving) * (0.8 + 0.2 * pulse);
 	layer(pc, a, vec3(0.03, 0.0, 0.0), clamp(av, 0.0, 0.95));
+
+	// Gyrophares de la poursuivante sur les bords.
+	vec3 siren = mix(vec3(1.0, 0.15, 0.7), vec3(0.15, 0.35, 1.0), step(0.5, fract(TIME * 1.5)));
+	layer(pc, a, siren, chase * 0.4 * smoothstep(0.55, 1.25, r));
 
 	// Black-out.
 	layer(pc, a, vec3(0.0), blackout);

@@ -19,6 +19,8 @@ extends Node
 
 signal pill_taken(count: int)
 signal blackout_started
+## L'assimilation atteint 100 % : on est devenu l'un d'eux.
+signal assimilated
 
 const GROUP := "pill_addiction"
 const OVERLAY_SHADER := preload("res://world/pills/pill_overlay.gdshader")
@@ -61,6 +63,11 @@ var craving := 0.0
 var assimilation := 0.0
 var pills_taken := 0
 var blackouts := 0
+## Réglés par ChaseDirector : manque figé (intro, fin de partie), rideau noir (0-1) et
+## proximité de la poursuivante (0-1, gyrophares sur les bords de l'image).
+var paused := false
+var curtain := 0.0
+var chase := 0.0
 
 var _car: Node
 var _boost := 0.0       # secondes de boost restantes
@@ -124,6 +131,7 @@ func take_pill() -> void:
 	pills_taken += 1
 	# Reprendre une pilule alors qu'on plane encore : on s'assimile plus vite.
 	var greedy := 1.5 if _high > 0.5 * _high_total else 1.0
+	var was_full := assimilation >= 1.0
 	assimilation = clampf(assimilation + assimilation_per_pill * greedy, 0.0, 1.0)
 	craving = 0.0
 	_blackout = 0.0
@@ -134,6 +142,8 @@ func take_pill() -> void:
 	_gulp.pitch_scale = randf_range(0.95, 1.08)
 	_gulp.play()
 	pill_taken.emit(pills_taken)
+	if assimilation >= 1.0 and not was_full:
+		assimilated.emit()
 
 
 # --- Boucle ---------------------------------------------------------------------
@@ -145,7 +155,9 @@ func _physics_process(delta: float) -> void:
 	_boost = maxf(_boost - delta, 0.0)
 	_high = maxf(_high - delta, 0.0)
 	_flash = maxf(_flash - delta * 1.5, 0.0)
-	if _blackout > 0.0:
+	if paused:
+		pass
+	elif _blackout > 0.0:
 		_blackout = maxf(_blackout - delta, 0.0)
 		if _blackout == 0.0:
 			craving = craving_after_blackout
@@ -201,7 +213,8 @@ func _process(delta: float) -> void:
 	if _overlay_mat:
 		_overlay_mat.set_shader_parameter("craving", craving * (1.0 - high))
 		_overlay_mat.set_shader_parameter("drunk", drunk)
-		_overlay_mat.set_shader_parameter("blackout", blackout)
+		_overlay_mat.set_shader_parameter("blackout", maxf(blackout, curtain))
+		_overlay_mat.set_shader_parameter("chase", chase)
 		_overlay_mat.set_shader_parameter("flash", _flash)
 		_overlay_mat.set_shader_parameter("pulse", pulse)
 		_overlay_mat.set_shader_parameter("assimilation", assimilation)
@@ -236,7 +249,7 @@ func _ensure_overlay() -> void:
 	_overlay.layers = OVERLAY_LAYER
 	_overlay_mat = ShaderMaterial.new()
 	_overlay_mat.shader = OVERLAY_SHADER
-	_overlay_mat.render_priority = Material.RENDER_PRIORITY_MAX
+	_overlay_mat.render_priority = 100   # sous les textes de ChaseDirector
 	_overlay.material_override = _overlay_mat
 	cam.add_child(_overlay)
 	cam.cull_mask |= OVERLAY_LAYER

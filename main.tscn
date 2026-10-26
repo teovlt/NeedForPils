@@ -8,6 +8,8 @@
 [ext_resource type="Script" uid="uid://dl8ukpveof3aw" path="res://world/hazards/falling_tree_manager.gd" id="23_trees"]
 [ext_resource type="Script" path="res://world/pills/pill_addiction.gd" id="24_addiction"]
 [ext_resource type="Script" path="res://world/pills/pill_spawner.gd" id="25_pills"]
+[ext_resource type="Script" path="res://world/chase/pursuer.gd" id="26_pursuer"]
+[ext_resource type="Script" path="res://world/chase/chase_director.gd" id="27_director"]
 
 [node name="Main" type="Node3D" unique_id=1577214552]
 script = ExtResource("1_fsva1")
@@ -42,3 +44,14 @@ road_path = NodePath("../RoadGenerator")
 car_path = NodePath("../SUV4x4")
 addiction_path = NodePath("../PillAddiction")
 
+[node name="Pursuer" type="Node3D" parent="."]
+script = ExtResource("26_pursuer")
+road_path = NodePath("../RoadGenerator")
+car_path = NodePath("../SUV4x4")
+
+[node name="ChaseDirector" type="Node" parent="."]
+script = ExtResource("27_director")
+car_path = NodePath("../SUV4x4")
+pursuer_path = NodePath("../Pursuer")
+addiction_path = NodePath("../PillAddiction")
+pills_path = NodePath("../Pills")

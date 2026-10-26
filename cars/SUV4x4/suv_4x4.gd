@@ -68,8 +68,11 @@ const LIGHT_MODES := ["OFF", "AUTO", "CODES", "PHARES", "PHARES + BARRE"]
 @export var player_path: NodePath
 @export var seat_player_on_ready := true
 @export var keyboard_controls := true
-## Si vrai, throttle_input / brake_input sont pilotés par un autre script (IA, test...).
+## Si vrai, throttle_input / brake_input / external_steer sont pilotés par un autre
+## script (IA, test, pilote automatique de l'intro...).
 @export var external_input := false
+## Direction (-1 à 1, + = gauche) quand external_input est vrai.
+var external_steer := 0.0
 
 ## Manivelles de lève-vitre : position et sens dans le repère de la porte (pivot de la
 ## charnière). Elles sont posées sur le panneau intérieur (x = 0,85 dans la voiture),
@@ -398,7 +401,7 @@ func _physics_process(delta: float) -> void:
 
 func _update_steering() -> void:
 	if not steering_wheel.is_grabbed():
-		steering_wheel.set_steer_input(_kb_steer)
+		steering_wheel.set_steer_input(external_steer if external_input else _kb_steer)
 	var speed_ratio := clampf(absf(forward_speed) * 3.6 / gear_max_speed_kmh[Gear.D], 0.0, 1.0)
 	var steer_limit := deg_to_rad(max_steer_angle_deg) * (1.0 - high_speed_steer_reduction * speed_ratio)
 	var target := steering_wheel.get_steer() * steer_limit + drug_steer_offset

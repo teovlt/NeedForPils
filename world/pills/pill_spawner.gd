@@ -70,6 +70,16 @@ func _physics_process(_delta: float) -> void:
 		spawn_ahead()
 
 
+## (Re)lance la pose des pilules à partir de maintenant.
+func start() -> void:
+	enabled = true
+	_next = travelled + randf_range(spacing.x, spacing.y)
+
+
+func get_road() -> RoadGenerator:
+	return _road
+
+
 ## Pose une pilule (ou une rangée) devant la voiture (distance auto si <= 0).
 func spawn_ahead(distance := -1.0) -> void:
 	var speed := (_car as RigidBody3D).linear_velocity.length() if _car is RigidBody3D else 0.0
