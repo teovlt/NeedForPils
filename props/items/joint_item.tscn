@@ -9,7 +9,7 @@ size = Vector3(0.101, 0.012, 0.012)
 [node name="Joint" type="RigidBody3D"]
 collision_layer = 0
 collision_mask = 0
-mass = 0.05
+mass = 0.002
 continuous_cd = true
 freeze = true
 freeze_mode = 1

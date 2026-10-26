@@ -18,8 +18,13 @@ extends Node3D
 ## Peut recevoir des objets lors du rangement aléatoire de début de partie
 ## (faux pour le support du GPS, qui garde son objet).
 @export var random_fill := true
+## Les objets rangés bougent (glissent, roulent, sautillent) dans le compartiment.
+@export var item_physics := true
+## Adhérence du fond du compartiment.
+@export var floor_friction := 0.8
 
 var _hinge: VRHingeInteractable
+var _car: RigidBody3D
 
 
 func _ready() -> void:
@@ -30,14 +35,58 @@ func _ready() -> void:
 			_place(c as RigidBody3D, false)
 
 
-func _physics_process(_delta: float) -> void:
+func _physics_process(delta: float) -> void:
 	var open := is_accessible()
+	if _car == null:
+		_car = CarStorage.find_vehicle(self)
+	var g := ItemPhysics.apparent_gravity(self, _car, delta) if item_physics and not exact_snap else Vector3.ZERO
+	var states: Array = []
+	var bodies: Array[RigidBody3D] = []
 	for c in get_children():
-		if c is RigidBody3D:
-			CarStorage.hold(c)
-			var grab := c.get_node_or_null("Grab") as VRPickable
-			if grab:
-				grab.enabled = open
+		if not c is RigidBody3D:
+			continue
+		var item := c as RigidBody3D
+		var grab := item.get_node_or_null("Grab") as VRPickable
+		if grab:
+			grab.enabled = open
+			if grab.is_grabbed():
+				continue
+		if exact_snap or not item_physics:
+			CarStorage.hold(item)
+			continue
+		if item.has_meta("rest_xf"):
+			CarStorage.hold(item)   # pose animée en cours
+			if CarStorage.anim_done(item):
+				item.remove_meta("rest_xf")
+				ItemPhysics.begin(item)
+			continue
+		# les objets bougent dans le compartiment (freinage, virages, bosses)
+		var st := ItemPhysics.get_state(item)
+		if st.is_empty():
+			st = ItemPhysics.begin(item)
+		var old_yaw: float = st["yaw"]
+		ItemPhysics.integrate(st, g, delta, 0.0, floor_friction)
+		var lo := Vector2(-size.x, -size.z) * 0.5
+		var hi := Vector2(size.x, size.z) * 0.5
+		ItemPhysics.keep_yaw_if_fits(st, old_yaw, lo, hi)
+		ItemPhysics.collide_bounds(st, lo, hi, 15)
+		# couvercle fermé : ils ne sortent pas par le haut
+		var top := size.y if open else size.y - float((st["half"] as Vector3).y) * 2.0
+		var pos: Vector3 = st["pos"]
+		if pos.y > maxf(top, 0.0):
+			pos.y = maxf(top, 0.0)
+			var v: Vector3 = st["vel"]
+			v.y = minf(v.y, 0.0)
+			st["vel"] = v
+			st["pos"] = pos
+		states.append(st)
+		bodies.append(item)
+	ItemPhysics.separate(states)
+	# la séparation ne doit pas pousser un objet à travers les parois du compartiment
+	for st2 in states:
+		ItemPhysics.collide_bounds(st2, Vector2(-size.x, -size.z) * 0.5, Vector2(size.x, size.z) * 0.5, 15)
+	for k in bodies.size():
+		ItemPhysics.apply(bodies[k], states[k])
 
 
 func is_accessible() -> bool:

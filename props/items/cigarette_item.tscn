@@ -9,7 +9,7 @@ size = Vector3(0.084, 0.008, 0.008)
 [node name="Cigarette" type="RigidBody3D"]
 collision_layer = 0
 collision_mask = 0
-mass = 0.05
+mass = 0.002
 continuous_cd = true
 freeze = true
 freeze_mode = 1
