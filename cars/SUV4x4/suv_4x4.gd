@@ -10,7 +10,8 @@ extends VehicleBody3D
 ## Clavier (test sans casque) : Z/W/↑ accélérer, S/↓ freiner, Q/A/D/←/→ tourner,
 ##      R/N/E = R/N/D, Pg↑/Pg↓ = vitesse précédente/suivante, T = frein à main,
 ##      K = comodo essuie-glaces, L = comodo phares, Espace = frein arrière tant qu'appuyé,
-##      1-4 portes, G boîte à gants, C accoudoir, J klaxon, B ceinture.
+##      1-4 portes, G boîte à gants, C accoudoir, J klaxon, B ceinture, M clé / moteur,
+##      F2 / F3 radio station - / +, F4 radio marche / arrêt, F9 / F10 volume.
 
 enum Gear { R, N, D, G2, G1 }
 const GEAR_LABELS := ["R", "N", "D", "2", "1"]
@@ -21,10 +22,30 @@ const LIGHT_MODES := ["OFF", "AUTO", "CODES", "PHARES", "PHARES + BARRE"]
 @export_group("Moteur")
 ## Force moteur appliquée à CHACUNE des 4 roues motrices (N).
 @export var engine_force_per_wheel := 1400.0
-## Vitesse max (km/h) pour R, N, D, 2, 1.
-@export var gear_max_speed_kmh := PackedFloat32Array([25.0, 0.0, 120.0, 60.0, 30.0])
-## Multiplicateur de couple pour R, N, D, 2, 1 (les petites vitesses tirent plus fort).
-@export var gear_torque := PackedFloat32Array([0.8, 0.0, 1.0, 1.25, 1.5])
+## Vitesse max (km/h) pour R, N, D, 2, 1 (D : bridage électronique à 154 km/h ;
+## 2 et 1 : régime max sur le 2e / 1er rapport).
+@export var gear_max_speed_kmh := PackedFloat32Array([25.0, 0.0, 154.0, 58.0, 36.0])
+## Multiplicateur de couple pour R, N (D, 2 et 1 utilisent les rapports de la boîte auto).
+@export var gear_torque := PackedFloat32Array([0.8, 0.0, 1.0, 1.0, 1.0])
+## Puissance max du moteur (kW) : au-delà d'une certaine vitesse, la poussée vaut P / v.
+@export var max_power_kw := 140.0
+## Résistance de l'air : force = aero_drag × v² (N, v en m/s ; 0,5 × ρ × Cx × S d'un SUV).
+@export var aero_drag := 0.62
+## Résistance au roulement + frottements de la transmission (amortissement linéaire du
+## corps, remplace celui par défaut de Godot, 0,1, qui freinait comme un parachute).
+@export var rolling_damp := 0.015
+## Vitesse (km/h) à laquelle la direction est la moins démultipliée.
+@export var steer_ref_speed_kmh := 120.0
+
+@export_group("Boîte automatique")
+## Régime (tr/min) par km/h pour chacun des 6 rapports internes.
+## 6e : 154 km/h ≈ 5 080 tr/min.
+@export var auto_rpm_per_kmh := PackedFloat32Array([140.0, 86.0, 61.0, 47.0, 39.5, 33.0])
+## Multiplicateur de poussée de chaque rapport (les rapports courts tirent plus fort).
+@export var auto_gear_torque := PackedFloat32Array([1.15, 1.0, 0.92, 0.85, 0.8, 0.75])
+## Durée d'un passage de rapport (s) : la poussée est coupée en partie pendant ce temps.
+@export var shift_time := 0.3
+@export var redline_rpm := 5600.0
 ## Freinage (impulsion par roue, ~25-30 pour 1000 kg = freinage fort).
 @export var max_brake := 30.0
 ## Léger frein quand on ne touche à rien (résistance au roulement).
@@ -62,6 +83,9 @@ const LIGHT_MODES := ["OFF", "AUTO", "CODES", "PHARES", "PHARES + BARRE"]
 @export_group("Démarrage")
 @export var start_gear: Gear = Gear.N
 @export var start_handbrake_engaged := true
+## Vrai : la clé est déjà dans le contact et le moteur tourne au lancement (scène de
+## test). Faux : moteur coupé, la clé est sous la sangle du pare-soleil conducteur.
+@export var start_engine_running := false
 
 @export_group("Joueur")
 ## Le Player (scène player.tscn) à installer au volant.
@@ -70,6 +94,35 @@ const LIGHT_MODES := ["OFF", "AUTO", "CODES", "PHARES", "PHARES + BARRE"]
 @export var keyboard_controls := true
 ## Si vrai, throttle_input / brake_input sont pilotés par un autre script (IA, test...).
 @export var external_input := false
+
+## Ceintures des places autres que le conducteur (repère de la voiture). Passager : symétrique
+## du conducteur (boucle contre la console) ; arrière gauche / droite : 3 points, renvoi
+## sur le montant arrière ; arrière milieu : ceinture ventrale 2 points.
+var OTHER_SEATBELTS: Array = [
+	{"name": "SeatbeltPassenger", "side": -1.0,
+		"d_ring": Vector3(-0.85, 1.60, -0.05), "lower_anchor": Vector3(-0.716, 0.82, -0.20),
+		"buckle_slot": Vector3(-0.222, 0.985, -0.065), "eye": Vector3(-0.45, 1.45, -0.05),
+		"buckle_up": Vector3(-0.12, 1.0, 0.05),
+		"shoulder_path": PackedVector3Array([Vector3(-0.64, 1.36, -0.15), Vector3(-0.46, 1.18, -0.02), Vector3(-0.30, 1.02, -0.06)]),
+		"lap_path": PackedVector3Array([Vector3(-0.66, 0.97, -0.08), Vector3(-0.46, 1.0, -0.03), Vector3(-0.30, 0.99, -0.07)])},
+	{"name": "SeatbeltRearLeft", "side": 1.0,
+		"d_ring": Vector3(0.855, 1.58, -1.02), "lower_anchor": Vector3(0.80, 0.86, -0.86),
+		"buckle_slot": Vector3(0.27, 0.93, -0.87), "eye": Vector3(0.55, 1.35, -0.75),
+		"buckle_up": Vector3(-0.15, 1.0, 0.15),
+		"shoulder_path": PackedVector3Array([Vector3(0.72, 1.33, -0.90), Vector3(0.55, 1.13, -0.76), Vector3(0.33, 0.97, -0.80)]),
+		"lap_path": PackedVector3Array([Vector3(0.74, 0.96, -0.80), Vector3(0.55, 0.99, -0.74), Vector3(0.33, 0.96, -0.82)])},
+	{"name": "SeatbeltRearCenter", "side": 1.0, "two_point": true,
+		"lower_anchor": Vector3(-0.14, 0.87, -0.87), "rest_point": Vector3(-0.05, 0.86, -0.80),
+		"buckle_slot": Vector3(0.15, 0.93, -0.87), "eye": Vector3(0.0, 1.35, -0.75),
+		"buckle_up": Vector3(0.0, 1.0, 0.15),
+		"lap_path": PackedVector3Array([Vector3(-0.10, 0.96, -0.79), Vector3(0.0, 0.99, -0.73), Vector3(0.10, 0.96, -0.79)])},
+	{"name": "SeatbeltRearRight", "side": -1.0,
+		"d_ring": Vector3(-0.855, 1.58, -1.02), "lower_anchor": Vector3(-0.80, 0.86, -0.86),
+		"buckle_slot": Vector3(-0.27, 0.93, -0.87), "eye": Vector3(-0.55, 1.35, -0.75),
+		"buckle_up": Vector3(0.15, 1.0, 0.15),
+		"shoulder_path": PackedVector3Array([Vector3(-0.72, 1.33, -0.90), Vector3(-0.55, 1.13, -0.76), Vector3(-0.33, 0.97, -0.80)]),
+		"lap_path": PackedVector3Array([Vector3(-0.74, 0.96, -0.80), Vector3(-0.55, 0.99, -0.74), Vector3(-0.33, 0.96, -0.82)])},
+]
 
 ## Manivelles de lève-vitre : position et sens dans le repère de la porte (pivot de la
 ## charnière). Elles sont posées sur le panneau intérieur (x = 0,85 dans la voiture),
@@ -151,8 +204,19 @@ var _rear_wiper_angle := 0.0
 var _rear_rain: WindshieldRain   # pluie sur la lunette, effacée par l'essuie-glace arrière
 ## Manivelles des lève-vitres par porte ("FL", "FR", "RL", "RR") : window_cranks["FL"].opening
 var window_cranks := {}
+## Moteur : 0 coupé, 1 démarreur en train de tourner, 2 en marche. Piloté par le contacteur.
+var engine_state := 0
+var ambience: Node   # bruits d'ambiance (ambience.gd) : ambience.exposure = ouverture de l'habitacle
+var radio: Node3D   # autoradio (car_radio.gd) : radio.is_on(), radio.station, radio.volume
+var sun_visors: Array[Node3D] = []   # pare-soleil [conducteur, passager] (sun_visor.gd)
+var ignition: Node3D   # contacteur à clé (ignition.gd) : ignition.get_level()
+## Ceintures de toutes les places : [conducteur, passager, arrière gauche, arrière milieu, arrière droite].
+var seatbelts: Array[Node3D] = []
 var seatbelt: Node3D   # ceinture du conducteur (seatbelt.gd) : seatbelt.is_buckled()
 var horn: Node3D   # klaxon (HornPad) : horn.is_honking()
+var auto_gear := 0        # rapport interne de la boîte auto (0 = 1re, 5 = 6e)
+var shift_timer := 0.0    # > 0 pendant un passage de rapport
+var _kickdown_lock := 0.0
 var engine_sound: AudioStreamPlayer3D   # bruit du moteur (EngineSound ; régime : engine_sound.rpm)
 var _weather: WeatherSystem
 var _auto_low_on := false
@@ -185,13 +249,65 @@ func _ready() -> void:
 	horn.set("wheel", steering_wheel)
 	horn.position = steering_wheel.position + steering_wheel.column_axis.normalized() * 0.032
 	add_child(horn)
+	# Bruits d'ambiance de la carte (surtout audibles vitres ou portes ouvertes).
+	ambience = preload("res://cars/SUV4x4/ambience.gd").new()
+	ambience.name = "Ambience"
+	ambience.set("car", self)
+	add_child(ambience)
+	# Autoradio au centre du tableau de bord (face inclinée au-dessus de la console),
+	# avec 4 haut-parleurs dans les portières.
+	radio = preload("res://cars/SUV4x4/car_radio.gd").new()
+	radio.name = "Radio"
+	radio.set("car", self)
+	var rz := Vector3(0.0, 0.32, -0.95).normalized()
+	var rx := Vector3.UP.cross(rz).normalized()
+	radio.transform = Transform3D(Basis(rx, rz.cross(rx), rz), Vector3(0.0, 1.067, 0.6435))
+	add_child(radio)
+	# Pare-soleil (conducteur à gauche, passager à droite), supports au pavillon côté
+	# montants ; la clé de la voiture est glissée sous la sangle du pare-soleil conducteur.
+	for sd in ["L", "R"]:
+		var v: Node3D = preload("res://cars/SUV4x4/sun_visor.gd").new()
+		v.name = "SunVisor" + sd
+		v.set("side", sd)
+		v.position = Vector3(0.80 if sd == "L" else -0.80, 1.735, 0.42)
+		add_child(v)
+		sun_visors.append(v)
+	var key_item := preload("res://props/items/car_key_item.tscn").instantiate() as RigidBody3D
+	add_child(key_item)
+	sun_visors[0].store_key(key_item)
+	# Contacteur à clé sur le tableau de bord, à droite de la colonne, hors du volant.
+	ignition = preload("res://cars/SUV4x4/ignition.gd").new()
+	ignition.name = "Ignition"
+	ignition.set("car", self)
+	var ign_z := Vector3(0.0, 0.32, -0.95).normalized()   # normale de la face du tableau de bord
+	var ign_x := Vector3.UP.cross(ign_z).normalized()
+	ignition.transform = Transform3D(Basis(ign_x, ign_z.cross(ign_x), ign_z), Vector3(0.215, 1.05, 0.6355))
+	add_child(ignition)
+	if start_engine_running:
+		var key := _find_key_item()
+		if key:
+			ignition.insert(key, 2, true)
+		engine_state = 2
 	# Ceinture de sécurité du conducteur (bip si on roule sans).
 	seatbelt = preload("res://cars/SUV4x4/seatbelt.gd").new()
 	seatbelt.name = "Seatbelt"
 	add_child(seatbelt)
+	seatbelts.append(seatbelt)
+	# Ceintures des autres places : fonctionnelles, mais sans voyant ni carillon.
+	for cfg in OTHER_SEATBELTS:
+		var b: Node3D = preload("res://cars/SUV4x4/seatbelt.gd").new()
+		b.name = cfg["name"]
+		b.set("warn", false)
+		for k in cfg:
+			if k != "name":
+				b.set(k, cfg[k])
+		add_child(b)
+		seatbelts.append(b)
 	_find_lamp_materials()
 	light_stalk.set_notch(start_light_mode, true)
 	_apply_lights()
+	linear_damp_mode = RigidBody3D.DAMP_MODE_REPLACE
+	linear_damp = rolling_damp
 	gear_lever.set_notch(start_gear, true)
 	handbrake_lever.set_angle_deg(handbrake_full_deg - 5.0 if start_handbrake_engaged else 0.0, true)
 	gear_lever.notch_changed.connect(func(_i): _update_gear_labels())
@@ -217,6 +333,39 @@ func get_gear() -> Gear:
 
 
 ## 0 = desserré, 1 = serré à fond.
+## Contact : 0 arrêt, 1 accessoires, 2 contact, 3 démarreur.
+func get_ignition_level() -> int:
+	return ignition.get_level() if ignition else 2
+
+
+func is_engine_running() -> bool:
+	return engine_state == 2
+
+
+## La clé du 4x4 (objet RigidBody3D du trousseau), où qu'elle soit.
+func _find_key_item() -> RigidBody3D:
+	var grab := get_tree().get_first_node_in_group("car_key")
+	return grab.get_parent() as RigidBody3D if grab else null
+
+
+## Touche M : met la clé dans le contact si besoin, puis démarre / coupe le moteur.
+func _key_shortcut() -> void:
+	if ignition == null:
+		return
+	if not ignition.has_key():
+		var key := _find_key_item()
+		if key == null:
+			return
+		var grab := key.get_node("Grab") as VRInteractable
+		if grab.is_grabbed():
+			return
+		var zone := key.get_parent() as StorageZone
+		if zone:
+			zone.on_item_taken(key)
+		ignition.insert(key)
+	ignition.toggle()
+
+
 ## Ceinture du conducteur : 0 mise, 1 non mise, 2 non mise en roulant (carillon).
 func get_belt_warning() -> int:
 	return seatbelt.get_warning_level() if seatbelt else 0
@@ -382,7 +531,9 @@ func _physics_process(delta: float) -> void:
 	if not external_input:
 		_read_inputs(delta)
 	_update_steering()
+	_update_gearbox(delta)
 	_update_drive()
+	_apply_aero_drag()
 	_update_wipers(delta)
 	_update_dome_lights(delta)
 	_update_weather_effects(delta)
@@ -393,9 +544,61 @@ func _physics_process(delta: float) -> void:
 func _update_steering() -> void:
 	if not steering_wheel.is_grabbed():
 		steering_wheel.set_steer_input(_kb_steer)
-	var speed_ratio := clampf(absf(forward_speed) * 3.6 / gear_max_speed_kmh[Gear.D], 0.0, 1.0)
+	var speed_ratio := clampf(absf(forward_speed) * 3.6 / steer_ref_speed_kmh, 0.0, 1.0)
 	var steer_limit := deg_to_rad(max_steer_angle_deg) * (1.0 - high_speed_steer_reduction * speed_ratio)
 	steering = steering_wheel.get_steer() * steer_limit
+
+
+## Boîte auto à 6 rapports : monte les rapports selon le régime et l'accélérateur,
+## rétrograde quand le régime tombe ou quand on enfonce l'accélérateur (kickdown).
+## « 2 » bloque sur les 2 premiers rapports, « 1 » sur le premier.
+func _update_gearbox(delta: float) -> void:
+	shift_timer = maxf(shift_timer - delta, 0.0)
+	_kickdown_lock = maxf(_kickdown_lock - delta, 0.0)
+	var gear := get_gear()
+	if gear == Gear.R or gear == Gear.N or engine_state != 2:
+		auto_gear = 0
+		return
+	var top := 5 if gear == Gear.D else (1 if gear == Gear.G2 else 0)
+	if shift_timer > 0.0:
+		return
+	var kmh := maxf(forward_speed * 3.6, 0.0)
+	if auto_gear > top:
+		# levier passé sur 2 ou 1 : rétrograde un rapport à la fois, sans surrégime
+		if kmh * auto_rpm_per_kmh[auto_gear - 1] < redline_rpm - 300.0:
+			auto_gear -= 1
+			shift_timer = shift_time
+		return
+	var rpm_now := kmh * auto_rpm_per_kmh[auto_gear]
+	var shift_up := 2100.0 + 2600.0 * throttle_input
+	if auto_gear < top and (rpm_now > shift_up or rpm_now > redline_rpm - 200.0) \
+			and (throttle_input > 0.05 or rpm_now > 2400.0):
+		auto_gear += 1
+		shift_timer = shift_time
+	elif auto_gear > 0 and rpm_now < 1250.0:
+		auto_gear -= 1
+		shift_timer = shift_time * 0.7
+	elif auto_gear > 0 and throttle_input > 0.85 and _kickdown_lock <= 0.0 \
+			and kmh * auto_rpm_per_kmh[auto_gear - 1] < 3900.0 and rpm_now < 2600.0:
+		auto_gear -= 1   # kickdown
+		shift_timer = shift_time
+		_kickdown_lock = 1.5
+
+
+## Résistance de l'air (freine surtout à haute vitesse).
+func _apply_aero_drag() -> void:
+	var v := linear_velocity
+	var sp := v.length()
+	if sp > 1.0:
+		apply_central_force(-v * sp * aero_drag)
+
+
+## Rapport interne affiché (« 1 » à « 6 »), vide en R et N.
+func get_auto_gear_label() -> String:
+	var gear := get_gear()
+	if gear == Gear.R or gear == Gear.N:
+		return ""
+	return str(auto_gear + 1)
 
 
 func _update_drive() -> void:
@@ -414,8 +617,17 @@ func _update_drive() -> void:
 		var speed_in_dir := forward_speed * direction
 		if throttle_input > 0.05:
 			# La poussée diminue en approchant de la vitesse max du rapport.
-			var limiter := clampf((max_ms - speed_in_dir) / maxf(max_ms * 0.15, 0.5), 0.0, 1.0)
-			force = direction * throttle_input * engine_force_per_wheel * gear_torque[gear] * limiter
+			# bridage : la poussée est coupée sur les ~2 derniers km/h
+			var limiter := clampf((max_ms + 0.3 - speed_in_dir) / 0.6, 0.0, 1.0)
+			var mult := gear_torque[gear]
+			if gear != Gear.R:
+				mult = auto_gear_torque[auto_gear]
+				if shift_timer > 0.0:
+					mult *= 0.35   # passage de rapport : la poussée retombe un instant
+			force = throttle_input * engine_force_per_wheel * mult * limiter
+			# puissance limitée : à haute vitesse, la poussée diminue (P = F × v)
+			force = minf(force, max_power_kw * 250.0 / maxf(absf(forward_speed), 3.0))
+			force *= direction
 		if speed_in_dir > max_ms + 1.0:
 			extra_brake = engine_brake   # rétrogradage à haute vitesse : frein moteur
 
@@ -423,8 +635,8 @@ func _update_drive() -> void:
 	# NB : dans Godot, une roue qui reçoit une force moteur ignore son frein.
 	# Frein à main serré ou pédale de frein enfoncée => le moteur ne pousse plus.
 	var hb := get_handbrake_amount()
-	if hb > 0.3 or brake_input > 0.1:
-		force = 0.0
+	if hb > 0.3 or brake_input > 0.1 or engine_state != 2:
+		force = 0.0   # (moteur coupé : pas de poussée)
 	engine_force = force
 	var base := idle_brake + extra_brake + brake_input * max_brake
 	var rear := base + hb * handbrake_force
@@ -720,6 +932,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		KEY_4: target = $Doors/DoorRR
 	match (event as InputEventKey).keycode:
 		KEY_B: target = seatbelt
+		KEY_M: _key_shortcut()
 		KEY_G: target = $GloveboxLid
 		KEY_C: target = $ConsoleLid
 		KEY_T: target = handbrake_lever
