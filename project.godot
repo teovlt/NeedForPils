@@ -38,6 +38,10 @@ textures/vram_compression/import_etc2_astc=true
 
 [shader_globals]
 
+pill_assimilation={
+"type": "float",
+"value": 0.0
+}
 META_ENVIRONMENT_DEPTH_AVAILABLE={
 "type": "bool",
 "value": false

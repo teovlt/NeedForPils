@@ -6,6 +6,8 @@
 [ext_resource type="PackedScene" path="res://weather/weather_system.tscn" id="21_weather"]
 [ext_resource type="PackedScene" path="res://world/road/road_generator.tscn" id="22_road"]
 [ext_resource type="Script" uid="uid://dl8ukpveof3aw" path="res://world/hazards/falling_tree_manager.gd" id="23_trees"]
+[ext_resource type="Script" path="res://world/pills/pill_addiction.gd" id="24_addiction"]
+[ext_resource type="Script" path="res://world/pills/pill_spawner.gd" id="25_pills"]
 
 [node name="Main" type="Node3D" unique_id=1577214552]
 script = ExtResource("1_fsva1")
@@ -29,3 +31,14 @@ target_path = NodePath("../SUV4x4")
 script = ExtResource("23_trees")
 road_path = NodePath("../RoadGenerator")
 car_path = NodePath("../SUV4x4")
+
+[node name="PillAddiction" type="Node" parent="."]
+script = ExtResource("24_addiction")
+car_path = NodePath("../SUV4x4")
+
+[node name="Pills" type="Node" parent="."]
+script = ExtResource("25_pills")
+road_path = NodePath("../RoadGenerator")
+car_path = NodePath("../SUV4x4")
+addiction_path = NodePath("../PillAddiction")
+

@@ -111,6 +111,38 @@ func _draw_right_panel() -> void:
 	var belt: int = car.get_belt_warning() if car.has_method("get_belt_warning") else 0
 	var belt_on := belt == 1 or (belt == 2 and fmod(_blink, 0.7) < 0.42)
 	_icon_seatbelt(Vector2(266.0, 172.0), Color(1.0, 0.18, 0.12, 1.0 if belt_on else DIM))
+	var addiction: PillAddiction = car.get_addiction() if car.has_method("get_addiction") else null
+	if addiction:
+		_draw_pills(addiction)
+
+
+# --- Pilules : jauge de manque, nombre de pilules, assimilation --------------------
+
+func _draw_pills(a: PillAddiction) -> void:
+	var x := 300.0
+	var top := 62.0
+	var h := 118.0
+	draw_rect(Rect2(x, top, 14.0, h), Color(0.08, 0.09, 0.11))
+	var c := a.craving
+	var col := Color(0.2, 0.9, 0.4).lerp(Color(1.0, 0.75, 0.1), smoothstep(0.3, 0.6, c))
+	col = col.lerp(Color(1.0, 0.15, 0.1), smoothstep(0.6, 0.9, c))
+	if c > 0.8 and fmod(_blink, 0.5) < 0.25:
+		col.a = 0.35
+	draw_rect(Rect2(x, top + h * (1.0 - c), 14.0, h * c), col)
+	draw_rect(Rect2(x, top, 14.0, h), Color(0.3, 0.32, 0.36), false, 1.5)
+	_text(x + 7.0, top + h + 14.0, "MANQUE", 10, Color(0.6, 0.63, 0.68))
+	# pilule + compteur
+	var pc := Vector2(342.0, 80.0)
+	var pink := Color(1.0, 0.35, 0.8)
+	draw_circle(pc + Vector2(-6, 0), 6.0, pink)
+	draw_circle(pc + Vector2(6, 0), 6.0, Color(0.95, 0.95, 1.0))
+	draw_rect(Rect2(pc.x - 6.0, pc.y - 6.0, 6.0, 12.0), pink)
+	draw_rect(Rect2(pc.x, pc.y - 6.0, 6.0, 12.0), Color(0.95, 0.95, 1.0))
+	_text(pc.x, pc.y + 26.0, "x%d" % a.pills_taken, 18, Color.WHITE)
+	_text(pc.x, 140.0, "ASSIM.", 10, Color(0.6, 0.63, 0.68))
+	_text(pc.x, 158.0, "%d%%" % roundi(a.assimilation * 100.0), 17, pink.lerp(Color.WHITE, 0.3))
+	if a.is_boosting() and fmod(_blink, 0.4) < 0.28:
+		_text(165.0, 128.0, "BOOST", 16, pink)
 
 
 func _icon_low_beam(p: Vector2, c: Color) -> void:

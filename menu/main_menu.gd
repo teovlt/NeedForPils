@@ -6,8 +6,8 @@ extends StartXR
 
 ## Scène lancée par JOUER avec le casque
 @export_file("*.tscn") var game_scene: String = "res://main.tscn"
-## Scène lancée par JOUER sans casque
-@export_file("*.tscn") var desktop_game_scene: String = "res://main_without_vr.tscn"
+## Scène lancée par JOUER sans casque (main.tscn passe seule en mode bureau : clavier + souris)
+@export_file("*.tscn") var desktop_game_scene: String = "res://main.tscn"
 
 # Amplitude (m) et vitesse du flottement du panneau
 @export var float_amplitude: float = 0.03

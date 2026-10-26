@@ -154,6 +154,12 @@ var window_cranks := {}
 var seatbelt: Node3D   # ceinture du conducteur (seatbelt.gd) : seatbelt.is_buckled()
 var horn: Node3D   # klaxon (HornPad) : horn.is_honking()
 var engine_sound: AudioStreamPlayer3D   # bruit du moteur (EngineSound ; régime : engine_sound.rpm)
+## Effets des pilules, réglés à chaque image par PillAddiction : multiplicateurs de
+## vitesse max / couple (boost, manque) et perturbation de la direction (bourré).
+var drug_speed_mult := 1.0
+var drug_torque_mult := 1.0
+var drug_steer_offset := 0.0   # rad, ajouté au braquage
+var drug_steer_lag := 0.0      # 0 = direction normale, 1 = roues très en retard sur le volant
 var _weather: WeatherSystem
 var _auto_low_on := false
 var _lights_state := -1   # combinaison allumée (bits : 1 codes, 2 pleins phares, 4 barre)
@@ -395,7 +401,8 @@ func _update_steering() -> void:
 		steering_wheel.set_steer_input(_kb_steer)
 	var speed_ratio := clampf(absf(forward_speed) * 3.6 / gear_max_speed_kmh[Gear.D], 0.0, 1.0)
 	var steer_limit := deg_to_rad(max_steer_angle_deg) * (1.0 - high_speed_steer_reduction * speed_ratio)
-	steering = steering_wheel.get_steer() * steer_limit
+	var target := steering_wheel.get_steer() * steer_limit + drug_steer_offset
+	steering = lerpf(steering, target, 1.0 - drug_steer_lag * 0.95)
 
 
 func _update_drive() -> void:
@@ -410,12 +417,12 @@ func _update_drive() -> void:
 	var force := 0.0
 	var extra_brake := 0.0
 	if direction != 0.0:
-		var max_ms := gear_max_speed_kmh[gear] / 3.6
+		var max_ms := gear_max_speed_kmh[gear] / 3.6 * (drug_speed_mult if direction > 0.0 else 1.0)
 		var speed_in_dir := forward_speed * direction
 		if throttle_input > 0.05:
 			# La poussée diminue en approchant de la vitesse max du rapport.
 			var limiter := clampf((max_ms - speed_in_dir) / maxf(max_ms * 0.15, 0.5), 0.0, 1.0)
-			force = direction * throttle_input * engine_force_per_wheel * gear_torque[gear] * limiter
+			force = direction * throttle_input * engine_force_per_wheel * gear_torque[gear] * limiter * drug_torque_mult
 		if speed_in_dir > max_ms + 1.0:
 			extra_brake = engine_brake   # rétrogradage à haute vitesse : frein moteur
 
@@ -645,6 +652,11 @@ func get_hazards() -> FallingTreeManager:
 ## Secondes restantes de l'alerte « CHOC ! » après avoir percuté un arbre.
 func get_hit_flash() -> float:
 	return _hit_flash
+
+
+## Dépendance aux pilules (PillAddiction), ou null s'il n'y en a pas dans la scène.
+func get_addiction() -> PillAddiction:
+	return get_tree().get_first_node_in_group(PillAddiction.GROUP) as PillAddiction
 
 
 ## Phares réellement allumés : {low, high, bar}.

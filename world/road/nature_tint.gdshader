@@ -13,7 +13,12 @@ uniform float dry_amount = 0.0;    // 0 = jamais jaunissant
 uniform float face_amount = 0.07;  // variation par facette
 uniform vec4 dry_color : source_color = vec4(0.62, 0.52, 0.24, 1.0);
 
+// Assimilation par les pilules (0-1, réglée par PillAddiction) : le décor se teinte
+// de bandes aux couleurs des pilules.
+global uniform float pill_assimilation;
+
 varying vec4 v_custom;
+varying vec3 v_world;
 varying flat float v_face;
 
 float hash13(vec3 p) {
@@ -24,6 +29,7 @@ float hash13(vec3 p) {
 
 void vertex() {
 	v_custom = INSTANCE_CUSTOM;
+	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	v_face = hash13(VERTEX * 37.0 + v_custom.rgb * 11.0);
 }
 
@@ -46,6 +52,13 @@ void fragment() {
 	col *= 1.0 + (c.b - 0.5) * 2.0 * val_amount + (v_face - 0.5) * 2.0 * face_amount;
 	float lum = dot(col, vec3(0.3, 0.59, 0.11));
 	col = mix(col, dry_color.rgb * lum * 2.6, clamp(c.a * dry_amount, 0.0, 1.0));
+	if (pill_assimilation > 0.001) {
+		float hp = fract(dot(v_world.xz, vec2(0.011, 0.017)) + v_world.y * 0.02 + TIME * 0.015);
+		vec3 pal = 0.5 + 0.5 * cos(6.2832 * (hp + vec3(0.0, 0.33, 0.67)));
+		pal = mix(pal, vec3(1.0, 0.35, 0.8), 0.35);
+		float l2 = dot(col, vec3(0.3, 0.59, 0.11));
+		col = mix(col, pal * (0.35 + l2 * 1.6), clamp(pill_assimilation * 0.6, 0.0, 0.6));
+	}
 	ALBEDO = col;
 	ROUGHNESS = roughness_value;
 }
