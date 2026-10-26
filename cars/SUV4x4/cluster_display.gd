@@ -107,6 +107,10 @@ func _draw_right_panel() -> void:
 	_icon_high_beam(Vector2(cx - 40.0, y), Color(0.25, 0.55, 1.0, 1.0 if lights["high"] else DIM))
 	_icon_bar(Vector2(cx + 14.0, y), Color(1.0, 0.7, 0.15, 1.0 if lights["bar"] else DIM))
 	_icon_handbrake(Vector2(cx + 74.0, y), Color(1.0, 0.18, 0.12, 1.0 if hb_on else DIM))
+	# ceinture non bouclée : fixe à l'arrêt, clignote quand le carillon sonne
+	var belt: int = car.get_belt_warning() if car.has_method("get_belt_warning") else 0
+	var belt_on := belt == 1 or (belt == 2 and fmod(_blink, 0.7) < 0.42)
+	_icon_seatbelt(Vector2(266.0, 172.0), Color(1.0, 0.18, 0.12, 1.0 if belt_on else DIM))
 
 
 func _icon_low_beam(p: Vector2, c: Color) -> void:
@@ -140,3 +144,13 @@ func _icon_handbrake(p: Vector2, c: Color) -> void:
 	draw_arc(p, 16.0, deg_to_rad(120), deg_to_rad(240), 8, c, 2.5, true)
 	draw_arc(p, 16.0, deg_to_rad(-60), deg_to_rad(60), 8, c, 2.5, true)
 	_text(p.x, p.y + 6.0, "P", 16, c)
+
+
+func _icon_seatbelt(p: Vector2, c: Color) -> void:
+	# personnage assis (tête, buste, cuisses) barré par la ceinture en diagonale
+	draw_circle(p + Vector2(-2, -13), 4.5, c)
+	draw_line(p + Vector2(-3, -6), p + Vector2(-5, 7), c, 5.0, true)
+	draw_line(p + Vector2(-5, 7), p + Vector2(7, 7), c, 4.5, true)
+	draw_line(p + Vector2(7, 7), p + Vector2(9, 15), c, 4.0, true)
+	draw_line(p + Vector2(6, -8), p + Vector2(-10, 8), c, 2.5, true)
+	draw_circle(p + Vector2(-10, 8), 2.5, c)
