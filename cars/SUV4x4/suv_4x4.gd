@@ -10,7 +10,7 @@ extends VehicleBody3D
 ## Clavier (test sans casque) : Z/W/↑ accélérer, S/↓ freiner, Q/A/D/←/→ tourner,
 ##      R/N/E = R/N/D, Pg↑/Pg↓ = vitesse précédente/suivante, T = frein à main,
 ##      K = comodo essuie-glaces, L = comodo phares, Espace = frein arrière tant qu'appuyé,
-##      1-4 portes, G boîte à gants, C accoudoir.
+##      1-4 portes, G boîte à gants, C accoudoir, J klaxon, B ceinture.
 
 enum Gear { R, N, D, G2, G1 }
 const GEAR_LABELS := ["R", "N", "D", "2", "1"]
@@ -70,6 +70,22 @@ const LIGHT_MODES := ["OFF", "AUTO", "CODES", "PHARES", "PHARES + BARRE"]
 @export var keyboard_controls := true
 ## Si vrai, throttle_input / brake_input sont pilotés par un autre script (IA, test...).
 @export var external_input := false
+
+## Manivelles de lève-vitre : position et sens dans le repère de la porte (pivot de la
+## charnière). Elles sont posées sur le panneau intérieur (x = 0,85 dans la voiture),
+## derrière l'accoudoir ; leur axe +Z pointe vers l'habitacle.
+const WINDOW_CRANKS := {
+	"FL": {"pos": Vector3(-0.10, 0.40, -0.76), "side": 1.0},
+	"FR": {"pos": Vector3(0.10, 0.40, -0.76), "side": -1.0},
+	"RL": {"pos": Vector3(-0.10, 0.40, -0.715), "side": 1.0},
+	"RR": {"pos": Vector3(0.10, 0.40, -0.715), "side": -1.0},
+}
+@export_group("Vitres")
+## Course des vitres de portes (m) : elles disparaissent presque entièrement dans la porte.
+@export var window_travel := 0.45
+## Tours de manivelle pour baisser entièrement une vitre.
+@export var window_crank_turns := 3.0
+@export_group("")
 
 ## Pièces du modèle Blender -> noeud qui leur sert de pivot.
 const PART_PIVOTS := {
@@ -133,6 +149,11 @@ var _wiper_pause := 0.0
 var _wiper_angle := 0.0
 var _rear_wiper_angle := 0.0
 var _rear_rain: WindshieldRain   # pluie sur la lunette, effacée par l'essuie-glace arrière
+## Manivelles des lève-vitres par porte ("FL", "FR", "RL", "RR") : window_cranks["FL"].opening
+var window_cranks := {}
+var seatbelt: Node3D   # ceinture du conducteur (seatbelt.gd) : seatbelt.is_buckled()
+var horn: Node3D   # klaxon (HornPad) : horn.is_honking()
+var engine_sound: AudioStreamPlayer3D   # bruit du moteur (EngineSound ; régime : engine_sound.rpm)
 var _weather: WeatherSystem
 var _auto_low_on := false
 var _lights_state := -1   # combinaison allumée (bits : 1 codes, 2 pleins phares, 4 barre)
@@ -147,8 +168,27 @@ var debug_max_suspension_speed := 0.0
 
 func _ready() -> void:
 	_attach_parts()
+	_setup_windows()
 	_make_glass_clearer()
 	_setup_rear_window_rain()
+	# Bruit du moteur (généré par code), placé dans le compartiment moteur.
+	engine_sound = preload("res://cars/SUV4x4/engine_sound.gd").new()
+	engine_sound.name = "EngineSound"
+	engine_sound.set("car", self)
+	engine_sound.position = Vector3(0.0, 0.95, 1.6)
+	add_child(engine_sound)
+	# Klaxon au centre du volant (coussin + son). Frère du volant et non enfant, pour
+	# ne pas se mêler à la surbrillance du volant ; il est rond, la rotation importe peu.
+	horn = preload("res://cars/SUV4x4/horn_pad.gd").new()
+	horn.name = "Horn"
+	horn.set("column_axis", steering_wheel.column_axis)
+	horn.set("wheel", steering_wheel)
+	horn.position = steering_wheel.position + steering_wheel.column_axis.normalized() * 0.032
+	add_child(horn)
+	# Ceinture de sécurité du conducteur (bip si on roule sans).
+	seatbelt = preload("res://cars/SUV4x4/seatbelt.gd").new()
+	seatbelt.name = "Seatbelt"
+	add_child(seatbelt)
 	_find_lamp_materials()
 	light_stalk.set_notch(start_light_mode, true)
 	_apply_lights()
@@ -177,6 +217,11 @@ func get_gear() -> Gear:
 
 
 ## 0 = desserré, 1 = serré à fond.
+## Ceinture du conducteur : 0 mise, 1 non mise, 2 non mise en roulant (carillon).
+func get_belt_warning() -> int:
+	return seatbelt.get_warning_level() if seatbelt else 0
+
+
 func get_handbrake_amount() -> float:
 	return clampf(handbrake_lever.angle / deg_to_rad(handbrake_full_deg), 0.0, 1.0)
 
@@ -200,6 +245,104 @@ func _attach_parts() -> void:
 			mesh.reparent(pivot, true)
 		if pivot is VRInteractable:
 			pivot.refresh_meshes()
+
+
+## Vitres de portes mobiles : la vitre (surface SUV_Glass du mesh de chaque porte) est
+## sortie dans son propre MeshInstance3D « Window », enfant du pivot de la porte, qui
+## coulisse vers le bas. Une manivelle (VRWindowCrank) la commande ; à l'avant, le
+## rétroviseur extérieur n'est attrapable que la vitre baissée.
+func _setup_windows() -> void:
+	for code in WINDOW_CRANKS:
+		var door := get_node("Doors/Door" + code) as Node3D
+		var door_mesh := door.get_node_or_null("Door_" + code) as MeshInstance3D
+		if door_mesh == null or door_mesh.mesh == null:
+			push_warning("SUV4x4 : mesh de porte introuvable : Door_" + code)
+			continue
+		var src := door_mesh.mesh
+		var body := ArrayMesh.new()
+		var glass := ArrayMesh.new()
+		for si in src.get_surface_count():
+			var mat := src.surface_get_material(si)
+			var target := glass if mat and mat.resource_name.begins_with("SUV_Glass") else body
+			target.add_surface_from_arrays(src.surface_get_primitive_type(si), src.surface_get_arrays(si))
+			target.surface_set_material(target.get_surface_count() - 1, mat)
+		if glass.get_surface_count() == 0:
+			continue
+		door_mesh.mesh = body
+		var win := MeshInstance3D.new()
+		win.name = "Window"
+		win.mesh = glass
+		win.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		door.add_child(win)
+		win.transform = door_mesh.transform
+		# joint noir le long des bords hauts de la vitre (bord du haut + bord avant incliné
+		# des vitres avant) : on voit jusqu'où la vitre est baissée
+		_add_window_edges(win, glass)
+		var info: Dictionary = WINDOW_CRANKS[code]
+		var side: float = info["side"]
+		var crank: VRWindowCrank = preload("res://interaction/vr_window_crank.gd").new()
+		crank.name = "WindowCrank"
+		crank.window = win
+		crank.travel = window_travel
+		crank.turns = window_crank_turns
+		crank.open_direction = side
+		crank.highlight_distance = 0.13
+		crank.grab_distance = 0.06
+		crank.outline_width = 0.003
+		crank.pick_bonus = 0.04   # préférée à la porte (dont la boîte englobante la contient)
+		crank.mirror = door.get_node_or_null("Mirror") as VRInteractable
+		# axe +Z vers l'habitacle (-X à gauche, +X à droite), bras vers le haut
+		var z := Vector3(-side, 0.0, 0.0)
+		crank.transform = Transform3D(Basis(Vector3.UP.cross(z), Vector3.UP, z), info["pos"])
+		door.add_child(crank)
+		window_cranks[code] = crank
+		if door is VRInteractable:
+			door.refresh_meshes()
+
+
+## Joint noir sur les bords supérieurs d'une vitre, qui épouse sa forme : contour de la
+## vitre vu de côté (enveloppe convexe dans le plan y-z), dont on garde les arêtes
+## tournées vers le haut (bord du haut, bord avant incliné le long du montant).
+func _add_window_edges(win: MeshInstance3D, glass: ArrayMesh) -> void:
+	var verts: PackedVector3Array = glass.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+	var min_x := INF
+	var max_x := -INF
+	var pts := PackedVector2Array()
+	for v in verts:
+		min_x = minf(min_x, v.x)
+		max_x = maxf(max_x, v.x)
+		pts.append(Vector2(v.z, v.y))
+	var hull := Geometry2D.convex_hull(pts)
+	var centre := Vector2.ZERO
+	for q in hull:
+		centre += q
+	centre /= float(hull.size())
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.04, 0.04, 0.045)
+	mat.roughness = 0.8
+	const W := 0.007   # largeur du joint sur la vitre
+	for i in hull.size() - 1:
+		var a := hull[i]
+		var b := hull[i + 1]
+		var d := b - a
+		if d.length() < 0.01:
+			continue
+		var n := Vector2(-d.y, d.x).normalized()
+		if n.dot((a + b) * 0.5 - centre) < 0.0:
+			n = -n
+		if n.y < 0.3:
+			continue   # bords du bas et de l'arrière : cachés dans la porte
+		var edge := MeshInstance3D.new()
+		edge.name = "Edge%d" % i
+		var bm := BoxMesh.new()
+		bm.size = Vector3(max_x - min_x + 0.002, W, d.length() + W)
+		bm.material = mat
+		edge.mesh = bm
+		var z_axis := Vector3(0.0, d.y, d.x).normalized()
+		var y_axis := Vector3(0.0, n.y, n.x)
+		var c2 := (a + b) * 0.5 - n * W * 0.5
+		edge.transform = Transform3D(Basis(y_axis.cross(z_axis), y_axis, z_axis), Vector3((min_x + max_x) * 0.5, c2.y, c2.x))
+		win.add_child(edge)
 
 
 ## Installe le joueur VR sur le siège conducteur et coupe ses déplacements.
@@ -559,6 +702,13 @@ func _read_inputs(delta: float) -> void:
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
+	# J : klaxon tant que la touche est enfoncée
+	if keyboard_controls and horn and (event as InputEventKey).keycode == KEY_J and not event.is_echo():
+		if event.is_pressed():
+			horn.press("clavier")
+		else:
+			horn.unpress("clavier")
+		return
 	if not keyboard_controls or not event.is_pressed() or event.is_echo():
 		return
 	var target = null
@@ -569,6 +719,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		KEY_3: target = $Doors/DoorRL
 		KEY_4: target = $Doors/DoorRR
 	match (event as InputEventKey).keycode:
+		KEY_B: target = seatbelt
 		KEY_G: target = $GloveboxLid
 		KEY_C: target = $ConsoleLid
 		KEY_T: target = handbrake_lever
