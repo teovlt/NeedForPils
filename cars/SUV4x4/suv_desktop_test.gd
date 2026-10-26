@@ -7,7 +7,7 @@ extends Node3D
 
 @export var autotest := false
 ## Scénario du test automatique : "objets" (rangements) ou "arbres".
-@export_enum("objets", "arbres", "aleatoire", "phares", "retros", "portes", "boite", "combine", "essuie", "plafonnier", "nature", "pluie", "balayage", "menu", "lunette") var autotest_scenario := "objets"
+@export_enum("objets", "arbres", "aleatoire", "phares", "retros", "portes", "boite", "combine", "essuie", "plafonnier", "nature", "pluie", "balayage", "menu", "lunette", "moteur", "klaxon", "vitres", "ceinture") var autotest_scenario := "objets"
 
 @onready var car: SUV4x4 = $SUV4x4
 @onready var cam: Camera3D = $Camera3D
@@ -62,6 +62,14 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_menu(delta)
 		elif autotest_scenario == "lunette":
 			_run_autotest_rear_window(delta)
+		elif autotest_scenario == "moteur":
+			_run_autotest_engine(delta)
+		elif autotest_scenario == "klaxon":
+			_run_autotest_horn(delta)
+		elif autotest_scenario == "vitres":
+			_run_autotest_windows(delta)
+		elif autotest_scenario == "ceinture":
+			_run_autotest_belt(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -1005,4 +1013,298 @@ func _run_autotest_rear_window(delta: float) -> void:
 	if at.call(11.2): car.wiper_stalk.set_notch(0, true)   # finit son aller-retour puis se gare
 	if at.call(11.55): _shot("lunette_3_balai_dedans")
 	if at.call(13.6): _shot("lunette_4_essuyee_dedans")
+	if at.call(14.0): get_tree().quit()
+
+
+# Bruit du moteur : point mort (coups d'accélérateur), puis pleine accélération en D
+# jusqu'à ~110 km/h, lever de pied, puis en « 2 ». Le son est enregistré dans
+# .godot/autotest_moteur.wav et le régime noté toutes les 0,5 s.
+var _rec: AudioEffectRecord
+
+func _run_autotest_engine(delta: float) -> void:
+	var w: WeatherSystem = $Weather
+	var road: RoadGenerator = $RoadGenerator
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	w.random_events = false
+	$FallingTrees.enabled = false
+	car.external_input = true
+	if at.call(0.05):
+		w.set_weather("degage", true)
+		w.rain_volume = 0.0
+		_rec = AudioEffectRecord.new()
+		AudioServer.add_bus_effect(0, _rec)
+		_rec.set_recording_active(true)
+		car.gear_lever.set_notch(1, true)   # N
+		car.handbrake_lever.set_angle_deg(0.0, true)
+	var thr := 0.0
+	var brk := 0.0
+	if _t < 6.0:
+		car.gear_lever.set_notch(1, true)
+		brk = 1.0
+		thr = 1.0 if (fmod(_t, 2.0) > 1.0 and _t > 1.0) else 0.0   # coups d'accélérateur au point mort
+	elif _t < 26.0:
+		if at.call(6.0): car.gear_lever.set_notch(2, true)   # D
+		thr = 1.0 if car.forward_speed * 3.6 < 110.0 else 0.0
+	elif _t < 31.0:
+		thr = 0.0   # lever de pied
+	else:
+		if at.call(31.0): car.gear_lever.set_notch(3, true)   # « 2 »
+		thr = 1.0 if car.forward_speed * 3.6 < 58.0 else 0.0
+	var fwd := car.global_basis.z
+	var info := road.sample_road(car.global_position + fwd * 14.0)
+	if info["found"]:
+		var target: Vector3 = info["point"] + info["right"] * 1.75
+		var to_t := target - car.global_position
+		to_t.y = 0.0
+		car._kb_steer = clampf(fwd.cross(to_t.normalized()).y * 2.0, -1.0, 1.0)
+	car.throttle_input = thr
+	car.brake_input = brk
+	_inside = false
+	_cabin_cam(Vector3(0.42, 1.52, -0.2), Vector3(0.42, 1.25, 4.0))
+	var es = car.engine_sound
+	if fmod(_t, 0.5) < delta and _t > 0.2:
+		_log("AUTOTEST moteur t=%.1f levier=%s vitesse=%.0f km/h rapport interne=%d régime=%.0f charge=%.2f" % [_t, car.gear_lever.get_notch_label(), car.forward_speed * 3.6, es.auto_gear + 1, es.rpm, es.engine_load])
+	if at.call(40.0):
+		_rec.set_recording_active(false)
+		_rec.get_recording().save_to_wav(ProjectSettings.globalize_path("res://.godot/autotest_moteur.wav"))
+		_log("AUTOTEST moteur : son enregistré")
+	if at.call(40.5): get_tree().quit()
+
+
+# Klaxon : vue rapprochée du volant, appui maintenu 1 s, puis coup bref (toggle),
+# puis appui avec la main souris (grab du coussin). Son enregistré.
+func _run_autotest_horn(delta: float) -> void:
+	var w: WeatherSystem = $Weather
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	w.random_events = false
+	$FallingTrees.enabled = false
+	car.external_input = true
+	car.throttle_input = 0.0
+	car.brake_input = 1.0
+	_inside = false
+	cam.fov = 50.0
+	var horn = car.horn
+	_cabin_cam(Vector3(0.45, 1.5, 0.1), horn.global_position * 0.0 + car.to_local(horn.global_position))
+	if at.call(0.05):
+		w.set_weather("degage", true)
+		w.rain_volume = 0.0
+		_rec = AudioEffectRecord.new()
+		AudioServer.add_bus_effect(0, _rec)
+		_rec.set_recording_active(true)
+	if at.call(1.0): horn.press("test")
+	if at.call(1.5):
+		horn.set_hand_distance(self, 0.0)   # surbrillance comme si une main était dessus
+		_shot("klaxon_1_appui")
+		_log("AUTOTEST klaxon appui : klaxonne=%s" % horn.is_honking())
+	if at.call(2.0): horn.unpress("test")
+	if at.call(2.6):
+		horn.set_hand_distance(self, -1.0)
+		_shot("klaxon_2_repos")
+		_log("AUTOTEST klaxon relâché : klaxonne=%s" % horn.is_honking())
+	if at.call(3.0): horn.toggle()
+	if at.call(3.1): _log("AUTOTEST klaxon coup bref : klaxonne=%s" % horn.is_honking())
+	if at.call(4.0):
+		# la main souris qui vise le centre du volant choisit-elle le klaxon ?
+		var origin := cam.global_position
+		var dir: Vector3 = (horn.global_position - origin).normalized()
+		var best = null
+		var best_t := INF
+		for n in get_tree().get_nodes_in_group(VRInteractable.GROUP):
+			var it := n as VRInteractable
+			var tt := it.ray_hit_distance(origin, dir, 2.0, it.grab_distance * 0.3)
+			if tt - it.pick_bonus * 3.0 < best_t - (best.pick_bonus * 3.0 if best else 0.0):
+				best = it
+				best_t = tt
+		_log("AUTOTEST klaxon : visé au centre du volant -> %s" % (best.name if best else "rien"))
+		var ev := InputEventKey.new()
+		ev.keycode = KEY_J
+		ev.pressed = true
+		Input.parse_input_event(ev)
+	if at.call(4.6):
+		_log("AUTOTEST klaxon touche J : klaxonne=%s" % horn.is_honking())
+		var ev2 := InputEventKey.new()
+		ev2.keycode = KEY_J
+		ev2.pressed = false
+		Input.parse_input_event(ev2)
+	if at.call(5.5):
+		_log("AUTOTEST klaxon J relâchée : klaxonne=%s" % horn.is_honking())
+		_rec.set_recording_active(false)
+		_rec.get_recording().save_to_wav(ProjectSettings.globalize_path("res://.godot/autotest_klaxon.wav"))
+	# le coussin tourne-t-il avec le volant ?
+	if at.call(5.6): car.set("_kb_steer", 0.35)
+	if at.call(7.6):
+		_shot("klaxon_3_volant_gauche")
+		_log("AUTOTEST klaxon volant %.0f° coussin %.0f°" % [rad_to_deg(car.steering_wheel.wheel_angle), rad_to_deg(horn.transform.basis.get_rotation_quaternion().get_angle())])
+		car.set("_kb_steer", -0.6)
+	if at.call(10.0):
+		_shot("klaxon_4_volant_droite")
+		_log("AUTOTEST klaxon volant %.0f° coussin %.0f°" % [rad_to_deg(car.steering_wheel.wheel_angle), rad_to_deg(horn.transform.basis.get_rotation_quaternion().get_angle())])
+	if at.call(10.5): get_tree().quit()
+
+
+
+## Objet interactif visé par un rayon (même choix que la main souris).
+func _ray_pick(origin: Vector3, target: Vector3) -> VRInteractable:
+	var dir: Vector3 = (target - origin).normalized()
+	var best: VRInteractable = null
+	var best_t := INF
+	for n in get_tree().get_nodes_in_group(VRInteractable.GROUP):
+		var it := n as VRInteractable
+		if it == null or not it.enabled or not it.is_visible_in_tree():
+			continue
+		var tt := it.ray_hit_distance(origin, dir, 2.0, it.grab_distance * 0.3)
+		if tt - it.pick_bonus * 3.0 < best_t - (best.pick_bonus * 3.0 if best else 0.0):
+			best = it
+			best_t = tt
+	return best if best_t < INF else null
+
+
+func _run_autotest_windows(delta: float) -> void:
+	# Manivelles : tourner celle du conducteur à la main, vitre baissée -> rétro attrapable.
+	var w: WeatherSystem = $Weather
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	w.random_events = false
+	$FallingTrees.enabled = false
+	car.external_input = true
+	car.throttle_input = 0.0
+	car.brake_input = 1.0
+	_inside = false
+	cam.fov = 60.0
+	var fl: VRWindowCrank = car.window_cranks["FL"]
+	var mirror_fl := car.get_node("Doors/DoorFL/Mirror") as VRInteractable
+	var eye := Vector3(0.45, 1.45, -0.05)
+	var knob := func(ang: float) -> Vector3: return fl.to_global(Vector3(cos(ang), sin(ang), 0.0) * 0.072 + Vector3(0, 0, 0.05))
+	if _t < 0.6:
+		cam.fov = 50.0
+		_cabin_cam(Vector3(2.2, 1.75, 1.3), Vector3(0.93, 1.55, 0.45))   # coin avant de la vitre, dehors
+	elif _t < 0.95:
+		_cabin_cam(eye, Vector3(0.95, 1.75, 0.55))   # montant avant, depuis le siège
+	elif _t < 7.9:
+		_cabin_cam(eye, car.to_local(fl.global_position) + Vector3(0, 0.25, 0.2))
+	else:
+		cam.fov = 40.0
+		_cabin_cam(Vector3(4.2, 1.6, -0.6), Vector3(0.9, 1.2, -0.1))
+	if at.call(0.05):
+		w.hour = 14.0
+		w.set_weather("degage", true)
+		_hand = Node3D.new()
+		add_child(_hand)
+	if at.call(0.55): _shot("vitres_0_coin_dehors")
+	if at.call(0.9): _shot("vitres_0_coin_dedans")
+	if at.call(1.0):
+		_shot("vitres_1_fermee")
+		var pick := _ray_pick(car.to_global(eye), mirror_fl.global_position)
+		_log("AUTOTEST vitre fermée : rétro gauche attrapable=%s, visé -> %s" % [mirror_fl.enabled, pick.name if pick else "rien"])
+		pick = _ray_pick(car.to_global(eye), knob.call(PI * 0.5))
+		_log("AUTOTEST visé le bouton de la manivelle -> %s" % (pick.name if pick else "rien"))
+		_hand.global_position = knob.call(PI * 0.5)
+		fl.grab(_hand)
+	# 1,5 tour dans le sens horaire (vu de l'habitacle) en 2 s : la vitre descend de moitié
+	if _t > 1.0 and _t <= 3.0 and fl.is_grabbed():
+		_hand.global_position = knob.call(PI * 0.5 - clampf((_t - 1.0) / 2.0, 0.0, 1.0) * 1.5 * TAU)
+		fl.grab_update(_hand)
+	if at.call(3.1):
+		fl.release(_hand)
+		_log("AUTOTEST 1,5 tour : ouverture=%.2f, rétro attrapable=%s" % [fl.opening, mirror_fl.enabled])
+		_shot("vitres_2_mi_ouverte")
+		_hand.global_position = knob.call(-PI * 0.5)
+		fl.grab(_hand)
+	# demi-tour dans l'autre sens : la vitre remonte un peu
+	if _t > 3.1 and _t <= 3.8 and fl.is_grabbed():
+		_hand.global_position = knob.call(-PI * 0.5 + clampf((_t - 3.1) / 0.7, 0.0, 1.0) * PI)
+		fl.grab_update(_hand)
+	if at.call(3.9):
+		fl.release(_hand)
+		_log("AUTOTEST demi-tour inverse : ouverture=%.2f" % fl.opening)
+		fl.toggle()   # F / A-X : descend d'elle-même
+	if at.call(6.0):
+		var pick2 := _ray_pick(car.to_global(eye), mirror_fl.global_position)
+		_log("AUTOTEST touche F : ouverture=%.2f, rétro attrapable=%s, visé le rétro -> %s" % [fl.opening, mirror_fl.enabled, pick2.name if pick2 else "rien"])
+		_shot("vitres_3_ouverte")
+		car.window_cranks["RL"].set_opening(0.5)
+	if at.call(8.3):
+		_shot("vitres_4_cote")
+		fl.toggle()
+	if at.call(10.2):
+		_log("AUTOTEST remontée : ouverture=%.2f, rétro attrapable=%s" % [fl.opening, mirror_fl.enabled])
+		_shot("vitres_5_remontee")
+	if at.call(10.4): get_tree().quit()
+
+
+func _run_autotest_belt(delta: float) -> void:
+	# Ceinture : voyant et carillon en roulant sans, bouclage à la main, déblocage, bip rapide.
+	var w: WeatherSystem = $Weather
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	w.random_events = false
+	$FallingTrees.enabled = false
+	car.external_input = true
+	car.throttle_input = 0.35 if _t > 2.0 and _t < 14.0 else 0.0
+	car.brake_input = 0.0 if _t > 2.0 else 1.0
+	_inside = false
+	cam.fov = 60.0
+	var belt = car.seatbelt
+	var passenger := Vector3(-0.35, 1.42, 0.35)
+	if _t > 4.6 and _t < 5.8:
+		_cabin_cam(Vector3(0.45, 1.45, -0.05), Vector3(0.45, 1.2, 0.75))   # combiné
+	elif (_t > 1.2 and _t < 1.8) or (_t > 7.8 and _t < 8.4):
+		_cabin_cam(Vector3(0.45, 1.45, -0.05), Vector3(0.2, 0.95, 0.05))   # regard du conducteur vers la boucle
+	else:
+		_cabin_cam(passenger, Vector3(0.5, 1.1, -0.15))
+	if at.call(0.05):
+		w.hour = 14.0
+		w.set_weather("degage", true)
+		_hand = Node3D.new()
+		add_child(_hand)
+		_rec = AudioEffectRecord.new()
+		AudioServer.add_bus_effect(0, _rec)
+		_rec.set_recording_active(true)
+	if at.call(1.0):
+		_shot("ceinture_1_debouclee")
+		_log("AUTOTEST ceinture à l'arrêt : bouclée=%s voyant=%d" % [belt.is_buckled(), car.get_belt_warning()])
+	if at.call(1.7): _shot("ceinture_1b_vue_conducteur")
+	if at.call(8.3): _shot("ceinture_3b_vue_conducteur")
+	if at.call(5.0):
+		_shot("ceinture_2_combine_a")
+		_log("AUTOTEST ceinture en roulant (%.0f km/h) : voyant=%d carillon=%d" % [absf(car.forward_speed) * 3.6, car.get_belt_warning(), belt._chime_mode])
+	if at.call(5.4): _shot("ceinture_2_combine_b")
+	# main qui saisit le pêne et le tire devant le torse jusqu'à la boucle
+	if at.call(6.0):
+		_hand.global_position = belt._tongue.global_position
+		var pick := _ray_pick(car.to_global(Vector3(0.45, 1.45, -0.05)), belt._tongue.global_position)
+		_log("AUTOTEST visé le pêne -> %s" % (pick.name if pick else "rien"))
+		belt._tongue.grab(_hand)
+	if _t > 6.0 and _t <= 7.5 and belt._tongue.is_grabbed():
+		var k := clampf((_t - 6.0) / 1.5, 0.0, 1.0)
+		var start: Vector3 = belt._rest_point()
+		var mid := Vector3(0.48, 1.2, 0.12)
+		var end: Vector3 = belt._buckled_tongue_point()
+		var p := start.lerp(mid, k).lerp(mid.lerp(end, k), k)
+		_hand.global_position = car.to_global(p)
+		belt._tongue.grab_update(_hand)
+		if not belt._tongue.enabled:
+			belt._tongue.release(_hand)
+	if at.call(7.7):
+		_shot("ceinture_3_bouclee")
+		_log("AUTOTEST bouclée à la main : bouclée=%s voyant=%d carillon=%d" % [belt.is_buckled(), car.get_belt_warning(), belt._chime_mode])
+	if at.call(9.0): belt._buckle.toggle()   # bouton rouge
+	if at.call(10.2):
+		_shot("ceinture_4_relachee")
+		_log("AUTOTEST bouton rouge : bouclée=%s voyant=%d carillon=%d pêne au repos=%s" % [belt.is_buckled(), car.get_belt_warning(), belt._chime_mode, belt._state == 0])
+		belt.unbelted_drive_time = 19.5
+	if at.call(11.5):
+		_log("AUTOTEST après 20 s sans ceinture : carillon=%d (2 = bip rapide)" % belt._chime_mode)
+	if at.call(12.5): belt._tongue.toggle()   # F sur le pêne : se boucle seul
+	if at.call(13.8):
+		_log("AUTOTEST touche F sur le pêne : bouclée=%s carillon=%d" % [belt.is_buckled(), belt._chime_mode])
+		_shot("ceinture_5_auto")
+		_rec.set_recording_active(false)
+		_rec.get_recording().save_to_wav(ProjectSettings.globalize_path("res://.godot/autotest_ceinture.wav"))
 	if at.call(14.0): get_tree().quit()
