@@ -3,9 +3,10 @@ extends Node3D
 ## La voiture de l'Essaim qui nous poursuit.
 ##
 ## Poursuite « virtuelle » : on suit seulement l'écart (m, le long de la route) entre
-## elle et le joueur. Elle roule à la vitesse de croisière du 4x4 pied au plancher :
-## tant qu'on ne ralentit pas, l'écart tient. Freiner, percuter un arbre, ou le manque
-## (qui bride le moteur) la rapprochent ; le boost d'une pilule nous en éloigne. Très
+## elle et le joueur. Tant qu'on roule pied au plancher sans freiner, elle s'aligne sur
+## notre vitesse (sans dépasser sa vitesse de croisière) : en montée, elle ralentit
+## avec nous et l'écart tient. Lâcher l'accélérateur, freiner, percuter un arbre ou le
+## manque (qui bride le moteur) la rapprochent ; le boost d'une pilule nous en éloigne. Très
 ## loin derrière, elle remonte plus vite (elle ne lâche jamais). La voiture visible est posée sur la route à
 ## l'écart voulu (visible dans les rétros), gyrophares roses et bleus, sirène.
 ## Pas de collision : rattrapé = écart < `catch_gap`.
@@ -21,8 +22,8 @@ enum State { IDLE, ESCORT, CHASE, STOPPED }
 @export var road_path: NodePath
 @export var car_path: NodePath
 @export_group("Poursuite")
-## Vitesse (km/h) au début de la poursuite et au bout de `ramp_time` s. Le 4x4 tient
-## ~105-110 km/h pied au plancher sans manque (120 en descente).
+## Vitesse de croisière (km/h) au début de la poursuite et au bout de `ramp_time` s.
+## Le 4x4 tient ~105-110 km/h pied au plancher sans manque, sur le plat.
 @export var speed_start := 100.0
 @export var speed_end := 110.0
 @export var ramp_time := 600.0
@@ -33,6 +34,10 @@ enum State { IDLE, ESCORT, CHASE, STOPPED }
 @export var catch_gap := 6.0
 ## Écart (m) au début de la poursuite.
 @export var start_gap := 60.0
+## Secondes de grâce à la prise en main : elle suit notre vitesse quoi qu'on fasse.
+@export var grace_time := 4.0
+## Après un choc contre un arbre, elle roule à sa vitesse de croisière pendant ce temps.
+@export var hit_penalty_time := 4.0
 
 var state := State.IDLE
 var gap := 999.0
@@ -43,6 +48,9 @@ var _car: Node3D
 var _s := 0.0              # position le long de la route (m)
 var _t := 0.0
 var _escort_gap := 40.0
+var _speed := 100.0          # vitesse actuelle (km/h, hors rattrapage de loin)
+var _penalty := 0.0
+var _last_hits := 0
 var _visual: Node3D
 var _bar_mats: Array[StandardMaterial3D] = []
 var _bar_lights: Array[OmniLight3D] = []
@@ -84,6 +92,7 @@ func start_chase() -> void:
 	state = State.CHASE
 	chase_time = 0.0
 	_s = _car_s() - start_gap
+	_speed = _player_kmh()
 	if not _siren.playing:
 		_siren.play()
 
@@ -99,10 +108,31 @@ func get_car_position() -> Vector3:
 
 ## Vitesse actuelle de la poursuivante (km/h).
 func get_speed_kmh() -> float:
-	var v := lerpf(speed_start, speed_end, clampf(chase_time / ramp_time, 0.0, 1.0))
-	if gap > far_gap:
-		v += catch_up_bonus
-	return v
+	return _speed + (catch_up_bonus if gap > far_gap else 0.0)
+
+
+func _player_kmh() -> float:
+	var body := _car as RigidBody3D
+	return maxf(body.linear_velocity.dot(body.global_basis.z) * 3.6, 0.0) if body else 0.0
+
+
+## Vitesse visée : sa croisière, ou la nôtre si on fait de notre mieux.
+func _update_speed(delta: float) -> void:
+	var cruise := lerpf(speed_start, speed_end, clampf(chase_time / ramp_time, 0.0, 1.0))
+	var trees := get_tree().get_first_node_in_group(FallingTreeManager.GROUP) as FallingTreeManager
+	if trees and trees.tree_hits > _last_hits:
+		_last_hits = trees.tree_hits
+		_penalty = hit_penalty_time
+	_penalty = maxf(_penalty - delta, 0.0)
+	var pushing := false
+	if "throttle_input" in _car:
+		pushing = _car.throttle_input > 0.8 and _car.brake_input < 0.1 and _car.get_handbrake_amount() < 0.3
+	var target := cruise
+	if (pushing or chase_time < grace_time) and _penalty == 0.0:
+		# Le moteur bridé par le manque n'est pas une excuse : on retire ce bridage.
+		var bridle: float = minf(_car.get("drug_speed_mult") if "drug_speed_mult" in _car else 1.0, 1.0)
+		target = minf(cruise, _player_kmh() / maxf(bridle, 0.5) + 1.0)
+	_speed = move_toward(_speed, target, 30.0 * delta)
 
 
 func _car_s() -> float:
@@ -124,6 +154,7 @@ func _physics_process(delta: float) -> void:
 			_s = car_s - _escort_gap
 		State.CHASE:
 			chase_time += delta
+			_update_speed(delta)
 			_s += get_speed_kmh() / 3.6 * delta
 		State.STOPPED:
 			pass   # reste sur place
