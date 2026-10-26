@@ -50,6 +50,7 @@ var _end_time := 0.0
 var _autopilot := false
 var _drone: Node3D
 var _drone_t := 0.0
+var _drone_fwd := Vector3.ZERO
 var _origin: Node3D
 var _trees: FallingTreeManager
 
@@ -172,9 +173,12 @@ func _begin_aerial() -> void:
 	_drone.name = "IntroDrone"
 	get_parent().add_child(_drone)
 	_drone_t = 0.0
+	_drone_fwd = Vector3.ZERO
 	_update_drone(0.0)
 	_origin.reparent(_drone, false)
 	_origin.transform = Transform3D.IDENTITY
+	if _is_vr():
+		_car.recenter_view()   # regard vers l'avant de la route, donc vers les voitures
 
 
 func _end_aerial() -> void:
@@ -193,24 +197,34 @@ func _update_drone(delta: float) -> void:
 	var k := smoothstep(0.0, 1.0, clampf(_drone_t / aerial_time, 0.0, 1.0))
 	if _pursuer and _pursuer.state == Pursuer.State.ESCORT:
 		_pursuer.set_escort_gap(lerpf(55.0, 28.0, k))   # elle se rapproche
-	var fwd := _car.global_basis.z
-	fwd.y = 0.0
-	fwd = fwd.normalized()
-	var left := Vector3.UP.cross(fwd)
+	# Direction de la route (et non du 4x4, qui oscille avec le pilote automatique),
+	# lissée : la caméra ne tourne que doucement dans les virages.
 	var car_pos := _car.global_position
-	if _is_vr():
-		# À niveau, en hauteur, un peu derrière et sur le côté : les deux voitures en dessous.
-		var p := car_pos + left * 7.0 + Vector3.UP * 13.0 - fwd * 26.0
-		_drone.global_transform = Transform3D(Basis.looking_at(fwd, Vector3.UP), p)
-		return
-	# Bureau : de côté et en hauteur, centré entre les deux voitures, puis la caméra
-	# glisse derrière le 4x4.
+	var dir := _car.global_basis.z
+	var road := _pills.get_road() if _pills else null
+	if road:
+		var s := road.sample_road(car_pos)
+		if s["found"]:
+			dir = s["dir"]
+	dir.y = 0.0
+	dir = dir.normalized()
+	_drone_fwd = dir if _drone_fwd == Vector3.ZERO else _drone_fwd.slerp(dir, clampf(delta * 1.5, 0.0, 1.0)).normalized()
+	var fwd := _drone_fwd
+	var left := Vector3.UP.cross(fwd)
 	var pursuer_pos := _pursuer.get_car_position() if _pursuer else car_pos - fwd * 50.0
 	var mid := (car_pos + pursuer_pos) * 0.5
-	var from := mid + left * 30.0 + Vector3.UP * 15.0 - fwd * 6.0
-	var to := car_pos + left * 3.0 + Vector3.UP * 6.0 - fwd * 13.0
+	if _is_vr():
+		# À niveau (jamais de tangage imposé), derrière la poursuivante et en hauteur :
+		# les deux voitures sont devant, un peu en dessous du regard.
+		var p := pursuer_pos + Vector3.UP * 10.0 - fwd * 18.0
+		_drone.global_transform = Transform3D(Basis.looking_at(fwd, Vector3.UP), p)
+		return
+	# Bureau : au-dessus de la route, derrière la poursuivante (jamais dans le relief du
+	# bord de route), puis la caméra glisse jusque derrière le 4x4.
+	var from := pursuer_pos + left * 3.0 + Vector3.UP * 12.0 - fwd * 22.0
+	var to := car_pos + left * 2.0 + Vector3.UP * 6.0 - fwd * 13.0
 	var pos := from.lerp(to, k)
-	var look := mid.lerp(car_pos + fwd * 25.0, k)
+	var look := (mid + fwd * 5.0).lerp(car_pos + fwd * 25.0, k)
 	_drone.global_transform = Transform3D(Basis.looking_at(look - pos, Vector3.UP), pos)
 
 

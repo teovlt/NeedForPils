@@ -49,6 +49,11 @@ func _ready():
 		# Force le mode VR opaque (pas de passthrough)
 		xr_interface.session_begun.connect(_set_opaque)
 		_set_opaque()
+		# Vue recentrée : le panneau pile en face, où qu'on soit dans la pièce.
+		xr_interface.session_begun.connect(func(): get_tree().create_timer(0.5).timeout.connect(_recenter))
+		if xr_interface.has_signal("pose_recentered"):
+			xr_interface.pose_recentered.connect(_recenter)
+		_recenter.call_deferred()
 	else:
 		_setup_desktop()
 
@@ -114,6 +119,10 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 # ------------------------------------------------------------------ VR
+
+func _recenter() -> void:
+	XRServer.center_on_hmd(XRServer.RESET_BUT_KEEP_TILT, true)
+
 
 # Si la référence d'espace n'est pas au niveau du sol (la tête est alors vers y = 0),
 # on remonte l'origine XR pour que le sol virtuel corresponde au vrai sol.
