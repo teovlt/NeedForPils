@@ -75,6 +75,8 @@ func _run_intro() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame   # le joueur est installé au volant, la caméra existe
 	if not play_intro:
+		_set_paused(true)
+		await _wait_engine_start()
 		_start_chase()
 		return
 	# Pendant l'intro, le 4x4 roule tout seul ; ni pilules, ni arbres, ni manque.
@@ -97,9 +99,23 @@ func _run_intro() -> void:
 	await _fade_curtain(1.0, 0.7)
 	_end_aerial()
 	_autopilot = false
-	_start_chase()
+	if _car:
+		_car.external_input = false
 	await _fade_curtain(0.0, 0.8)
+	await _wait_engine_start()
+	_start_chase()
 	await _say("PRENDS LE VOLANT !", _controls_text(), 4.5)
+
+
+## Le 4x4 part moteur coupé : la poursuite ne commence qu'une fois le moteur
+## démarré (il faut d'abord trouver les clés).
+func _wait_engine_start() -> void:
+	if _car == null or _car.is_engine_running():
+		return
+	_show("DÉMARRE !", "Trouve les clés et démarre le moteur.")
+	while not _car.is_engine_running():
+		await get_tree().process_frame
+	_text_target = 0.0
 
 
 func _start_chase() -> void:
