@@ -10,6 +10,7 @@
 [ext_resource type="Script" path="res://interaction/storage_zone.gd" id="8_zone"]
 [ext_resource type="PackedScene" path="res://props/items/pill_bag_item.tscn" id="9_bag"]
 [ext_resource type="PackedScene" path="res://props/items/cigarette_item.tscn" id="11_cig"]
+[ext_resource type="PackedScene" path="res://props/items/lighter_item.tscn" id="11_lighter"]
 [ext_resource type="PackedScene" path="res://props/items/joint_item.tscn" id="12_joint"]
 [ext_resource type="PackedScene" path="res://props/items/phone_item.tscn" id="13_phone"]
 [ext_resource type="PackedScene" path="res://props/items/gps_item.tscn" id="14_gps"]
@@ -349,6 +350,9 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.05, 0, -0.08)
 
 [node name="Joint" parent="Storage/Console" instance=ExtResource("12_joint")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.055, 0, 0.12)
+
+[node name="Lighter" parent="Storage/Console" instance=ExtResource("11_lighter")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.01, -0.15)
 
 [node name="GPSMount" type="Node3D" parent="Storage"]
 transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0.12, 1.261, 0.782)

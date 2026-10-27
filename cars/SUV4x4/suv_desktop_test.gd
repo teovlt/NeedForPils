@@ -7,7 +7,7 @@ extends Node3D
 
 @export var autotest := false
 ## Scénario du test automatique : "objets" (rangements) ou "arbres".
-@export_enum("objets", "arbres", "aleatoire", "phares", "retros", "portes", "boite", "combine", "essuie", "plafonnier", "nature", "pluie", "balayage", "menu", "lunette", "moteur", "klaxon", "vitres", "ceinture", "cle", "depart", "pare_soleil", "cle_f", "physique", "eclairage", "radio", "radio_nuit", "radio_pwr", "ambiance", "rangements", "ceintures", "vitesses", "sapins", "balises", "playlist", "animaux", "pochette", "lieu", "police", "manque", "zoo", "balade", "klaxon_animaux", "police_vue", "pochette_places") var autotest_scenario := "objets"
+@export_enum("objets", "arbres", "aleatoire", "phares", "retros", "portes", "boite", "combine", "essuie", "plafonnier", "nature", "pluie", "balayage", "menu", "lunette", "moteur", "klaxon", "vitres", "ceinture", "cle", "depart", "pare_soleil", "cle_f", "physique", "eclairage", "radio", "radio_nuit", "radio_pwr", "ambiance", "rangements", "ceintures", "vitesses", "sapins", "balises", "playlist", "animaux", "pochette", "lieu", "police", "manque", "zoo", "balade", "klaxon_animaux", "police_vue", "pochette_places", "briquet") var autotest_scenario := "objets"
 
 @onready var car: SUV4x4 = $SUV4x4
 @onready var cam: Camera3D = $Camera3D
@@ -126,6 +126,8 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_police_view(delta)
 		elif autotest_scenario == "pochette_places":
 			_run_autotest_bag_places(delta)
+		elif autotest_scenario == "briquet":
+			_run_autotest_lighter(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -3532,3 +3534,59 @@ func _run_autotest_bag_places(delta: float) -> void:
 	if fmod(_t - 1.0, 1.0) > 0.85 and not has_meta("bps%d" % i):
 		set_meta("bps%d" % i, true)
 		_shot("pochette_place_%d" % i)
+
+
+# --- Briquet : rangé au hasard, attrapé, allumé / éteint ---------------------------
+
+func _run_autotest_lighter(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	$Weather.random_events = false
+	$FallingTrees.enabled = false
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = false
+	var lt := car.find_child("Lighter", true, false) as RigidBody3D
+	if at.call(0.05):
+		$Weather.hour = 21.5   # nuit : on voit la lumière de la flamme
+		$Weather.set_weather("degage", true)
+	if at.call(0.5):
+		var where := PackedStringArray()
+		for i in 8:
+			car.get_node("Storage").randomize_items()
+			var z := lt.get_parent()
+			where.append(str(z.get("zone_name")) if z.get("zone_name") else "en vrac")
+		_log("AUTOTEST briquet rangé (8 tirages) : %s ; boîte %s" % [", ".join(where), (lt.get_node("Grab") as VRPickable).get_local_aabb().size])
+		_shot("briquet_0_range")
+	if at.call(1.5):
+		if _hand == null:
+			_hand = Node3D.new()
+			add_child(_hand)
+		_held = lt.get_node("Grab")
+		_hand.global_transform = Transform3D(car.global_basis, lt.global_position)
+		_held.grab(_hand)
+		_log("AUTOTEST briquet attrapé=%s" % _held.is_grabbed())
+	if _t > 1.5 and _t < 5.0 and _held:
+		_hand.global_transform = Transform3D(car.global_basis, car.to_global(Vector3(-0.45, 1.15, 0.1)))
+		_held._on_grab_update(_hand)
+	var g := lt.get_node("Grab") as Lighter
+	if at.call(2.2):
+		g.toggle()
+		_log("AUTOTEST F -> allumé=%s, flamme visible=%s" % [g.lit, g._flame.visible if g._flame else null])
+	if _t > 1.6 and _t < 4.8:
+		cam.fov = 45.0
+		cam.global_position = lt.global_position + car.global_basis * Vector3(0.12, 0.08, -0.2)
+		cam.look_at(lt.global_position + car.global_basis.y * 0.06)
+	if at.call(3.0):
+		_shot("briquet_1_allume")
+		_log("AUTOTEST briquet en main : local voiture %s, main %s, caméra %s" % [car.to_local(lt.global_position), car.to_local(_hand.global_position), car.to_local(cam.global_position)])
+	if at.call(3.5):
+		g.toggle()
+		_log("AUTOTEST F -> allumé=%s" % g.lit)
+		g.toggle()
+	if at.call(4.2):
+		_release_item()
+		_log("AUTOTEST lâché -> allumé=%s, posé dans %s" % [g.lit, lt.get_parent().name])
+	if at.call(5.5):
+		get_tree().quit()
