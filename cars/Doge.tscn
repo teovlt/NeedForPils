@@ -1,8 +1,13 @@
 [gd_scene format=3 uid="uid://ci52bv1m15cbs"]
 
-[ext_resource type="PackedScene" uid="uid://duy0dbkychify" path="res://voiture/BaseCar.tscn" id="1_cfkas"]
-[ext_resource type="PackedScene" uid="uid://benmjny2guowm" path="res://voiture/Models/Doge/Wheel.glb" id="2_eoiid"]
-[ext_resource type="PackedScene" uid="uid://bty2rpvw2dh0h" path="res://voiture/Models/Doge/doge-body.glb" id="3_om8jj"]
+[ext_resource type="PackedScene" uid="uid://duy0dbkychify" path="res://cars/BaseCar.tscn" id="1_cfkas"]
+[ext_resource type="PackedScene" uid="uid://benmjny2guowm" path="res://cars/Models/Doge/Wheel.glb" id="2_eoiid"]
+[ext_resource type="Script" uid="uid://kuxqh057vr5y" path="res://addons/godot-xr-tools/functions/movement_turn.gd" id="3_bflf5"]
+[ext_resource type="PackedScene" uid="uid://bty2rpvw2dh0h" path="res://cars/Models/Doge/doge-body.glb" id="3_om8jj"]
+[ext_resource type="PackedScene" uid="uid://l2n30mpbkdyw" path="res://addons/godot-xr-tools/hands/scenes/lowpoly/right_hand_low.tscn" id="4_08h6l"]
+[ext_resource type="Script" uid="uid://b18kkstg643yw" path="res://addons/godot-xr-tools/functions/function_pickup.gd" id="5_7xqq0"]
+[ext_resource type="Script" uid="uid://dc4hg8kq5ia5y" path="res://addons/godot-xr-tools/functions/movement_direct.gd" id="6_evmhu"]
+[ext_resource type="PackedScene" uid="uid://b4kad2kuba1yn" path="res://addons/godot-xr-tools/hands/scenes/lowpoly/left_hand_low.tscn" id="7_wxqxt"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_n7qdn"]
 radius = 0.291194
@@ -13,64 +18,116 @@ size = Vector3(0.542114, 1.7092, 1.53265)
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_7kmqy"]
 radius = 0.363529
 
-[node name="car" instance=ExtResource("1_cfkas")]
+[node name="car" unique_id=343289149 instance=ExtResource("1_cfkas")]
 STEER_LIMIT = 0.4
-engine_force_value = 50
+engine_force_value = 40.0
 
-[node name="wheal0" parent="." index="0"]
+[node name="wheal0" parent="." index="0" unique_id=113553420]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.997421, 0.340338, -1.50006)
 wheel_radius = 0.37
 wheel_rest_length = 0.095
 suspension_travel = 0.357
 
-[node name="Wheel" parent="wheal0" index="0" instance=ExtResource("2_eoiid")]
+[node name="Wheel" parent="wheal0" index="0" unique_id=1740107756 instance=ExtResource("2_eoiid")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.142656, 0, 0)
 
-[node name="wheal1" parent="." index="1"]
+[node name="wheal1" parent="." index="1" unique_id=389776708]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.02668, 0.340338, -1.50006)
 wheel_radius = 0.37
 wheel_rest_length = 0.095
 suspension_travel = 0.357
 
-[node name="Wheel" parent="wheal1" index="0" instance=ExtResource("2_eoiid")]
+[node name="Wheel" parent="wheal1" index="0" unique_id=1790070529 instance=ExtResource("2_eoiid")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.0775136, 0, 0)
 
-[node name="wheal2" parent="." index="2"]
+[node name="wheal2" parent="." index="2" unique_id=236629858]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.997421, 0.286814, 1.26411)
 wheel_radius = 0.37
 wheel_rest_length = 0.095
 suspension_travel = 0.357
 
-[node name="Wheel" parent="wheal2" index="0" instance=ExtResource("2_eoiid")]
+[node name="Wheel" parent="wheal2" index="0" unique_id=1554849425 instance=ExtResource("2_eoiid")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.142656, 0, 0)
 
-[node name="wheal3" parent="." index="3"]
+[node name="wheal3" parent="." index="3" unique_id=2009624742]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.02668, 0.286814, 1.26411)
 wheel_radius = 0.37
 wheel_rest_length = 0.095
 suspension_travel = 0.357
 
-[node name="Wheel" parent="wheal3" index="0" instance=ExtResource("2_eoiid")]
+[node name="Wheel" parent="wheal3" index="0" unique_id=1911050470 instance=ExtResource("2_eoiid")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.0775136, 0, 0)
 
-[node name="CollisionShape3D" parent="." index="4"]
+[node name="CollisionShape3D" parent="." index="4" unique_id=151482881]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.0026385, 0.827398, 0.719927)
 
-[node name="Camera3D" parent="look" index="0"]
+[node name="Camera3D" parent="look" parent_id_path=PackedInt32Array(1776060611) index="0" unique_id=1607301646]
+transform = Transform3D(1, 0, 0, 0, 0.9743465, 0.22505292, 0, -0.22505292, 0.9743465, 0, 1.97324, 5.174017)
+visible = false
+current = false
 target_distance = 5
-speed = 10.0
 
-[node name="doge-body" parent="." index="7" instance=ExtResource("3_om8jj")]
-transform = Transform3D(-1, 0, -8.74228e-08, 0, 1, 0, 8.74228e-08, 0, -1, 0, 0, 0)
+[node name="DriverEyes" type="Marker3D" parent="look" parent_id_path=PackedInt32Array(1776060611) index="1" unique_id=1701775629]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.3461336, -0.1723535, 0.40039036)
 
-[node name="CollisionShape3D2" type="CollisionShape3D" parent="." index="8"]
-transform = Transform3D(-4.37114e-08, -1, 0, 1, -4.37114e-08, 0, 0, 0, 1, 0, 0.590649, -2.08042)
+[node name="XROrigin3D" type="XROrigin3D" parent="look" parent_id_path=PackedInt32Array(1776060611) index="2" unique_id=1948368691]
+transform = Transform3D(1, 0, 0, 0, 0.9743466, 0.22505294, 0, -0.22505294, 0.9743466, 0, -0.75702643, 0.18095207)
+current = true
+
+[node name="XRCamera3D" type="XRCamera3D" parent="look/XROrigin3D" index="0" unique_id=1762433658]
+transform = Transform3D(1, 0, 0, 0, 0.99999994, 0, 0, 0, 0.99999994, -0.4145065, 0.5789083, 0.33372638)
+current = true
+fov = 71.54478
+
+[node name="RightHand" type="XRController3D" parent="look/XROrigin3D" index="1" unique_id=428970274]
+transform = Transform3D(1, 0, 0, 0, 0.99999964, -2.9802322e-08, 0, 2.9802322e-08, 0.99999964, -0.07964927, 0.3986067, 0.06059906)
+tracker = &"right_hand"
+pose = &"grip"
+
+[node name="RightHand" parent="look/XROrigin3D/RightHand" index="0" unique_id=1199664352 instance=ExtResource("4_08h6l")]
+transform = Transform3D(1, 0, 0, 0, 1.0000008, 4.4703484e-08, 0, -4.4703484e-08, 1.0000008, -0.04078436, -0.010407925, -0.01637812)
+
+[node name="XRToolsFunctionPickup" type="Node3D" parent="look/XROrigin3D/RightHand" index="1" unique_id=351097855]
+transform = Transform3D(1, 0, 0, 0, 0.70710707, 0.70710707, 0, -0.70710707, 0.70710707, -0.03530491, 0.0026794672, -0.011600256)
+script = ExtResource("5_7xqq0")
+metadata/_custom_type_script = "uid://b18kkstg643yw"
+
+[node name="XRToolsMovementTurn" type="Node3D" parent="look/XROrigin3D/RightHand" index="2" unique_id=682227455 groups=["movement_providers"]]
+transform = Transform3D(1, 0, 0, 0, 1.0000011, 1.4901161e-08, 0, -1.4901161e-08, 1.0000011, -0.038306847, 0.0039408207, -0.017061442)
+script = ExtResource("3_bflf5")
+turn_mode = 2
+enabled = false
+metadata/_custom_type_script = "uid://kuxqh057vr5y"
+
+[node name="LeftHand" type="XRController3D" parent="look/XROrigin3D" index="2" unique_id=1344529225]
+transform = Transform3D(1, 0, 0, 0, 0.99999976, -1.4901161e-08, 0, 1.4901161e-08, 0.99999976, -0.6358761, 0.39053425, 0.09766716)
+tracker = &"left_hand"
+pose = &"grip"
+
+[node name="LeftHand" parent="look/XROrigin3D/LeftHand" index="0" unique_id=995268345 instance=ExtResource("7_wxqxt")]
+
+[node name="XRToolsFunctionPickup" type="Node3D" parent="look/XROrigin3D/LeftHand" index="1" unique_id=1773395916]
+transform = Transform3D(1, 0, 0, 0, 0.70710677, 0.70710677, 0, -0.70710677, 0.70710677, 0, 0, 0)
+script = ExtResource("5_7xqq0")
+metadata/_custom_type_script = "uid://b18kkstg643yw"
+
+[node name="XRToolsMovementDirect" type="Node3D" parent="look/XROrigin3D/LeftHand" index="2" unique_id=1903035066 groups=["movement_providers"]]
+transform = Transform3D(1, 0, 0, 0, 1.0000002, 1.4901161e-08, 0, -1.4901161e-08, 1.0000002, 0, 0, 0)
+script = ExtResource("6_evmhu")
+enabled = false
+metadata/_custom_type_script = "uid://dc4hg8kq5ia5y"
+
+[node name="doge-body" parent="." index="6" unique_id=2005161308 instance=ExtResource("3_om8jj")]
+transform = Transform3D(-1, 0, -1.509958e-07, 0, 1, 0, 1.509958e-07, 0, -1, 0, 0, 0)
+
+[node name="CollisionShape3D2" type="CollisionShape3D" parent="." index="7" unique_id=1106424375]
+transform = Transform3D(-4.371139e-08, -1, 0, 1, -4.371139e-08, 0, 0, 0, 1, 0, 0.590649, -2.08042)
 shape = SubResource("CapsuleShape3D_n7qdn")
 
-[node name="CollisionShape3D3" type="CollisionShape3D" parent="." index="9"]
-transform = Transform3D(-4.37114e-08, -1, 0, 1, -4.37114e-08, 0, 0, 0, 1, -0.000778168, 0.603737, -1.11035)
+[node name="CollisionShape3D3" type="CollisionShape3D" parent="." index="8" unique_id=1646347506]
+transform = Transform3D(-4.371139e-08, -1, 0, 1, -4.371139e-08, 0, 0, 0, 1, -0.000778168, 0.603737, -1.11035)
 shape = SubResource("BoxShape3D_xaafv")
 
-[node name="CollisionShape3D4" type="CollisionShape3D" parent="." index="10"]
-transform = Transform3D(-4.37114e-08, -1, 0, 1, -4.37114e-08, 0, 0, 0, 1, -0.000778168, 0.653567, 1.99781)
+[node name="CollisionShape3D4" type="CollisionShape3D" parent="." index="9" unique_id=1249504064]
+transform = Transform3D(-4.371139e-08, -1, 0, 1, -4.371139e-08, 0, 0, 0, 1, -0.000778168, 0.653567, 1.99781)
 shape = SubResource("CapsuleShape3D_7kmqy")

@@ -92,8 +92,11 @@ const LIGHT_MODES := ["OFF", "AUTO", "CODES", "PHARES", "PHARES + BARRE"]
 @export var player_path: NodePath
 @export var seat_player_on_ready := true
 @export var keyboard_controls := true
-## Si vrai, throttle_input / brake_input sont pilotés par un autre script (IA, test...).
+## Si vrai, throttle_input / brake_input / external_steer sont pilotés par un autre
+## script (IA, test, pilote automatique de l'intro...).
 @export var external_input := false
+## Direction (-1 à 1, + = gauche) quand external_input est vrai.
+var external_steer := 0.0
 
 ## Ceintures des places autres que le conducteur (repère de la voiture). Passager : symétrique
 ## du conducteur (boucle contre la console) ; arrière gauche / droite : 3 points, renvoi
@@ -218,6 +221,12 @@ var auto_gear := 0        # rapport interne de la boîte auto (0 = 1re, 5 = 6e)
 var shift_timer := 0.0    # > 0 pendant un passage de rapport
 var _kickdown_lock := 0.0
 var engine_sound: AudioStreamPlayer3D   # bruit du moteur (EngineSound ; régime : engine_sound.rpm)
+## Effets des pilules, réglés à chaque image par PillAddiction : multiplicateurs de
+## vitesse max / couple (boost, manque) et perturbation de la direction (bourré).
+var drug_speed_mult := 1.0
+var drug_torque_mult := 1.0
+var drug_steer_offset := 0.0   # rad, ajouté au braquage
+var drug_steer_lag := 0.0      # 0 = direction normale, 1 = roues très en retard sur le volant
 var _weather: WeatherSystem
 var _auto_low_on := false
 var _lights_state := -1   # combinaison allumée (bits : 1 codes, 2 pleins phares, 4 barre)
@@ -543,10 +552,11 @@ func _physics_process(delta: float) -> void:
 
 func _update_steering() -> void:
 	if not steering_wheel.is_grabbed():
-		steering_wheel.set_steer_input(_kb_steer)
+		steering_wheel.set_steer_input(external_steer if external_input else _kb_steer)
 	var speed_ratio := clampf(absf(forward_speed) * 3.6 / steer_ref_speed_kmh, 0.0, 1.0)
 	var steer_limit := deg_to_rad(max_steer_angle_deg) * (1.0 - high_speed_steer_reduction * speed_ratio)
-	steering = steering_wheel.get_steer() * steer_limit
+	var target := steering_wheel.get_steer() * steer_limit + drug_steer_offset
+	steering = lerpf(steering, target, 1.0 - drug_steer_lag * 0.95)
 
 
 ## Boîte auto à 6 rapports : monte les rapports selon le régime et l'accélérateur,
@@ -613,7 +623,7 @@ func _update_drive() -> void:
 	var force := 0.0
 	var extra_brake := 0.0
 	if direction != 0.0:
-		var max_ms := gear_max_speed_kmh[gear] / 3.6
+		var max_ms := gear_max_speed_kmh[gear] / 3.6 * (drug_speed_mult if direction > 0.0 else 1.0)
 		var speed_in_dir := forward_speed * direction
 		if throttle_input > 0.05:
 			# La poussée diminue en approchant de la vitesse max du rapport.
@@ -624,9 +634,9 @@ func _update_drive() -> void:
 				mult = auto_gear_torque[auto_gear]
 				if shift_timer > 0.0:
 					mult *= 0.35   # passage de rapport : la poussée retombe un instant
-			force = throttle_input * engine_force_per_wheel * mult * limiter
+			force = throttle_input * engine_force_per_wheel * mult * limiter * drug_torque_mult
 			# puissance limitée : à haute vitesse, la poussée diminue (P = F × v)
-			force = minf(force, max_power_kw * 250.0 / maxf(absf(forward_speed), 3.0))
+			force = minf(force, max_power_kw * 250.0 / maxf(absf(forward_speed), 3.0) * drug_torque_mult)
 			force *= direction
 		if speed_in_dir > max_ms + 1.0:
 			extra_brake = engine_brake   # rétrogradage à haute vitesse : frein moteur
@@ -857,6 +867,11 @@ func get_hazards() -> FallingTreeManager:
 ## Secondes restantes de l'alerte « CHOC ! » après avoir percuté un arbre.
 func get_hit_flash() -> float:
 	return _hit_flash
+
+
+## Dépendance aux pilules (PillAddiction), ou null s'il n'y en a pas dans la scène.
+func get_addiction() -> PillAddiction:
+	return get_tree().get_first_node_in_group(PillAddiction.GROUP) as PillAddiction
 
 
 ## Phares réellement allumés : {low, high, bar}.

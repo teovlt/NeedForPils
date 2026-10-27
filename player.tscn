@@ -5,7 +5,6 @@
 [ext_resource type="Script" uid="uid://dc4hg8kq5ia5y" path="res://addons/godot-xr-tools/functions/movement_direct.gd" id="2_sweqy"]
 [ext_resource type="Script" uid="uid://b18kkstg643yw" path="res://addons/godot-xr-tools/functions/function_pickup.gd" id="3_1jxqw"]
 [ext_resource type="PackedScene" uid="uid://diyu06cw06syv" path="res://addons/godot-xr-tools/player/player_body.tscn" id="3_2hs0m"]
-[ext_resource type="Script" uid="uid://ck4yn3hxuobj7" path="res://addons/godot-xr-tools/player/player_body.gd" id="4_1jxqw"]
 [ext_resource type="PackedScene" uid="uid://b4kad2kuba1yn" path="res://addons/godot-xr-tools/hands/scenes/lowpoly/left_hand_low.tscn" id="6_1jxqw"]
 
 [ext_resource type="Script" path="res://interaction/vr_hand_interactor.gd" id="9_hand"]
@@ -18,14 +17,6 @@
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.3746462, 0)
 
 [node name="XRCamera3D" type="XRCamera3D" parent="XROrigin3D" unique_id=902689131]
-current = true
-
-[node name="XRToolsPlayerBody" type="CharacterBody3D" parent="XROrigin3D/XRCamera3D" unique_id=1715741457]
-script = ExtResource("4_1jxqw")
-player_radius = 0.35
-player_height_min = 1.0
-player_height_max = 2.1
-metadata/_custom_type_script = "uid://ck4yn3hxuobj7"
 
 [node name="RightHand" type="XRController3D" parent="XROrigin3D" unique_id=1618150330]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.478861, 0.468292, -0.241097)

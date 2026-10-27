@@ -178,6 +178,12 @@ func _update_visual() -> void:
 
 func _ensure_built() -> void:
 	if _built:
+		# un mesh a été libéré depuis (pièce supprimée ou déplacée) : on reconstruit
+		for m in _meshes:
+			if not is_instance_valid(m):
+				refresh_meshes()
+				break
+	if _built:
 		return
 	_built = true
 	_outline_mat = ShaderMaterial.new()

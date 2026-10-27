@@ -1,0 +1,187 @@
+[gd_scene format=3 uid="uid://d3bqqqw3mo58e"]
+
+[ext_resource type="Script" uid="uid://oxk2wx07xqwl" path="res://menu/main_menu.gd" id="1_menu"]
+[ext_resource type="PackedScene" uid="uid://clujaf3u776a3" path="res://addons/godot-xr-tools/objects/viewport_2d_in_3d.tscn" id="2_vp"]
+[ext_resource type="PackedScene" path="res://menu/main_menu_ui.tscn" id="3_ui"]
+[ext_resource type="PackedScene" uid="uid://cqhw276realc" path="res://addons/godot-xr-tools/functions/function_pointer.tscn" id="4_ptr"]
+[ext_resource type="PackedScene" uid="uid://b4kad2kuba1yn" path="res://addons/godot-xr-tools/hands/scenes/lowpoly/left_hand_low.tscn" id="5_lh"]
+[ext_resource type="PackedScene" uid="uid://l2n30mpbkdyw" path="res://addons/godot-xr-tools/hands/scenes/lowpoly/right_hand_low.tscn" id="6_rh"]
+[ext_resource type="Script" uid="uid://bp3nd2gn0ool1" path="res://menu/forest_generator.gd" id="7_forest"]
+[ext_resource type="AudioStream" uid="uid://coeny862jla1m" path="res://menu/audio/menu_music.ogg" id="8_music"]
+[ext_resource type="AudioStream" uid="uid://dg3656o53aipf" path="res://menu/audio/forest_ambience.ogg" id="9_amb"]
+[ext_resource type="PackedScene" uid="uid://d2hc5k4wugbvn" path="res://cars/SUV4x4/suv_4x4.glb" id="10_body"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_menu"]
+sky_top_color = Color(0.12, 0.2, 0.38, 1)
+sky_horizon_color = Color(0.85, 0.6, 0.4, 1)
+ground_bottom_color = Color(0.05, 0.08, 0.05, 1)
+ground_horizon_color = Color(0.45, 0.45, 0.38, 1)
+sun_angle_max = 20.0
+
+[sub_resource type="Sky" id="Sky_menu"]
+sky_material = SubResource("ProceduralSkyMaterial_menu")
+
+[sub_resource type="Environment" id="Environment_menu"]
+background_mode = 2
+sky = SubResource("Sky_menu")
+ambient_light_source = 3
+ambient_light_energy = 0.7
+tonemap_mode = 2
+fog_enabled = true
+fog_light_color = Color(0.48, 0.55, 0.5, 1)
+fog_density = 0.025
+fog_sky_affect = 0.3
+
+[sub_resource type="Gradient" id="Gradient_grass"]
+offsets = PackedFloat32Array(0, 0.5, 1)
+colors = PackedColorArray(0.12, 0.22, 0.08, 1, 0.2, 0.33, 0.12, 1, 0.3, 0.32, 0.16, 1)
+
+[sub_resource type="FastNoiseLite" id="FastNoiseLite_grass"]
+frequency = 0.02
+
+[sub_resource type="NoiseTexture2D" id="NoiseTexture2D_grass"]
+width = 256
+height = 256
+noise = SubResource("FastNoiseLite_grass")
+color_ramp = SubResource("Gradient_grass")
+seamless = true
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ground"]
+albedo_texture = SubResource("NoiseTexture2D_grass")
+uv1_scale = Vector3(30, 30, 30)
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_ground"]
+material = SubResource("StandardMaterial3D_ground")
+size = Vector2(260, 260)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_firefly"]
+shading_mode = 0
+albedo_color = Color(0.85, 1, 0.4, 1)
+
+[sub_resource type="SphereMesh" id="SphereMesh_firefly"]
+material = SubResource("StandardMaterial3D_firefly")
+radius = 0.015
+height = 0.03
+radial_segments = 6
+rings = 3
+
+[sub_resource type="Curve" id="Curve_firefly"]
+_data = [Vector2(0, 0), 0.0, 0.0, 0, 0, Vector2(0.5, 1), 0.0, 0.0, 0, 0, Vector2(1, 0), 0.0, 0.0, 0, 0]
+point_count = 3
+
+[node name="MainMenu" type="Node3D" unique_id=820694293]
+script = ExtResource("1_menu")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=431877481]
+environment = SubResource("Environment_menu")
+
+[node name="Sun" type="DirectionalLight3D" parent="." unique_id=1884586116]
+transform = Transform3D(-0.8660254, -0.23473582, 0.44147384, 0, 0.88294756, 0.46947157, -0.50000006, 0.4065743, -0.764655, 0, 0, 0)
+light_color = Color(1, 0.85, 0.65, 1)
+light_energy = 1.1
+shadow_enabled = true
+directional_shadow_max_distance = 40.0
+
+[node name="Ground" type="MeshInstance3D" parent="." unique_id=1107706563]
+mesh = SubResource("PlaneMesh_ground")
+
+[node name="Forest" type="Node3D" parent="." unique_id=2097058679]
+script = ExtResource("7_forest")
+
+[node name="XROrigin3D" type="XROrigin3D" parent="." unique_id=1350259011]
+
+[node name="XRCamera3D" type="XRCamera3D" parent="XROrigin3D" unique_id=406801753]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.7, 0)
+
+[node name="LeftHand" type="XRController3D" parent="XROrigin3D" unique_id=1656515164]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.3, 1.2, -0.3)
+tracker = &"left_hand"
+pose = &"grip"
+
+[node name="LeftHand" parent="XROrigin3D/LeftHand" unique_id=1824651493 instance=ExtResource("5_lh")]
+
+[node name="RightHand" type="XRController3D" parent="XROrigin3D" unique_id=1694133513]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.3, 1.2, -0.3)
+tracker = &"right_hand"
+pose = &"grip"
+
+[node name="RightHand" parent="XROrigin3D/RightHand" unique_id=793899465 instance=ExtResource("6_rh")]
+
+[node name="LeftAim" type="XRController3D" parent="XROrigin3D" unique_id=1580508796]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.3, 1.2, -0.3)
+tracker = &"left_hand"
+pose = &"aim"
+
+[node name="FunctionPointer" parent="XROrigin3D/LeftAim" unique_id=977322642 instance=ExtResource("4_ptr")]
+show_target = true
+
+[node name="RightAim" type="XRController3D" parent="XROrigin3D" unique_id=746601368]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.3, 1.2, -0.3)
+tracker = &"right_hand"
+pose = &"aim"
+
+[node name="FunctionPointer" parent="XROrigin3D/RightAim" unique_id=105803169 instance=ExtResource("4_ptr")]
+show_target = true
+
+[node name="DesktopCamera" type="Camera3D" parent="." unique_id=578646503]
+transform = Transform3D(1, 0, 0, 0, 0.9975641, 0.06975647, 0, -0.06975647, 0.9975641, 0, 1.7, 0)
+fov = 70.0
+
+[node name="MenuPanel" parent="." unique_id=1502497858 instance=ExtResource("2_vp")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.05, -2.2)
+screen_size = Vector2(1.8, 1.2)
+scene = ExtResource("3_ui")
+viewport_size = Vector2(1500, 1000)
+transparent = 1
+unshaded = true
+scene_properties_keys = PackedStringArray("main_menu_ui.gd")
+
+[node name="CarShowcase" type="Node3D" parent="." unique_id=1446053486]
+transform = Transform3D(-0.8660254, 0, 0.50000006, 0, 1, 0, -0.50000006, 0, -0.8660254, 0.3, 0.05, -5.8)
+
+[node name="Body" parent="CarShowcase" unique_id=373975721 instance=ExtResource("10_body")]
+transform = Transform3D(-1, 0, -8.742278e-08, 0, 1, 0, 8.742278e-08, 0, -1, 0, 0, 0)
+
+[node name="HeadlightL" type="SpotLight3D" parent="CarShowcase" unique_id=1552164594]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.65, 0.95, -2.45)
+light_color = Color(1, 0.95, 0.8, 1)
+light_energy = 3.0
+spot_range = 15.0
+spot_angle = 25.0
+
+[node name="HeadlightR" type="SpotLight3D" parent="CarShowcase" unique_id=1042036746]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.65, 0.95, -2.45)
+light_color = Color(1, 0.95, 0.8, 1)
+light_energy = 3.0
+spot_range = 15.0
+spot_angle = 25.0
+
+[node name="ShowcaseLight" type="OmniLight3D" parent="CarShowcase" unique_id=1548396013]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3, 0)
+light_color = Color(1, 0.85, 0.6, 1)
+light_energy = 1.5
+omni_range = 6.0
+
+[node name="Fireflies" type="CPUParticles3D" parent="." unique_id=2073166257]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, -5)
+cast_shadow = 0
+amount = 80
+lifetime = 6.0
+preprocess = 6.0
+mesh = SubResource("SphereMesh_firefly")
+emission_shape = 3
+emission_box_extents = Vector3(14, 1.5, 14)
+direction = Vector3(0, 1, 0)
+spread = 180.0
+gravity = Vector3(0, 0, 0)
+initial_velocity_min = 0.05
+initial_velocity_max = 0.25
+scale_amount_curve = SubResource("Curve_firefly")
+
+[node name="MusicPlayer" type="AudioStreamPlayer" parent="." unique_id=237418522]
+stream = ExtResource("8_music")
+volume_db = -6.0
+
+[node name="AmbiencePlayer" type="AudioStreamPlayer" parent="." unique_id=1208722404]
+stream = ExtResource("9_amb")
+volume_db = -10.0

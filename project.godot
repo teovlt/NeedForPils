@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="Meta Scene Sample"
-run/main_scene="res://main.tscn"
+run/main_scene="res://menu/main_menu.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 config/icon="res://icon.svg"
 
@@ -38,6 +38,10 @@ textures/vram_compression/import_etc2_astc=true
 
 [shader_globals]
 
+pill_assimilation={
+"type": "float",
+"value": 0.0
+}
 META_ENVIRONMENT_DEPTH_AVAILABLE={
 "type": "bool",
 "value": false
