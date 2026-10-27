@@ -31,10 +31,17 @@ const OVERLAY_LAYER := 1 << 19
 @export var car_path: NodePath
 
 @export_group("Manque")
-## Manque au départ (0-1) : on a vite envie de la première pilule.
-@export_range(0.0, 1.0) var start_craving := 0.25
+## Manque au départ (0-1).
+@export_range(0.0, 1.0) var start_craving := 0.0
 ## Secondes pour passer de 0 à 100 % de manque, sans assimilation / assimilation max.
-@export var craving_time := Vector2(60.0, 26.0)
+## Les effets se voient à partir de ~35 % (≈ 75 s sobre au début) ; le manque ne monte
+## pas tant qu'on plane encore après une pilule.
+@export var craving_time := Vector2(210.0, 100.0)
+## Voix du personnage quand le manque s'installe (« je suis en manque bordel... »),
+## une fois par épisode de manque. À remplacer : audio/voice/manque.wav.
+@export_file("*.wav", "*.ogg", "*.mp3") var craving_voice_path := "res://audio/voice/manque.wav"
+@export_range(0.0, 1.0) var craving_voice_at := 0.45
+@export var craving_voice_db := 0.0
 ## Manque au réveil après un black-out.
 @export_range(0.0, 1.0) var craving_after_blackout := 0.8
 @export var blackout_duration := 3.5
@@ -82,6 +89,8 @@ var _overlay_mat: ShaderMaterial
 var _env: Environment
 var _heart: AudioStreamPlayer
 var _gulp: AudioStreamPlayer
+var _voice: AudioStreamPlayer
+var _voice_said := false
 
 
 func _ready() -> void:
@@ -98,6 +107,12 @@ func _ready() -> void:
 	_gulp.stream = _make_pill_sound()
 	_gulp.volume_db = -4.0
 	add_child(_gulp)
+	_voice = AudioStreamPlayer.new()
+	_voice.name = "CravingVoice"
+	if ResourceLoader.exists(craving_voice_path):
+		_voice.stream = load(craving_voice_path) as AudioStream
+	_voice.volume_db = craving_voice_db
+	add_child(_voice)
 	RenderingServer.global_shader_parameter_set("pill_assimilation", 0.0)
 
 
@@ -134,6 +149,7 @@ func take_pill() -> void:
 	var was_full := assimilation >= 1.0
 	assimilation = clampf(assimilation + assimilation_per_pill * greedy, 0.0, 1.0)
 	craving = 0.0
+	_voice_said = false
 	_blackout = 0.0
 	_boost = boost_duration
 	_high_total = lerpf(high_duration.x, high_duration.y, assimilation)
@@ -161,8 +177,13 @@ func _physics_process(delta: float) -> void:
 		_blackout = maxf(_blackout - delta, 0.0)
 		if _blackout == 0.0:
 			craving = craving_after_blackout
-	else:
+	elif _high <= 0.0:
 		craving = minf(craving + delta / lerpf(craving_time.x, craving_time.y, assimilation), 1.0)
+		if craving >= craving_voice_at and not _voice_said:
+			_voice_said = true
+			if _voice.stream:
+				_voice.play()
+				print("Voix de manque : ", craving_voice_path)
 		if craving >= 1.0:
 			_blackout = blackout_duration
 			blackouts += 1
