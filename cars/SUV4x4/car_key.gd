@@ -68,6 +68,8 @@ func _build() -> void:
 	for n in ["Ign_Bezel", "Ign_Face"]:
 		parts.get_node(n).queue_free()
 	parts.queue_free()
+	# les meshes ont changé (pièces du contact libérées) : contour à reconstruire
+	refresh_meshes.call_deferred()
 	_lay_flat()
 
 
