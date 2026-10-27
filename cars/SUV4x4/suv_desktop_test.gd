@@ -128,6 +128,10 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_bag_places(delta)
 		elif autotest_scenario == "briquet":
 			_run_autotest_lighter(delta)
+		elif autotest_scenario == "fumer":
+			_run_autotest_smoke(delta)
+		elif autotest_scenario == "fumee_debug":
+			_run_autotest_smoke_debug(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -3589,4 +3593,153 @@ func _run_autotest_lighter(delta: float) -> void:
 		_release_item()
 		_log("AUTOTEST lâché -> allumé=%s, posé dans %s" % [g.lit, lt.get_parent().name])
 	if at.call(5.5):
+		get_tree().quit()
+
+
+# --- Fumer : cigarette allumée au briquet (deux mains VR), bouffées à la bouche,
+# joint allumé et fumé avec F (sans casque), cigarette fumée jusqu'au filtre ----------
+
+var _sm := {}
+
+
+func _sm_hand(key: String) -> Node3D:
+	if not _sm.has(key):
+		var h := Node3D.new()
+		add_child(h)
+		_sm[key] = h
+	return _sm[key]
+
+
+## Tient l'objet `g` (déjà attrapé par `h`) pour que son point local `local_pt` soit en `p`.
+func _sm_hold(h: Node3D, g: VRPickable, basis: Basis, local_pt: Vector3, p: Vector3) -> void:
+	h.global_transform = Transform3D(basis, p - basis * local_pt)
+	g._on_grab_update(h)
+
+
+func _run_autotest_smoke(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	$Weather.random_events = false
+	$FallingTrees.enabled = false
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = false
+	var lt := car.find_child("Lighter", true, false) as RigidBody3D
+	var cig := car.find_child("Cigarette", true, false) as RigidBody3D
+	var jt := car.find_child("Joint", true, false) as RigidBody3D
+	var gl := lt.get_node("Grab") as Lighter
+	var gc := cig.get_node("Grab") as Smokable
+	var gj := jt.get_node("Grab") as Smokable
+	var hA := _sm_hand("A")
+	var hB := _sm_hand("B")
+	# caméra = tête du conducteur (la bouche en dépend)
+	cam.fov = 70.0
+	cam.global_position = car.to_global(Vector3(-0.36, 1.25, -0.12))
+	cam.look_at(car.to_global(Vector3(-0.36, 1.18, 1.0)))
+	var fwd := -cam.global_basis.z
+	var flat := Basis.looking_at(car.global_basis.x, car.global_basis.y)   # objet couché, +X vers la gauche voiture
+	if at.call(0.05):
+		$Weather.hour = 21.5
+		$Weather.set_weather("degage", true)
+	if at.call(0.4):
+		for b in [[hA, gl, lt], [hB, gc, cig]]:
+			(b[0] as Node3D).global_transform = (b[2] as Node3D).global_transform
+			(b[1] as VRPickable).grab(b[0])
+		gl.toggle()
+		_log("AUTOTEST briquet allumé=%s, cigarette tenue=%s allumée=%s" % [gl.lit, gc.is_grabbed(), gc.lit])
+	var lpos := car.to_global(Vector3(-0.30, 1.05, 0.30))
+	var up_basis := Basis(car.global_basis.x, car.global_basis.y, car.global_basis.z)
+	if _t > 0.4 and _t < 3.6:
+		_sm_hold(hA, gl, up_basis, Vector3.ZERO, lpos)
+		# la cigarette approche le briquet, puis le bout dans la flamme à partir de 1,2 s
+		var tip_target := gl.flame_position() + (Vector3.ZERO if _t > 1.2 else car.global_basis.x * 0.08)
+		var cb := Basis(fwd.cross(Vector3.UP).normalized() * -1.0, Vector3.UP, fwd.cross(Vector3.UP).normalized() * -1.0).orthonormalized()
+		cb = Basis.looking_at(-car.global_basis.x, Vector3.UP) * Basis(Vector3.UP, -PI * 0.5)
+		_sm_hold(hB, gc, cb, Vector3(gc.tip_x, 0, 0), tip_target)
+		if gc.lit and not _sm.has("lit_t"):
+			_sm["lit_t"] = _t
+			_log("AUTOTEST cigarette allumée au briquet après %.1f s dans la flamme" % (_t - 1.2))
+	if at.call(2.4):
+		_shot("fumer_1_allumage")
+	if at.call(3.6):
+		gl.toggle()
+		gl.release(hA)
+		_log("AUTOTEST briquet éteint et lâché ; cigarette allumée=%s" % gc.lit)
+	# bouffée de 3 s : filtre à la bouche
+	var mouth: Vector3 = EdiblePickable.mouth_position(get_tree())
+	var mb := Basis.looking_at(-fwd, Vector3.UP) * Basis(Vector3.UP, -PI * 0.5)   # +X de l'objet vers l'avant
+	if _t > 3.8 and _t < 6.8:
+		if not _sm.has("b0"):
+			_sm["b0"] = gc.burnt
+		_sm_hold(hB, gc, mb, Vector3(gc.butt_x, 0, 0), mouth)
+	if _t >= 6.8 and _t < 8.5:
+		_sm_hold(hB, gc, mb, Vector3(gc.butt_x, 0, 0), mouth + fwd * 0.25 - cam.global_basis.y * 0.15)
+	if at.call(6.8):
+		_log("AUTOTEST bouffée de 3 s : papier consumé %.1f mm -> %.1f mm (sur %.0f mm)" % [_sm["b0"] * 1000.0, gc.burnt * 1000.0, (gc.paper_length() - gc.stub) * 1000.0])
+	if at.call(7.2):
+		_shot("fumer_2_recrache")
+		_log("AUTOTEST bouffées=%d, fumée recrachée=%s" % [gc.puffs, gc._exhale.emitting if gc._exhale else null])
+	if at.call(8.5):
+		gc.release(hB)
+		_log("AUTOTEST cigarette posée, toujours allumée=%s" % gc.lit)
+	# joint : sans casque, F l'allume avec le briquet de la voiture, F = une bouffée
+	if at.call(9.0):
+		hB.global_transform = jt.global_transform
+		gj.grab(hB)
+		gj.toggle()
+		_log("AUTOTEST joint tenu, F -> allumé=%s" % gj.lit)
+	if _t > 9.0 and _t < 12.5:
+		_sm_hold(hB, gj, mb, Vector3(gj.butt_x, 0, 0), mouth + fwd * 0.3 - cam.global_basis.y * 0.12)
+	if at.call(9.6):
+		_sm["j0"] = gj.burnt
+		gj.toggle()
+	if at.call(11.5):
+		_log("AUTOTEST joint F -> bouffée : consumé %.1f -> %.1f mm, bouffées=%d" % [_sm["j0"] * 1000.0, gj.burnt * 1000.0, gj.puffs])
+		_shot("fumer_3_joint")
+	if at.call(12.5):
+		gj.release(hB)
+		# cigarette fumée jusqu'au bout (bouffées accélérées)
+		hB.global_transform = cig.global_transform
+		gc.grab(hB)
+		gc.puff_time = 1.5
+	if _t > 12.6 and _t < 15.0:
+		_sm_hold(hB, gc, mb, Vector3(gc.butt_x, 0, 0), mouth)
+	if at.call(15.0):
+		_log("AUTOTEST jusqu'au bout : éteinte=%s, mégot=%s, reste %.1f mm de papier" % [not gc.lit, gc.burnt_out, (gc.paper_length() - gc.burnt) * 1000.0])
+		gc.toggle()
+		_log("AUTOTEST F sur le mégot -> allumé=%s" % gc.lit)
+		gc.release(hB)
+	if at.call(15.5):
+		get_tree().quit()
+
+
+func _run_autotest_smoke_debug(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = false
+	cam.global_position = car.to_global(Vector3(0, 3, -6))
+	cam.look_at(car.to_global(Vector3(0, 1.5, 3)))
+	if at.call(0.05):
+		$Weather.hour = 13.0
+		var gc := car.find_child("Cigarette", true, false).get_node("Grab") as Smokable
+		for i in 3:
+			var p: CPUParticles3D = gc._make_smoke(30, 3.0, 0.2, 0.8)
+			p.direction = Vector3.UP
+			p.initial_velocity_min = 0.3
+			p.initial_velocity_max = 0.5
+			add_child(p)
+			p.global_position = car.to_global(Vector3(-1.5 + i * 1.5, 2.0, 2.0))
+			var m := (p.mesh as QuadMesh).material as StandardMaterial3D
+			if i == 1:
+				m.vertex_color_use_as_albedo = false
+				m.albedo_color = Color(0.8, 0.8, 0.8, 0.5)
+			elif i == 2:
+				m.albedo_texture = null
+			p.emitting = true
+	if at.call(2.5):
+		_shot("fumee_debug")
 		get_tree().quit()

@@ -19,6 +19,7 @@ func _ready() -> void:
 	super._ready()
 	rest_up_axis = -1
 	friction = 0.55
+	add_to_group("lighters")
 	# tout de suite : la flamme est exclue du contour de surbrillance (construit plus tard)
 	for mi in _flame_meshes():
 		mi.set_meta("_vr_outline", true)
@@ -65,6 +66,19 @@ func _setup() -> void:
 ## Boîte du corps seul (la flamme, cachée, ne compte pas pour le rangement).
 func get_local_aabb() -> AABB:
 	return AABB(Vector3(-0.0135, -0.0005, -0.0078), Vector3(0.027, 0.0775, 0.0156))
+
+
+## Position monde de la flamme (pour allumer une cigarette ou un joint).
+func flame_position() -> Vector3:
+	if _flame:
+		return _flame.global_position + Vector3(0, 0.012, 0)
+	return item.global_transform * Vector3(0, 0.085, 0)
+
+
+func play_click() -> void:
+	if _click:
+		_click.pitch_scale = randf_range(0.9, 1.15)
+		_click.play()
 
 
 ## F / A / X : allume ou éteint, seulement quand on le tient.
