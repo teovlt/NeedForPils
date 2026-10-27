@@ -184,7 +184,7 @@ func _run_autotest(delta: float) -> void:
 		var target: Vector3 = info["point"] + info["right"] * target_lat
 		var to_t := target - car.global_position
 		to_t.y = 0.0
-		car._kb_steer = clampf(fwd.cross(to_t.normalized()).y * 2.0, -1.0, 1.0)
+		_steer(clampf(fwd.cross(to_t.normalized()).y * 2.0, -1.0, 1.0))
 	var speed_kmh := car.forward_speed * 3.6
 	car.throttle_input = 0.8 if speed_kmh < 45.0 else 0.0
 	car.brake_input = 0.0
@@ -258,6 +258,15 @@ func _release_item() -> void:
 		_log("AUTOTEST lâche %s" % _held.item.name)
 		_held.release(_hand)
 		_held = null
+
+
+## Direction de la voiture pendant les tests (-1 à 1, + = gauche). Passe par les deux
+## chemins : `_kb_steer` (direction clavier) et `external_steer` (ajouté sur dev pour le
+## pilote automatique de l'intro : quand external_input est vrai, c'est lui que la voiture
+## lit). `set` ne fait rien si la propriété n'existe pas, donc ça marche sur les deux branches.
+func _steer(value: float) -> void:
+	car.set("_kb_steer", value)
+	car.set("external_steer", value)
 
 
 func _cabin_cam(pos: Vector3, look: Vector3) -> void:
@@ -713,7 +722,7 @@ func _run_autotest_cluster(delta: float) -> void:
 	else:
 		car.brake_input = 0.0
 		car.throttle_input = 1.0 if car.forward_speed * 3.6 < 70.0 else 0.0
-		car._kb_steer = 0.0
+		_steer(0.0)
 	if at.call(2.0):
 		car.handbrake_lever.set_angle_deg(0.0, true)
 		car.light_stalk.set_notch(4, true)   # PHARES + BARRE
@@ -846,7 +855,7 @@ func _run_autotest_nature(delta: float) -> void:
 		var target: Vector3 = info["point"] + info["right"] * 1.75
 		var to_t := target - car.global_position
 		to_t.y = 0.0
-		car._kb_steer = clampf(fwd.cross(to_t.normalized()).y * 2.0, -1.0, 1.0)
+		_steer(clampf(fwd.cross(to_t.normalized()).y * 2.0, -1.0, 1.0))
 	car.throttle_input = 1.0 if car.forward_speed * 3.6 < 110.0 else 0.0
 	car.brake_input = 0.0
 	_inside = false
@@ -906,7 +915,7 @@ func _run_autotest_rain(delta: float) -> void:
 		var target: Vector3 = info["point"] + info["right"] * 1.75
 		var to_t := target - car.global_position
 		to_t.y = 0.0
-		car._kb_steer = clampf(fwd.cross(to_t.normalized()).y * 2.0, -1.0, 1.0)
+		_steer(clampf(fwd.cross(to_t.normalized()).y * 2.0, -1.0, 1.0))
 	car.throttle_input = 1.0 if car.forward_speed * 3.6 < 80.0 else 0.0
 	car.brake_input = 0.0
 	_inside = false
@@ -1088,7 +1097,7 @@ func _run_autotest_engine(delta: float) -> void:
 		var target: Vector3 = info["point"] + info["right"] * 1.75
 		var to_t := target - car.global_position
 		to_t.y = 0.0
-		car._kb_steer = clampf(fwd.cross(to_t.normalized()).y * 2.0, -1.0, 1.0)
+		_steer(clampf(fwd.cross(to_t.normalized()).y * 2.0, -1.0, 1.0))
 	car.throttle_input = thr
 	car.brake_input = brk
 	_inside = false
@@ -1165,11 +1174,11 @@ func _run_autotest_horn(delta: float) -> void:
 		_rec.set_recording_active(false)
 		_rec.get_recording().save_to_wav(ProjectSettings.globalize_path("res://.godot/autotest_klaxon.wav"))
 	# le coussin tourne-t-il avec le volant ?
-	if at.call(5.6): car.set("_kb_steer", 0.35)
+	if at.call(5.6): _steer(0.35)
 	if at.call(7.6):
 		_shot("klaxon_3_volant_gauche")
 		_log("AUTOTEST klaxon volant %.0f° coussin %.0f°" % [rad_to_deg(car.steering_wheel.wheel_angle), rad_to_deg(horn.transform.basis.get_rotation_quaternion().get_angle())])
-		car.set("_kb_steer", -0.6)
+		_steer(-0.6)
 	if at.call(10.0):
 		_shot("klaxon_4_volant_droite")
 		_log("AUTOTEST klaxon volant %.0f° coussin %.0f°" % [rad_to_deg(car.steering_wheel.wheel_angle), rad_to_deg(horn.transform.basis.get_rotation_quaternion().get_angle())])
@@ -1663,7 +1672,7 @@ func _run_autotest_physics(delta: float) -> void:
 	var steer := 0.0
 	if _t > 8.5 and _t < 10.5: steer = 0.7
 	elif _t > 10.5 and _t < 12.5: steer = -0.7
-	car.set("_kb_steer", steer)
+	_steer(steer)
 	cam.fov = 78.0
 	_cabin_cam(Vector3(0.42, 1.45, -0.1), Vector3(-0.35, 0.98, 0.42))
 	if at.call(0.05):
@@ -2051,7 +2060,7 @@ func _run_autotest_storage_spots(delta: float) -> void:
 	var steer := 0.0
 	if _t > 8.5 and _t < 10.5: steer = 0.8
 	elif _t > 10.5 and _t < 12.5: steer = -0.8
-	car.set("_kb_steer", steer)
+	_steer(steer)
 	var pocket := car.get_node("Doors/DoorFL/Pocket") as StorageZone
 	var glove := car.get_node("Storage/Glovebox") as StorageZone
 	var console := car.get_node("Storage/Console") as StorageZone
@@ -2243,7 +2252,7 @@ func _run_autotest_gears(delta: float) -> void:
 	# tout droit vers +Z, en corrigeant l'écart latéral
 	var to_t := Vector3(0.0, 0.0, car.global_position.z + 30.0 + absf(car.forward_speed)) - car.global_position
 	to_t.y = 0.0
-	car._kb_steer = clampf(fwd.cross(to_t.normalized()).y * 2.0, -1.0, 1.0)
+	_steer(clampf(fwd.cross(to_t.normalized()).y * 2.0, -1.0, 1.0))
 	car.throttle_input = thr
 	car.brake_input = brk
 	_inside = false
@@ -2346,7 +2355,7 @@ func _run_autotest_tree_hits(delta: float) -> void:
 	var target: Vector3 = o["pos"]
 	var fwd: Vector3 = car.global_basis.z
 	var to_t := Vector3(target.x, 0, target.z) - Vector3(car.global_position.x, 0, car.global_position.z)
-	car._kb_steer = clampf(fwd.cross(to_t.normalized()).y * 2.0, -1.0, 1.0) if el < 4.0 else 0.0
+	_steer(clampf(fwd.cross(to_t.normalized()).y * 2.0, -1.0, 1.0) if el < 4.0 else 0.0)
 	var kmh: float = car.forward_speed * 3.6
 	car.throttle_input = (1.0 if kmh < 12.0 else 0.0) if el > 0.5 else 0.0
 	car.brake_input = 1.0 if el < 0.5 else 0.0
@@ -2426,7 +2435,7 @@ func _run_autotest_posts(delta: float) -> void:
 		var target: Vector3 = info["point"] + info["right"] * lat
 		var to_t := target - car.global_position
 		to_t.y = 0.0
-		car._kb_steer = clampf(fwd.cross(to_t.normalized()).y * 2.5, -1.0, 1.0)
+		_steer(clampf(fwd.cross(to_t.normalized()).y * 2.5, -1.0, 1.0))
 	_inside = false
 	cam.fov = 70.0
 	if _post != null and not _post_log.has("cam_off"):
@@ -2450,7 +2459,7 @@ func _run_autotest_posts(delta: float) -> void:
 			var inf2 := road.sample_road(car.global_position)
 			_log("AUTOTEST voiture arrêtée à %.1f m de l'axe, inclinaison %.0f°" % [(car.global_position - inf2["point"]).dot(inf2["right"]), rad_to_deg(car.global_basis.y.angle_to(Vector3.UP))])
 			_shot("balise_bloquee")
-	if _post == null and kmh > want - 3.0 and _t > 3.0:
+	if _post == null and _post_pass < 3 and kmh > want - 3.0 and _t > 3.0:
 		_post = _next_post_ahead(45.0)
 		if _post:
 			_post_pass += 1
