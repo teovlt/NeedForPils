@@ -34,3 +34,4 @@ paper_color = Color(0.96, 0.95, 0.9, 1)
 puff_time = 14.0
 idle_time = 300.0
 stub = 0.008
+kind = "joint"

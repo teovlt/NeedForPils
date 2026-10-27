@@ -24,6 +24,8 @@ var _yaw := 0.0
 var _pitch := 0.0
 var _looking := false
 var _help: Label
+var _pending: VRInteractable      # saisie en attente (défoncé : gestes plus lents)
+var _pending_t := 0.0
 
 
 func _ready() -> void:
@@ -136,9 +138,27 @@ func _physics_process(_delta: float) -> void:
 	if hovered:
 		hovered.set_hand_distance(self, 0.0)
 		_depth = best_t
+	if _pending:
+		if hovered != _pending:
+			_pending = null
+		else:
+			_pending_t -= _delta
+			if _pending_t <= 0.0:
+				_pending = null
+				_grab_now()
 
 
 func _try_grab() -> void:
+	if hovered and not held:
+		var wait := 0.45 * PillAddiction.stoned_level(get_tree())
+		if wait > 0.03:
+			_pending = hovered
+			_pending_t = wait
+			return
+		_grab_now()
+
+
+func _grab_now() -> void:
 	if hovered and not held:
 		held = hovered
 		hovered.set_hand_distance(self, -1.0)
@@ -147,6 +167,7 @@ func _try_grab() -> void:
 
 
 func _release() -> void:
+	_pending = null
 	if held and is_instance_valid(held):
 		held.release(self)
 	held = null

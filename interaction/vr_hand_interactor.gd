@@ -19,6 +19,8 @@ var held: VRInteractable
 var _grip_down := false
 var _toggle_down := false
 var _hover_grabbable := false
+var _pending: VRInteractable      # saisie en attente (défoncé : gestes plus lents)
+var _pending_t := 0.0
 
 
 func _ready() -> void:
@@ -82,13 +84,25 @@ func _physics_process(_delta: float) -> void:
 			best_d = d
 	_set_hover(best, best_d)
 
+	# saisie retardée en cours : il faut garder le grip sur le même objet
+	if _pending:
+		if not _grip_down or best != _pending:
+			_pending = null
+		else:
+			_pending_t -= _delta
+			if _pending_t <= 0.0:
+				_pending = null
+				_grab_now(best)
+				return
 	if best and best_d <= best.grab_distance:
 		if grip_pressed:
-			held = best
-			_set_hover(null, -1.0)
-			held.grab(self)
-			pulse(0.5, 0.06)
-			return
+			var wait := 0.45 * PillAddiction.stoned_level(get_tree())
+			if wait > 0.03:
+				_pending = best
+				_pending_t = wait
+			else:
+				_grab_now(best)
+				return
 		var toggle_now := controller.is_button_pressed(toggle_action)
 		if toggle_now and not _toggle_down and best.has_method("toggle"):
 			best.toggle()
@@ -96,6 +110,13 @@ func _physics_process(_delta: float) -> void:
 		_toggle_down = toggle_now
 	else:
 		_toggle_down = controller.is_button_pressed(toggle_action)
+
+
+func _grab_now(it: VRInteractable) -> void:
+	held = it
+	_set_hover(null, -1.0)
+	held.grab(self)
+	pulse(0.5, 0.06)
 
 
 func _set_hover(target: VRInteractable, distance: float) -> void:

@@ -27,6 +27,8 @@ var _offset := Transform3D.IDENTITY
 var _last_pos := Vector3.ZERO
 var _local_aabb: AABB
 var _aabb_ready := false
+var _lag_local := Transform3D.IDENTITY
+var _lag_ready := false
 
 
 func _ready() -> void:
@@ -65,6 +67,21 @@ func _on_grab_update(hand: Node3D) -> void:
 	CarStorage.pin_body(item)
 	var xf := hand.global_transform * _offset
 	var dt := get_physics_process_delta_time()
+	# défoncé (joint) : l'objet suit la main avec du retard (calculé dans le repère de la
+	# voiture, pour ne pas rester en arrière quand elle roule)
+	var st := PillAddiction.stoned_level(get_tree())
+	if st > 0.01:
+		var frame := CarStorage.find_vehicle(item)
+		var fx: Transform3D = frame.global_transform if frame else Transform3D.IDENTITY
+		var target := fx.affine_inverse() * xf
+		if not _lag_ready:
+			_lag_local = target
+			_lag_ready = true
+		var w := 1.0 - exp(-lerpf(30.0, 5.0, st) * dt)
+		_lag_local = _lag_local.interpolate_with(target, w)
+		xf = fx * _lag_local
+	else:
+		_lag_ready = false
 	hand_velocity = hand_velocity.lerp((xf.origin - _last_pos) / maxf(dt, 0.001), 0.5)
 	_last_pos = xf.origin
 	item.global_transform = xf
@@ -104,6 +121,7 @@ func _take(hand: Node3D) -> void:
 	CarStorage.pin_body(item)
 	_offset = hand.global_transform.affine_inverse() * item.global_transform
 	_last_pos = item.global_position
+	_lag_ready = false
 	hand_velocity = Vector3.ZERO
 
 

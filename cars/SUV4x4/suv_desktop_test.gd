@@ -134,6 +134,8 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_smoke_debug(delta)
 		elif autotest_scenario == "fumer_souris":
 			_run_autotest_smoke_mouse(delta)
+		elif autotest_scenario == "fumer_effets":
+			_run_autotest_smoke_effects(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -3774,4 +3776,75 @@ func _run_autotest_smoke_mouse(delta: float) -> void:
 		_mouse_hand._toggle()
 	if at.call(3.0):
 		_log("AUTOTEST F -> bouffée : consumé %.1f -> %.1f mm, bouffées=%d" % [_sm["b0"] * 1000.0, gc.burnt * 1000.0, gc.puffs])
+		get_tree().quit()
+
+
+# --- Effets : cigarette = moins de manque ; joint = moins de manque + défonce --------
+
+var _se := {}
+
+
+func _run_autotest_smoke_effects(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = true
+	var gc := car.find_child("Cigarette", true, false).get_node("Grab") as Smokable
+	var gj := car.find_child("Joint", true, false).get_node("Grab") as Smokable
+	if at.call(0.05):
+		$Weather.hour = 15.0
+		$Weather.set_weather("degage", true)
+		var add = preload("res://world/pills/pill_addiction.gd").new()
+		add.set("car_path", NodePath("../SUV4x4"))
+		add_child(add)
+		_se["add"] = add
+	var add = _se.get("add")
+	if add == null:
+		return
+	if at.call(0.6):
+		add.craving = 0.7
+		_mouse_hand.held = gc
+		gc.grab(_mouse_hand)
+		_mouse_hand._toggle()
+		_se["c0"] = add.craving
+	# 4 bouffées de cigarette (≈ la moitié)
+	for k in 4:
+		if at.call(1.0 + k * 1.6):
+			_mouse_hand._toggle()
+	if at.call(7.6):
+		_log("AUTOTEST cigarette : %d bouffées, manque %.2f -> %.2f, défonce %.2f, consumée %.0f %%" % [gc.puffs, _se["c0"], add.craving, add.stoned, gc.burnt / (gc.paper_length() - gc.stub) * 100.0])
+		_mouse_hand._release()
+		add.craving = 0.7
+		_mouse_hand.held = gj
+		gj.grab(_mouse_hand)
+		_mouse_hand._toggle()
+		_se["j0"] = add.craving
+	for k in 6:
+		if at.call(8.0 + k * 1.6):
+			_mouse_hand._toggle()
+	if at.call(17.8):
+		_log("AUTOTEST joint : %d bouffées, manque %.2f -> %.2f, défonce %.2f, consumé %.0f %%" % [gj.puffs, _se["j0"], add.craving, add.stoned, gj.burnt / (gj.paper_length() - gj.stub) * 100.0])
+		_log("AUTOTEST voiture : vitesse max x%.2f, couple x%.2f, retard du volant %.2f" % [car.drug_speed_mult, car.drug_torque_mult, car.drug_steer_lag])
+		var lp := -1.0
+		for i in AudioServer.get_bus_effect_count(0):
+			var e := AudioServer.get_bus_effect(0, i)
+			if e is AudioEffectLowPassFilter:
+				lp = (e as AudioEffectLowPassFilter).cutoff_hz
+		_log("AUTOTEST son étouffé : passe-bas %.0f Hz" % lp)
+		_shot("fumer_effets_vue")
+		# objet tenu : retard derrière la main
+		_se["hand0"] = _mouse_hand.global_position
+	if _t > 17.8 and _t < 18.6:
+		_mouse_hand.global_position = _se["hand0"] + car.global_basis.x * 0.25 * minf((_t - 17.8) / 0.1, 1.0)
+		gj._on_grab_update(_mouse_hand)
+	if at.call(18.0):
+		var want: Vector3 = (_mouse_hand.global_transform * gj._offset).origin
+		_log("AUTOTEST main déplacée de 25 cm : le joint suit avec %.1f cm de retard après 0,2 s" % [gj.item.global_position.distance_to(want) * 100.0])
+	if at.call(18.7):
+		_mouse_hand._release()
+		_mouse_hand.hovered = gc
+		_mouse_hand._try_grab()
+		_log("AUTOTEST saisie défoncé : tout de suite tenu=%s, en attente=%s (%.2f s)" % [_mouse_hand.held != null, _mouse_hand._pending != null, _mouse_hand._pending_t])
 		get_tree().quit()

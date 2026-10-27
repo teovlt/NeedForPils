@@ -51,6 +51,16 @@ const OVERLAY_LAYER := 1 << 19
 ## Tremblement des mains à 100 % de manque (degrés de braquage).
 @export var craving_shake_deg := 2.5
 
+@export_group("Cigarette et joint")
+## Manque retiré par une cigarette / un joint fumés en entier (au prorata des bouffées).
+@export var cigarette_relief := 0.35
+@export var joint_relief := 0.45
+## Défonce apportée par un joint entier (0-1), et secondes pour redescendre de 1 à 0.
+@export var joint_stoned := 1.0
+@export var stoned_fade_time := 150.0
+## Défonce : le manque monte moins vite (fraction retirée à 100 %).
+@export_range(0.0, 1.0) var stoned_craving_slow := 0.4
+
 @export_group("Pilule")
 ## Gain d'assimilation par pilule.
 @export var assimilation_per_pill := 0.08
@@ -67,6 +77,9 @@ const OVERLAY_LAYER := 1 << 19
 @export var inversion_range := Vector2(0.45, 0.9)
 
 var craving := 0.0
+## Défonce du joint (0-1) : détendu, sens altérés (vue brumeuse, sons étouffés, gestes
+## et volant plus lents). Ne rend pas plus rapide.
+var stoned := 0.0
 var assimilation := 0.0
 var pills_taken := 0
 var blackouts := 0
@@ -140,6 +153,21 @@ func get_drunk() -> float:
 	return maxf(high * tolerance * (1.0 - inversion), inversion * (1.0 - high))
 
 
+## Bouffée de cigarette ou de joint : `fraction` = part de l'objet fumée pendant cette
+## bouffée (appelé à chaque image par Smokable).
+func smoke(kind: String, fraction: float) -> void:
+	var relief := joint_relief if kind == "joint" else cigarette_relief
+	craving = maxf(craving - relief * fraction, 0.0)
+	if kind == "joint":
+		stoned = minf(stoned + joint_stoned * fraction, 1.0)
+
+
+## Défonce actuelle (0-1) du joueur, 0 sans PillAddiction (gestes, son...).
+static func stoned_level(tree: SceneTree) -> float:
+	var a := tree.get_first_node_in_group(GROUP)
+	return float(a.get("stoned")) if a else 0.0
+
+
 # --- Prise d'une pilule ------------------------------------------------------
 
 func take_pill() -> void:
@@ -178,7 +206,8 @@ func _physics_process(delta: float) -> void:
 		if _blackout == 0.0:
 			craving = craving_after_blackout
 	elif _high <= 0.0:
-		craving = minf(craving + delta / lerpf(craving_time.x, craving_time.y, assimilation), 1.0)
+		var slow := 1.0 - stoned_craving_slow * stoned
+		craving = minf(craving + slow * delta / lerpf(craving_time.x, craving_time.y, assimilation), 1.0)
 		if craving >= craving_voice_at and not _voice_said:
 			_voice_said = true
 			if _voice.stream:
@@ -188,6 +217,7 @@ func _physics_process(delta: float) -> void:
 			_blackout = blackout_duration
 			blackouts += 1
 			blackout_started.emit()
+	stoned = move_toward(stoned, 0.0, delta / stoned_fade_time)
 	_apply_to_car()
 
 
@@ -209,8 +239,11 @@ func _apply_to_car() -> void:
 	var drunk := get_drunk()
 	var shake := deg_to_rad(craving_shake_deg) * c * (sin(_t * 23.0) * 0.6 + sin(_t * 37.0) * 0.4)
 	var drift := deg_to_rad(drunk_drift_deg) * drunk * (sin(_t * 0.7) * 0.7 + sin(_t * 1.9 + 1.3) * 0.3)
+	# défoncé : direction un peu molle et flottante, mais pas plus de vitesse
+	var st := smoothstep(0.0, 1.0, stoned)
+	drift += deg_to_rad(1.2) * st * sin(_t * 0.45 + 0.7)
 	_car.drug_steer_offset = shake + drift
-	_car.drug_steer_lag = drunk * drunk_steer_lag
+	_car.drug_steer_lag = clampf(drunk * drunk_steer_lag + 0.45 * st, 0.0, 1.0)
 
 
 func _process(delta: float) -> void:
@@ -239,15 +272,45 @@ func _process(delta: float) -> void:
 		_overlay_mat.set_shader_parameter("flash", _flash)
 		_overlay_mat.set_shader_parameter("pulse", pulse)
 		_overlay_mat.set_shader_parameter("assimilation", assimilation)
+		_overlay_mat.set_shader_parameter("stoned", smoothstep(0.0, 1.0, stoned))
 	if _env:
 		# Couleurs : délavées en manque, saturées sous pilule.
 		_env.adjustment_enabled = true
 		var sat := lerpf(1.0, 0.2, craving * (1.0 - high)) + 0.8 * high * (1.0 - assimilation) + 0.6 * drunk
-		_env.adjustment_saturation = sat
-		_env.adjustment_contrast = 1.0 + 0.15 * drunk
+		var st := smoothstep(0.0, 1.0, stoned)
+		_env.adjustment_saturation = sat + 0.25 * st
+		_env.adjustment_contrast = 1.0 + 0.15 * drunk - 0.18 * st
+		_env.adjustment_brightness = 1.0 + 0.06 * st
+	_update_stoned_audio()
 	# Le décor se teinte doucement (paramètre global lu par nature_tint.gdshader).
 	_shown_assimilation = move_toward(_shown_assimilation, assimilation, delta * 0.1)
 	RenderingServer.global_shader_parameter_set("pill_assimilation", _shown_assimilation)
+
+
+## Défoncé : tous les sons un peu étouffés et lointains (passe-bas sur le bus principal).
+var _master_lp: AudioEffectLowPassFilter
+func _update_stoned_audio() -> void:
+	var st := smoothstep(0.0, 1.0, stoned)
+	if _master_lp == null:
+		if st < 0.01:
+			return
+		_master_lp = AudioEffectLowPassFilter.new()
+		AudioServer.add_bus_effect(0, _master_lp)
+	_master_lp.cutoff_hz = lerpf(20000.0, 2200.0, st)
+	var idx := -1
+	for i in AudioServer.get_bus_effect_count(0):
+		if AudioServer.get_bus_effect(0, i) == _master_lp:
+			idx = i
+	if idx >= 0:
+		AudioServer.set_bus_effect_enabled(0, idx, st > 0.01)
+
+
+func _exit_tree() -> void:
+	if _master_lp:
+		for i in AudioServer.get_bus_effect_count(0):
+			if AudioServer.get_bus_effect(0, i) == _master_lp:
+				AudioServer.remove_bus_effect(0, i)
+				break
 
 
 ## Filtre plein écran collé devant la caméra active (VR ou bureau).

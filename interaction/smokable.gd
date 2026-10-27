@@ -28,6 +28,9 @@ extends VRPickable
 @export var idle_time := 240.0
 ## Papier qui reste quand il s'éteint (m).
 @export var stub := 0.004
+## « cigarette » : calme le manque ; « joint » : calme le manque et défonce
+## (PillAddiction.smoke).
+@export_enum("cigarette", "joint") var kind := "cigarette"
 
 const MOUTH_RADIUS := 0.085
 const FLAME_RADIUS := 0.03
@@ -125,6 +128,9 @@ func _process(delta: float) -> void:
 	burnt = minf(burnt + rate * delta, burn_len)
 	if at_mouth:
 		_mouth_t += delta
+		var add := get_tree().get_first_node_in_group(PillAddiction.GROUP)
+		if add:
+			add.call("smoke", kind, delta / puff_time)
 		if _sizzle and not _sizzle.playing:
 			_sizzle.play()
 	else:
