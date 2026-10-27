@@ -7,7 +7,7 @@ extends Node3D
 
 @export var autotest := false
 ## Scénario du test automatique : "objets" (rangements) ou "arbres".
-@export_enum("objets", "arbres", "aleatoire", "phares", "retros", "portes", "boite", "combine", "essuie", "plafonnier", "nature", "pluie", "balayage", "menu", "lunette", "moteur", "klaxon", "vitres", "ceinture", "cle", "depart", "pare_soleil", "cle_f", "physique", "eclairage", "radio", "radio_nuit", "radio_pwr", "ambiance", "rangements", "ceintures", "vitesses") var autotest_scenario := "objets"
+@export_enum("objets", "arbres", "aleatoire", "phares", "retros", "portes", "boite", "combine", "essuie", "plafonnier", "nature", "pluie", "balayage", "menu", "lunette", "moteur", "klaxon", "vitres", "ceinture", "cle", "depart", "pare_soleil", "cle_f", "physique", "eclairage", "radio", "radio_nuit", "radio_pwr", "ambiance", "rangements", "ceintures", "vitesses", "sapins", "balises") var autotest_scenario := "objets"
 
 @onready var car: SUV4x4 = $SUV4x4
 @onready var cam: Camera3D = $Camera3D
@@ -96,6 +96,10 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_all_belts(delta)
 		elif autotest_scenario == "vitesses":
 			_run_autotest_gears(delta)
+		elif autotest_scenario == "sapins":
+			_run_autotest_tree_hits(delta)
+		elif autotest_scenario == "balises":
+			_run_autotest_posts(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -2251,4 +2255,235 @@ func _run_autotest_gears(delta: float) -> void:
 		_log("AUTOTEST vitesse max en D : %.1f km/h" % _gear_log["max"])
 	if at.call(74.0):
 		_log("AUTOTEST passages : " + " | ".join(PackedStringArray(_gear_log["shifts"])))
+		get_tree().quit()
+
+
+# Collisions du décor : le 4x4 roule à ~15 km/h droit sur un sapin (branches basses),
+# puis sur un arbre des collines et sur un rocher. On mesure la distance entre l'axe de
+# l'obstacle et l'avant de l'habitacle / du pare-chocs.
+var _tree_targets: Array = []
+var _tree_idx := -1
+var _tree_t0 := 0.0
+var _tree_min := 99.0
+
+func _find_obstacles() -> void:
+	var road: RoadGenerator = $RoadGenerator
+	var sapin = null
+	var colline = null
+	var rocher = null
+	var hills := 0
+	for body in road.find_children("NatureCollision", "StaticBody3D", true, false):
+		for cs in body.get_children():
+			var sh = (cs as CollisionShape3D).shape
+			var gp: Vector3 = cs.global_position
+			var info := road.sample_road(gp)
+			var lat := 999.0
+			if info["found"]:
+				lat = (gp - info["point"]).dot(info["right"])
+			var dist_car := gp.distance_to(car.global_position)
+			if sh is CylinderShape3D and sh.radius > 0.9 and sh.radius < 1.7:
+				var bottom: float = gp.y - sh.height * 0.5
+				var ground: float = gp.y - sh.height * 0.5 - 1.2
+				if absf(lat) > 48.0:
+					hills += 1
+				if sapin == null and absf(lat) > 14.0 and absf(lat) < 30.0 and dist_car < 120.0:
+					sapin = {"pos": gp, "r": sh.radius, "bottom": bottom, "kind": "sapin (couronne)"}
+				elif colline == null and absf(lat) > 50.0 and absf(lat) < 70.0 and dist_car < 150.0:
+					colline = {"pos": gp, "r": sh.radius, "bottom": bottom, "kind": "arbre des collines (couronne)"}
+			elif sh is ConvexPolygonShape3D and rocher == null and absf(lat) > 10.0 and absf(lat) < 30.0 and dist_car < 150.0:
+				var mx := 0.0
+				for v in sh.points:
+					mx = maxf(mx, Vector2(v.x, v.z).length())
+				if mx > 0.8:
+					rocher = {"pos": gp, "r": mx, "bottom": gp.y, "kind": "rocher (enveloppe)"}
+	_log("AUTOTEST couronnes d'arbres sur les collines (> 48 m) : %d" % hills)
+	for o in [sapin, colline, rocher]:
+		if o != null:
+			_tree_targets.append(o)
+	_log("AUTOTEST obstacles trouvés : %s" % ", ".join(PackedStringArray(_tree_targets.map(func(o): return o["kind"]))))
+
+func _place_before(o: Dictionary) -> void:
+	var target: Vector3 = o["pos"]
+	var from := target + Vector3(9.0, 0.0, 0.0).rotated(Vector3.UP, randf() * TAU)
+	var space := get_world_3d().direct_space_state
+	var q := PhysicsRayQueryParameters3D.create(from + Vector3(0, 40, 0), from - Vector3(0, 60, 0))
+	q.exclude = [car.get_rid()]
+	var hit := space.intersect_ray(q)
+	var y: float = hit["position"].y if hit else target.y
+	var dir := Vector3(target.x - from.x, 0, target.z - from.z).normalized()
+	car.global_transform = Transform3D(Basis.looking_at(-dir, Vector3.UP), Vector3(from.x, y + 0.6, from.z))
+	car.linear_velocity = Vector3.ZERO
+	car.angular_velocity = Vector3.ZERO
+	_tree_min = 99.0
+
+func _run_autotest_tree_hits(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	$Weather.random_events = false
+	$FallingTrees.enabled = false
+	car.external_input = true
+	car.handbrake_lever.set_angle_deg(0.0, true)
+	if at.call(0.05):
+		$Weather.hour = 13.0
+		$Weather.set_weather("degage", true)
+		car.gear_lever.set_notch(2, true)
+	if at.call(2.0):
+		_find_obstacles()
+		if _tree_targets.is_empty():
+			_log("AUTOTEST aucun obstacle trouvé")
+			get_tree().quit()
+			return
+		_tree_idx = 0
+		_tree_t0 = _t
+		_place_before(_tree_targets[0])
+	if _tree_idx < 0:
+		car.brake_input = 1.0
+		car.throttle_input = 0.0
+		return
+	var o: Dictionary = _tree_targets[_tree_idx]
+	var el := _t - _tree_t0
+	var target: Vector3 = o["pos"]
+	var fwd: Vector3 = car.global_basis.z
+	var to_t := Vector3(target.x, 0, target.z) - Vector3(car.global_position.x, 0, car.global_position.z)
+	car._kb_steer = clampf(fwd.cross(to_t.normalized()).y * 2.0, -1.0, 1.0) if el < 4.0 else 0.0
+	var kmh: float = car.forward_speed * 3.6
+	car.throttle_input = (1.0 if kmh < 12.0 else 0.0) if el > 0.5 else 0.0
+	car.brake_input = 1.0 if el < 0.5 else 0.0
+	# avant de l'habitacle (bord du pare-brise, z = 1,1) et du pare-chocs (z = 2,5) à hauteur de capot
+	var cab: Vector3 = car.to_global(Vector3(0, 1.5, 1.1))
+	var bump: Vector3 = car.to_global(Vector3(0, 0.8, 2.5))
+	var d_cab := Vector2(cab.x - target.x, cab.z - target.z).length()
+	var d_bump := Vector2(bump.x - target.x, bump.z - target.z).length()
+	_tree_min = minf(_tree_min, d_cab if o["kind"].begins_with("sapin") or o["kind"].begins_with("arbre") else d_bump)
+	_inside = false
+	cam.fov = 75.0
+	_cabin_cam(Vector3(0.42, 1.52, -0.2), Vector3(0.42, 1.35, 4.0))
+	if absf(el - 7.0) < delta * 0.5 + 0.0001 or (el >= 7.0 and el - delta < 7.0):
+		_shot("sapins_%d" % _tree_idx)
+	if el >= 9.0 and el - delta < 9.0:
+		var passed := to_t.dot(fwd) < 0.0
+		_log("AUTOTEST %s : rayon bloquant %.2f m, bas de la couronne à %.2f m du sol, distance mini axe-%s = %.2f m, vitesse finale %.1f km/h, traversé=%s" % [o["kind"], o["r"], o["bottom"] - (car.global_position.y - 0.0), "pare-brise" if not o["kind"].begins_with("rocher") else "pare-chocs", _tree_min, kmh, passed])
+		_tree_idx += 1
+		if _tree_idx >= _tree_targets.size():
+			get_tree().quit()
+			return
+		_tree_t0 = _t
+		_place_before(_tree_targets[_tree_idx])
+
+
+# Balises souples : le 4x4 roule à 50 puis 90 km/h, décalé à droite pour que son aile
+# droite accroche une balise. On note la vitesse avant/après, l'angle de la balise,
+# la rotation de la voiture, puis le retour de la balise à la verticale.
+var _post: Node3D
+var _post_pass := 0
+var _post_log := {}
+
+func _next_post_ahead(min_d: float) -> Node3D:
+	var road: RoadGenerator = $RoadGenerator
+	var best: Node3D = null
+	var best_d := 1e9
+	var fwd: Vector3 = car.global_basis.z
+	for p in get_tree().get_nodes_in_group("road_posts"):
+		var d: Vector3 = p.global_position - car.global_position
+		var ahead := d.dot(fwd)
+		var info := road.sample_road(p.global_position)
+		if not info["found"] or (p.global_position - info["point"]).dot(info["right"]) < 0.0:
+			continue   # balises de droite seulement
+		if ahead > min_d and ahead < best_d:
+			best_d = ahead
+			best = p
+	return best
+
+func _run_autotest_posts(delta: float) -> void:
+	var road: RoadGenerator = $RoadGenerator
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	$Weather.random_events = false
+	$FallingTrees.enabled = false
+	car.external_input = true
+	var kmh: float = car.forward_speed * 3.6
+	var want := 50.0 if _post_pass <= 1 else 90.0
+	if at.call(0.05):
+		$Weather.hour = 15.0
+		$Weather.set_weather("degage", true)
+		car.handbrake_lever.set_angle_deg(0.0, true)
+		car.gear_lever.set_notch(2, true)
+	# vitesse régulée, sauf pendant le passage sur la balise (pas de gaz)
+	var near := false
+	if _post != null:
+		var dz: float = (_post.global_position - car.global_position).dot(car.global_basis.z)
+		near = dz < 12.0 and dz > -6.0
+	car.throttle_input = 0.0 if near else clampf((want - kmh) * 0.15, 0.0, 1.0)
+	car.brake_input = 0.0
+	# suit la route avec un décalage à droite : centre à 4,4 m de l'axe → l'aile droite
+	# (1 m) passe à 5,4 m, la balise est à 5,0 m
+	var lat := 4.3 if _post != null else 1.75
+	var fwd: Vector3 = car.global_basis.z
+	var info := road.sample_road(car.global_position + fwd * (8.0 + absf(car.forward_speed) * 0.5))
+	if info["found"]:
+		var target: Vector3 = info["point"] + info["right"] * lat
+		var to_t := target - car.global_position
+		to_t.y = 0.0
+		car._kb_steer = clampf(fwd.cross(to_t.normalized()).y * 2.5, -1.0, 1.0)
+	_inside = false
+	cam.fov = 70.0
+	if _post != null and not _post_log.has("cam_off"):
+		var dzc: float = (_post.global_position - car.global_position).dot(car.global_basis.z)
+		if dzc < 14.0:
+			# caméra fixe au bord de la route, en arrière de la balise, côté extérieur
+			if not _post_log.has("cam"):
+				var rgt: Vector3 = -car.global_basis.x
+				var fw: Vector3 = car.global_basis.z
+				_post_log["cam"] = [_post.global_position + rgt * 4.0 - fw * 5.0 + Vector3(0, 1.6, 0), _post.global_position + Vector3(0, 0.3, 0) + fw * 1.0]
+			cam.global_position = _post_log["cam"][0]
+			cam.look_at(_post_log["cam"][1])
+		else:
+			_cabin_cam(Vector3(0.42, 1.52, -0.2), Vector3(0.42, 1.35, 4.0))
+	else:
+		_cabin_cam(Vector3(0.42, 1.52, -0.2), Vector3(0.42, 1.35, 4.0))
+	if fmod(_t, 5.0) < delta:
+		_log("AUTOTEST t=%.0f vitesse %.0f km/h, balises chargées : %d" % [_t, kmh, get_tree().get_nodes_in_group("road_posts").size()])
+		if absf(kmh) < 2.0 and _t > 6.0 and not _post_log.has("stuck"):
+			_post_log["stuck"] = true
+			var inf2 := road.sample_road(car.global_position)
+			_log("AUTOTEST voiture arrêtée à %.1f m de l'axe, inclinaison %.0f°" % [(car.global_position - inf2["point"]).dot(inf2["right"]), rad_to_deg(car.global_basis.y.angle_to(Vector3.UP))])
+			_shot("balise_bloquee")
+	if _post == null and kmh > want - 3.0 and _t > 3.0:
+		_post = _next_post_ahead(45.0)
+		if _post:
+			_post_pass += 1
+			_post_log = {"hits0": _post.hits, "v0": -1.0, "vmin": 999.0, "bend": 0.0, "yaw": 0.0, "t_hit": -1.0, "shot": false}
+			_log("AUTOTEST passage %d à %.0f km/h vers une balise à %.0f m" % [_post_pass, kmh, (_post.global_position - car.global_position).length()])
+	if _post != null:
+		var dz: float = (_post.global_position - car.global_position).dot(car.global_basis.z)
+		if dz < 8.0 and _post_log["v0"] < 0.0:
+			_post_log["v0"] = kmh
+		if _post.hits > _post_log["hits0"] and _post_log["t_hit"] < 0.0:
+			_post_log["t_hit"] = _t
+		if _post_log["t_hit"] > 0.0 and _t - _post_log["t_hit"] < 1.5:
+			_post_log["vmin"] = minf(_post_log["vmin"], kmh)
+			_post_log["bend"] = maxf(_post_log["bend"], _post.get_bend_deg())
+			_post_log["yaw"] = maxf(_post_log["yaw"], rad_to_deg(absf(car.angular_velocity.y)))
+		# captures depuis la caméra fixe : couchée sous la voiture, puis qui se redresse
+		if _post_log["t_hit"] > 0.0:
+			var dt_hit: float = _t - _post_log["t_hit"]
+			for k in [[0.15, "a_contact"], [0.45, "b_couchee"], [1.0, "c_rebond"], [1.4, "d_retour"]]:
+				if dt_hit >= k[0] and dt_hit - delta < k[0]:
+					_shot("balise_%d_%s" % [_post_pass, k[1]])
+		if _post_log["t_hit"] > 0.0 and _t - _post_log["t_hit"] > 1.5 and not _post_log.has("logged"):
+			_post_log["logged"] = true
+			_log("AUTOTEST passage %d : touchée=%s, %.0f → %.0f km/h (−%.1f), balise couchée à %.0f°, rotation voiture max %.1f°/s" % [_post_pass, _post.hits > _post_log["hits0"], _post_log["v0"], _post_log["vmin"], _post_log["v0"] - _post_log["vmin"], _post_log["bend"], _post_log["yaw"]])
+			var p := _post
+			var num := _post_pass
+			_post_log["cam_off"] = true
+			get_tree().create_timer(4.0).timeout.connect(func(): _log("AUTOTEST balise %d, 5,5 s après le choc : %.1f° (redressée=%s)" % [num, p.get_bend_deg(), p.get_bend_deg() < 1.0]))
+			_post = null
+		elif _post_log["t_hit"] < 0.0 and dz < -10.0:
+			_log("AUTOTEST passage %d : balise PAS touchée" % _post_pass)
+			_post = null
+	if _post_pass >= 3 and _post == null and not _post_log.has("end"):
+		_post_log["end"] = _t
+	if _post_log.has("end") and _t - _post_log["end"] > 5.0:
 		get_tree().quit()
