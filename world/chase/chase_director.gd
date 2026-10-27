@@ -1,13 +1,14 @@
 class_name ChaseDirector
 extends Node
-## Histoire et déroulé de la partie : intro (lore sur fond noir, puis plan aérien des
-## deux voitures lancées sur la route, puis fondu dans l'habitacle : on prend le
-## volant), poursuite, conseils, fin de partie.
+## Histoire et déroulé de la partie : départ garé moteur coupé (voix d'intro), puis la
+## route, où la police surgit au hasard (Pursuer : bas-côté, barrage, derrière) ; on
+## peut la semer. Conseils, fin de partie. (L'ancienne intro cinématique existe encore
+## derrière `play_intro`, désactivée.)
 ##
-## Lore : la Pils, une pilule rose, a transformé toute la ville en « Essaim ».
-## Tu es le dernier qu'ils n'ont pas assimilé, et tu t'enfuis avec leur stock.
-## Une Pils te rend plus rapide qu'eux... et un peu plus comme eux.
-## Deux fins : rattrapé par l'Essaim, ou assimilé (100 %) : tu es devenu l'un d'eux.
+## Lore : la Pils, une pilule rose, a envahi la ville et la police traque tous ceux qui
+## en ont. Tu t'enfuis avec un sachet de vingt. Une Pils te rend plus rapide... et
+## chaque Pils te rend un peu plus accro.
+## Deux fins : rattrapé par la police, ou assimilé (100 %) : perdu dans la Pils.
 ##
 ## Les textes s'affichent devant les yeux (Label3D collé à la caméra, invisible dans
 ## les rétros) : lisibles en VR comme en mode bureau. Espace / Entrée ou A / X pour
@@ -15,16 +16,21 @@ extends Node
 
 const LORE := [
 	["2049.", "La Pils est arrivée en ville. Une pilule rose. Tout le monde en a pris."],
-	["L'ESSAIM", "Ceux qui l'avalent sourient pareil, pensent pareil, roulent pareil."],
-	["TOI", "Le dernier qu'ils n'ont pas assimilé. Et tu viens de voler leur stock."],
-	["LA PILS", "Elle te rend plus rapide qu'eux. Mais chaque Pils te rend un peu plus comme eux."],
+	["LA POLICE", "Elle traque tous ceux qui en ont. Barrages, patrouilles, partout."],
+	["TOI", "Tu viens de filer avec vingt Pils dans la boîte à gants."],
+	["LA PILS", "Elle te rend plus rapide qu'eux. Mais chaque Pils te rend un peu plus accro."],
 ]
 
 @export var car_path: NodePath
 @export var pursuer_path: NodePath
 @export var addiction_path: NodePath
 @export var pills_path: NodePath
-@export var play_intro := true
+@export var play_intro := false
+## Voix jouée au début de la partie, tant que le moteur n'est pas démarré.
+@export_file("*.wav", "*.ogg", "*.mp3") var start_voice_path := "res://audio/voice/demarre.wav"
+@export var start_voice_db := 0.0
+## Délai (s) avant la voix, le temps que le joueur s'installe.
+@export var start_voice_delay := 1.0
 @export_file("*.tscn") var menu_scene := "res://menu/main_menu.tscn"
 ## Secondes d'affichage de chaque écran de lore.
 @export var lore_time := 5.5
@@ -63,6 +69,8 @@ func _ready() -> void:
 	_trees = get_tree().get_first_node_in_group(FallingTreeManager.GROUP) as FallingTreeManager
 	if _pursuer:
 		_pursuer.caught.connect(_on_caught)
+		_pursuer.chase_started.connect(_on_chase_started)
+		_pursuer.lost.connect(_on_police_lost)
 	if _addiction:
 		_addiction.assimilated.connect(_on_assimilated)
 		_addiction.pill_taken.connect(_on_pill_taken)
@@ -92,7 +100,7 @@ func _run_intro() -> void:
 	if _pursuer:
 		_pursuer.start_escort(55.0)
 	_fade_curtain(0.0, 1.2)
-	await _say("ILS T'ONT TROUVÉ.", "L'Essaim est sur tes traces.", aerial_time * 0.45)
+	await _say("ILS T'ONT TROUVÉ.", "La police est sur tes traces.", aerial_time * 0.45)
 	if not _skip:
 		await _say("ILS SE RAPPROCHENT.", "Ne ralentis jamais.", aerial_time * 0.45)
 	# Fondu au noir, retour au volant.
@@ -112,17 +120,36 @@ func _run_intro() -> void:
 func _wait_engine_start() -> void:
 	if _car == null or _car.is_engine_running():
 		return
-	_show("DÉMARRE !", "Trouve les clés et démarre le moteur.")
+	_play_start_voice()
 	while not _car.is_engine_running():
 		await get_tree().process_frame
-	_text_target = 0.0
+
+
+## Voix du début (« trouve les clés, démarre… ») : à remplacer par ton enregistrement
+## dans audio/voice/demarre.wav (même nom), ou changer start_voice_path.
+func _play_start_voice() -> void:
+	if not ResourceLoader.exists(start_voice_path):
+		return
+	var stream := load(start_voice_path) as AudioStream
+	if stream == null:
+		return
+	var p := AudioStreamPlayer.new()
+	p.name = "StartVoice"
+	p.stream = stream
+	p.volume_db = start_voice_db
+	add_child(p)
+	await get_tree().create_timer(start_voice_delay).timeout
+	if is_instance_valid(p):
+		p.play()
+		print("Voix de départ : ", start_voice_path, " (%.1f s)" % stream.get_length())
+		p.finished.connect(p.queue_free)
 
 
 func _start_chase() -> void:
 	if _car:
 		_car.external_input = false
 	if _pursuer:
-		_pursuer.start_chase()
+		_pursuer.start_patrols()   # la police surgira au hasard sur la route
 	_set_paused(false)
 	if _pills:
 		_pills.start()
@@ -277,13 +304,13 @@ func _hints() -> void:
 	if _addiction == null or _pursuer == null or _pursuer.state != Pursuer.State.CHASE:
 		return
 	if _addiction.craving > 0.65:
-		_hint_once("manque", "LE MANQUE", "Il te ralentit. Trouve une Pils : suis le faisceau rose.")
+		_hint_once("manque", "LE MANQUE", "Il te ralentit. Avale une Pils : le sachet est quelque part dans la voiture.")
 	if _pursuer.gap < 45.0:
 		_hint_once("proche", "ILS SONT DERRIÈRE TOI", "Une Pils = un boost. Avale-la.")
 	if _addiction.assimilation >= 0.45:
-		_hint_once("inversion", "TU CHANGES", "Sans Pils, tout devient flou. Tu deviens l'un d'eux.")
+		_hint_once("inversion", "TU CHANGES", "Sans Pils, tout devient flou. Tu ne peux plus t'en passer.")
 	if _addiction.assimilation >= 0.8:
-		_hint_once("presque", "ASSIMILATION " + str(roundi(_addiction.assimilation * 100.0)) + " %", "Encore quelques Pils et tu seras l'Essaim.")
+		_hint_once("presque", "ASSIMILATION " + str(roundi(_addiction.assimilation * 100.0)) + " %", "Encore quelques Pils et tu ne reviendras pas.")
 
 
 func _hint_once(key: String, title: String, sub: String) -> void:
@@ -299,16 +326,32 @@ func _on_pill_taken(count: int) -> void:
 		_say("BOOST !", "Mais tu leur ressembles un peu plus...", 3.0)
 
 
+func _on_chase_started(kind: String) -> void:
+	if game_over:
+		return
+	var sub := "Sème-la : creuse l'écart jusqu'à ce qu'elle te perde."
+	if kind == "barrage":
+		sub = "Elle a démarré derrière toi. " + sub
+	if not _hint_done.has("police"):
+		_hint_done["police"] = true
+		_say("LA POLICE !", sub, 3.5)
+
+
+func _on_police_lost() -> void:
+	if not game_over and not _co_running:
+		_say("SEMÉE !", "La police a perdu ta trace... pour l'instant.", 3.0)
+
+
 # --- Fins ---------------------------------------------------------------------------------
 
 func _on_caught() -> void:
-	_end("ILS T'ONT RATTRAPÉ.", "L'Essaim t'a eu.")
+	_end("ILS T'ONT RATTRAPÉ.", "La police t'a eu.")
 
 
 func _on_assimilated() -> void:
 	if _pursuer:
 		_pursuer.stop()
-	_end("TU ES L'ESSAIM.", "Tu souris. Comme eux.")
+	_end("PERDU DANS LA PILS.", "Tu souris. Tu ne sais plus pourquoi tu roulais.")
 
 
 func _end(title: String, line: String) -> void:

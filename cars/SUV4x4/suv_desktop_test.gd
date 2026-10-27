@@ -7,7 +7,7 @@ extends Node3D
 
 @export var autotest := false
 ## Scénario du test automatique : "objets" (rangements) ou "arbres".
-@export_enum("objets", "arbres", "aleatoire", "phares", "retros", "portes", "boite", "combine", "essuie", "plafonnier", "nature", "pluie", "balayage", "menu", "lunette", "moteur", "klaxon", "vitres", "ceinture", "cle", "depart", "pare_soleil", "cle_f", "physique", "eclairage", "radio", "radio_nuit", "radio_pwr", "ambiance", "rangements", "ceintures", "vitesses", "sapins", "balises", "playlist") var autotest_scenario := "objets"
+@export_enum("objets", "arbres", "aleatoire", "phares", "retros", "portes", "boite", "combine", "essuie", "plafonnier", "nature", "pluie", "balayage", "menu", "lunette", "moteur", "klaxon", "vitres", "ceinture", "cle", "depart", "pare_soleil", "cle_f", "physique", "eclairage", "radio", "radio_nuit", "radio_pwr", "ambiance", "rangements", "ceintures", "vitesses", "sapins", "balises", "playlist", "animaux", "pochette", "lieu", "police", "manque") var autotest_scenario := "objets"
 
 @onready var car: SUV4x4 = $SUV4x4
 @onready var cam: Camera3D = $Camera3D
@@ -34,6 +34,10 @@ func _physics_process(delta: float) -> void:
 	_mouse_hand.set_process(_inside)
 	_mouse_hand.set_physics_process(_inside)
 	if autotest:
+		# traversées d'animaux aléatoires coupées, sauf dans leur propre scénario
+		var am := $RoadGenerator.get_node_or_null("Animals")
+		if am and autotest_scenario != "animaux":
+			am.set("crossings_enabled", false)
 		if autotest_scenario == "arbres":
 			_run_autotest(delta)
 		elif autotest_scenario == "aleatoire":
@@ -102,6 +106,16 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_posts(delta)
 		elif autotest_scenario == "playlist":
 			_run_autotest_playlist(delta)
+		elif autotest_scenario == "animaux":
+			_run_autotest_animals(delta)
+		elif autotest_scenario == "pochette":
+			_run_autotest_pill_bag(delta)
+		elif autotest_scenario == "lieu":
+			_run_autotest_start_site(delta)
+		elif autotest_scenario == "police":
+			_run_autotest_police(delta)
+		elif autotest_scenario == "manque":
+			_run_autotest_craving(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -319,11 +333,11 @@ func _run_autotest_items(delta: float) -> void:
 	if at.call(3.5):
 		_report("ouverts")
 		_shot("objets_2_boite_a_gants")
-	# Pilule : de la boîte à gants vers le siège passager (lâchée en l'air)
-	if at.call(4.0): _grab_item("PillCapsule", Vector3(-0.45, 1.15, 0.0), 1.0)
+	# Pochette de pilules : vers le siège passager (lâchée en l'air)
+	if at.call(4.0): _grab_item("PillBag", Vector3(-0.45, 1.15, 0.0), 1.0)
 	if at.call(5.3): _release_item()
-	# Pilule smiley : boîte à gants -> accoudoir (rangement)
-	if at.call(5.5): _grab_item("PillSmiley", Vector3(0.0, 0.75, 0.1), 1.0)
+	# Pochette : siège -> accoudoir (rangement)
+	if at.call(5.5): _grab_item("PillBag", Vector3(0.0, 0.75, 0.1), 1.0)
 	if at.call(6.8): _release_item()
 	# GPS : décroché puis remis sur son support
 	if at.call(7.0): _grab_item("GPS", Vector3(0.2, 1.15, 0.4), 0.6)
@@ -1683,7 +1697,7 @@ func _run_autotest_physics(delta: float) -> void:
 		# objets posés à la main (lâchés juste au-dessus de leur surface)
 		var spots := {
 			"Phone": Vector3(-0.47, 0.92, -0.02), "Joint": Vector3(-0.32, 0.92, 0.18),
-			"PillCapsule": Vector3(-0.42, 1.2, 0.76), "Thermos": Vector3(-0.42, 0.66, 0.62),
+			"PillBag": Vector3(-0.42, 1.2, 0.76), "Thermos": Vector3(-0.42, 0.66, 0.62),
 			"Cigarette": Vector3(0.0, 0.98, 0.05),
 		}
 		for n in spots:
@@ -2549,4 +2563,591 @@ func _run_autotest_playlist(delta: float) -> void:
 		r.next_station()
 	if at.call(9.8):
 		_log("AUTOTEST ▶ encore (retour à la 1re) : station=%d (%s) flux=%s" % [r.station, r.STATIONS[r.station]["name"], r.speakers[0].stream.resource_path.get_file()])
+		get_tree().quit()
+
+
+# Animaux : espèces selon le biome, promeneurs, puis traversées devant la voiture à
+# 60 km/h : biche et moutons avec freinage (évités), sanglier, lapin et biche sans
+# freiner (chocs). Vitesse perdue au choc, captures depuis l'arrière de la voiture.
+var _an_trials := [["deer", true], ["sheep", true], ["boar", false], ["rabbit", false], ["deer", false], ["sheep", false]]
+var _an_i := -1
+var _an_t0 := 0.0
+var _an_log := {}
+var _an_group: Array = []
+
+func _run_autotest_animals(delta: float) -> void:
+	var road: RoadGenerator = $RoadGenerator
+	var am = road.get_node("Animals")
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	$Weather.random_events = false
+	$FallingTrees.enabled = false
+	am.crossings_enabled = false
+	car.external_input = true
+	var kmh: float = car.forward_speed * 3.6
+	if at.call(0.05):
+		$Weather.hour = 15.0
+		$Weather.set_weather("degage", true)
+		car.handbrake_lever.set_angle_deg(0.0, true)
+		car.gear_lever.set_notch(2, true)
+	if at.call(1.0):
+		var bw: Array = road.get_biome_at(car.global_position)
+		var counts := {}
+		for i in 400:
+			var sp: String = am.pick_species(car.global_position)
+			counts[sp] = counts.get(sp, 0) + 1
+		_log("AUTOTEST biome ici [sapins, mixte, prairie, montagne] = [%.2f, %.2f, %.2f, %.2f] -> tirages sur 400 : %s" % [bw[0], bw[1], bw[2], bw[3], counts])
+		# tirages dans des biomes purs (poids donnés à la main)
+		for pure in [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]:
+			var c2 := {}
+			for i in 400:
+				var tot := 0.0
+				var ws := {}
+				for sp in am.SPECIES:
+					var w := 0.0
+					for b in 4:
+						w += pure[b] * float(am.SPECIES[sp]["weights"][b])
+					ws[sp] = w
+					tot += w
+				var r := randf() * tot
+				for sp in ws:
+					r -= ws[sp]
+					if r <= 0.0:
+						c2[sp] = c2.get(sp, 0) + 1
+						break
+			_log("AUTOTEST biome pur %s -> %s" % [pure, c2])
+	if at.call(6.0):
+		var desc := PackedStringArray()
+		for a in am.animals:
+			var lat: float = am.lateral_of(a.global_position)
+			desc.append("%s à %.0f m (côté %.0f m)%s" % [a.species, a.global_position.distance_to(car.global_position), lat, " jeune" if a.size_scale < 0.8 else ""])
+		_log("AUTOTEST promeneurs (%d) : %s" % [am.animals.size(), ", ".join(desc)])
+		# vue sur le promeneur le plus proche
+		var best = null
+		var bd := 1e9
+		for a in am.animals:
+			var d: float = a.global_position.distance_to(car.global_position)
+			if d < bd:
+				bd = d
+				best = a
+		if best:
+			_an_log["look"] = best
+	if _t > 6.0 and _t < 7.0 and _an_log.has("look") and is_instance_valid(_an_log["look"]):
+		var a: Node3D = _an_log["look"]
+		cam.fov = 50.0
+		cam.global_position = a.global_position + Vector3(3.5, 1.6, 3.5)
+		cam.look_at(a.global_position + Vector3(0, 0.5, 0))
+		if at.call(6.8):
+			_shot("animaux_0_promeneur_" + a.species)
+		return
+	# conduite : voie de droite, 60 km/h, freinage si un animal traverse devant
+	var fwd: Vector3 = car.global_basis.z
+	var info := road.sample_road(car.global_position + fwd * (8.0 + absf(car.forward_speed) * 0.5))
+	if info["found"]:
+		var target: Vector3 = info["point"] + info["right"] * 1.75
+		var to_t := target - car.global_position
+		to_t.y = 0.0
+		_steer(clampf(fwd.cross(to_t.normalized()).y * 2.0, -1.0, 1.0))
+	var brake := false
+	var nearest := 1e9
+	if _an_i >= 0 and _an_i < _an_trials.size():
+		for a in _an_group:
+			if not is_instance_valid(a):
+				continue
+			var d: Vector3 = a.global_position - car.global_position
+			var ahead: float = d.dot(fwd)
+			var lat: float = am.lateral_of(a.global_position)
+			if ahead > 0.0:
+				nearest = minf(nearest, ahead)
+			if _an_trials[_an_i][1] and ahead > 0.0 and ahead < 70.0 and (absf(lat) < 4.5 or a.crossing):
+				brake = true
+	car.throttle_input = 0.0 if brake else clampf((60.0 - kmh) * 0.15, 0.0, 1.0)
+	car.brake_input = 1.0 if brake else 0.0
+	_inside = false
+	cam.fov = 70.0
+	_cabin_cam(Vector3(0.0, 3.2, -8.0), Vector3(0.0, 1.0, 12.0))
+	# essais successifs
+	if _an_i < 0 and _t > 9.0 and kmh > 55.0:
+		_an_i = 0
+		_an_start_trial(am)
+	if _an_i >= 0 and _an_i < _an_trials.size():
+		var el := _t - _an_t0
+		_an_log["vmax"] = maxf(_an_log.get("vmax", 0.0), kmh) if am.animals_hit == _an_log["hits0"] else _an_log.get("vmax", 0.0)
+		if am.animals_hit > _an_log["hits0"]:
+			if not _an_log.has("t_hit"):
+				_an_log["t_hit"] = _t
+				_an_log["v_hit"] = _an_log["vmax"]
+			_an_log["vmin"] = minf(_an_log.get("vmin", 999.0), kmh) if _t - _an_log["t_hit"] < 1.2 else _an_log.get("vmin", 999.0)
+			if not _an_log.has("shot_hit") and _t - _an_log["t_hit"] > 0.25:
+				_an_log["shot_hit"] = true
+				_shot("animaux_%d_%s_choc" % [_an_i + 1, _an_trials[_an_i][0]])
+		if nearest < 30.0 and not _an_log.has("shot_near"):
+			_an_log["shot_near"] = true
+			_shot("animaux_%d_%s_traverse" % [_an_i + 1, _an_trials[_an_i][0]])
+		# où est l'animal quand l'avant de la voiture passe à sa hauteur ?
+		for a in _an_group:
+			if not is_instance_valid(a):
+				continue
+			var l: Vector3 = car.to_local(a.global_position)
+			var key := "pz%d" % a.get_instance_id()
+			if _an_log.has(key) and _an_log[key] > 2.5 and l.z <= 2.5:
+				_an_log["pass"] = _an_log.get("pass", "") + " %s x=%.1f m (état %d, vitesse %.1f)" % [a.species, l.x, a.state, a.speed]
+			_an_log[key] = l.z
+		# sons joués par le groupe
+		for a in _an_group:
+			if is_instance_valid(a) and a._player and a._player.playing:
+				_an_log["sound"] = true
+		var still_crossing := false
+		for a in _an_group:
+			if is_instance_valid(a) and a.crossing:
+				still_crossing = true
+		if el > 11.0 and (not still_crossing or el > 30.0) and kmh > 50.0:
+			var sp: String = _an_trials[_an_i][0]
+			var hit: bool = am.animals_hit > _an_log["hits0"]
+			var txt := "AUTOTEST traversée %d : %s ×%d, %s : " % [_an_i + 1, sp, _an_group.size(), "freinage" if _an_trials[_an_i][1] else "sans freiner"]
+			if hit:
+				txt += "CHOC à %.0f km/h → %.0f km/h (−%.1f)" % [_an_log["v_hit"], _an_log["vmin"], _an_log["v_hit"] - _an_log["vmin"]]
+			else:
+				txt += "évité (vitesse mini %.0f km/h)" % _an_log.get("vmin_brake", kmh)
+			var states := PackedStringArray()
+			for a in _an_group:
+				if is_instance_valid(a):
+					states.append("%s(côté %.0f m, état %d)" % [a.species, am.lateral_of(a.global_position), a.state])
+			txt += " ; son joué=%s ; après : %s" % [_an_log.get("sound", false), ", ".join(states)]
+			txt += " ; au passage de la voiture :" + _an_log.get("pass", " -")
+			_log(txt)
+			_an_i += 1
+			if _an_i >= _an_trials.size():
+				_log("AUTOTEST bilan : traversées=%d évitées=%d chocs=%d" % [am.crossings, am.crossings_avoided, am.animals_hit])
+				get_tree().quit()
+			else:
+				_an_start_trial(am)
+		if brake:
+			_an_log["vmin_brake"] = minf(_an_log.get("vmin_brake", 999.0), kmh)
+
+
+func _an_start_trial(am) -> void:
+	_an_t0 = _t
+	_an_log = {"hits0": am.animals_hit}
+	var sp: String = _an_trials[_an_i][0]
+	_an_group = am.spawn_crossing(sp, 75.0, 1 if _an_i % 2 == 0 else -1)
+	for a in _an_group:
+		if sp == "deer":
+			a._freeze = 0.0 if not _an_trials[_an_i][1] else a._freeze   # chocs : pas d'arrêt
+	_log("AUTOTEST traversée %d lancée : %s ×%d à 75 m, voiture à %.0f km/h" % [_an_i + 1, sp, _an_group.size(), car.forward_speed * 3.6])
+
+
+# Pochette de pilules : placement au hasard, ouverture (F), visée (pilules / zip),
+# pilule avalée avec F, pilule sortie à la main et portée à la bouche (VR), pilule
+# posée puis avalée avec F, fermeture. Un PillAddiction est ajouté pour l'effet.
+var _pb_add: Node
+var _pb_held: VRInteractable
+
+## Interactable que viserait la souris (même règle que MouseHand).
+func _aim_pick(origin: Vector3, to: Vector3) -> String:
+	var dir := (to - origin).normalized()
+	var best: VRInteractable = null
+	var best_t := INF
+	for n in get_tree().get_nodes_in_group(VRInteractable.GROUP):
+		var it := n as VRInteractable
+		if it == null or not it.enabled or not it.is_visible_in_tree():
+			continue
+		var tt := it.ray_hit_distance(origin, dir, 3.0, it.grab_distance * 0.3)
+		if tt - it.pick_bonus * 3.0 < best_t - (best.pick_bonus * 3.0 if best else 0.0):
+			best = it
+			best_t = tt
+	return best.name if best and best_t < INF else "rien"
+
+## Interactable que prendrait une main VR à cette position (même règle que la main).
+func _hand_pick(p: Vector3) -> String:
+	var best: VRInteractable = null
+	var best_d := INF
+	for n in get_tree().get_nodes_in_group(VRInteractable.GROUP):
+		var it := n as VRInteractable
+		if it == null or not it.enabled or not it.is_visible_in_tree():
+			continue
+		var d := it.get_distance_to(p)
+		if d < it.highlight_distance and d - it.pick_bonus < best_d - (best.pick_bonus if best else 0.0):
+			best = it
+			best_d = d
+	return best.name if best else "rien"
+
+func _run_autotest_pill_bag(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	$Weather.random_events = false
+	$FallingTrees.enabled = false
+	car.external_input = true
+	car.throttle_input = 0.0
+	car.brake_input = 1.0
+	_inside = false
+	if _hand == null:
+		_hand = Node3D.new()
+		add_child(_hand)
+	if _held or _pb_held:
+		var k := clampf((_t - _move_t0) / _move_dur, 0.0, 1.0)
+		_hand.global_position = car.to_global(_move_from.lerp(_move_to, k))
+		(_held if _held else _pb_held).grab_update(_hand)
+	var bag_item := _item("PillBag")
+	var bag = bag_item.get_node("Grab") if bag_item else null
+	cam.fov = 60.0
+	_cabin_cam(Vector3(-0.2, 1.28, 0.28), Vector3(-0.45, 0.88, 0.0))
+	var st := func() -> String:
+		var taken: int = _pb_add.pills_taken if _pb_add else -1
+		return "ouverte=%s pilules=%d avalées=%d (compteur %d) manque=%.2f" % [bag.open, bag.pills_left(), taken, get_tree().root.get_meta("pills_eaten", 0), _pb_add.craving if _pb_add else -1.0]
+	if at.call(0.05):
+		$Weather.hour = 14.0
+		$Weather.set_weather("degage", true)
+		_pb_add = get_tree().get_first_node_in_group("pill_addiction")
+		if _pb_add == null:
+			_pb_add = preload("res://world/pills/pill_addiction.gd").new()
+			_pb_add.set("car_path", car.get_path())
+			add_child(_pb_add)
+		_pb_add.set("craving", 0.6)
+	if at.call(0.3):
+		var z = bag_item.get_parent()
+		_log("AUTOTEST pochette rangée au hasard : %s (%s), %d pilules, fermée=%s" % [z.get("zone_name") if z.get("zone_name") else z.name, car.to_local(bag_item.global_position), bag.pills_left(), not bag.open])
+		_grab_item("PillBag", Vector3(-0.45, 1.0, 0.0), 0.8)
+	if at.call(1.3):
+		_release_item()
+	if at.call(2.2):
+		var c := cam.global_position
+		var pills: Vector3 = bag._pills_root.global_position + bag_item.global_basis * Vector3(0, 0.004, -0.01)
+		var zip: Vector3 = bag_item.global_transform * Vector3(0, 0.004, 0.06)
+		_log("AUTOTEST pochette posée : %s ; fermée, visée sur les pilules -> %s" % [car.to_local(bag_item.global_position), _aim_pick(c, pills)])
+		_shot("pochette_1_fermee")
+		bag.toggle()   # F sur la pochette fermée
+	if at.call(2.8):
+		var c := cam.global_position
+		var pills: Vector3 = bag_item.global_transform * Vector3(0.0, 0.004, -0.02)
+		var zip: Vector3 = bag_item.global_transform * Vector3(0, 0.005, 0.062)
+		_log("AUTOTEST F -> %s ; visée pilules -> %s, visée zip -> %s ; main VR sur les pilules -> %s, sur le zip -> %s" % [st.call(), _aim_pick(c, pills), _aim_pick(c, zip), _hand_pick(pills + bag_item.global_basis.y * 0.01), _hand_pick(zip)])
+		_shot("pochette_2_ouverte")
+		bag._taker.toggle()   # F en visant les pilules
+	if at.call(3.2):
+		_log("AUTOTEST F sur les pilules : " + st.call())
+		# VR : main dans la pochette, on serre -> une pilule dans la main
+		_hand.global_position = bag_item.global_transform * Vector3(0.0, 0.01, -0.02)
+		_pb_held = bag._taker
+		_pb_held.grab(_hand)
+		var mouth: Vector3 = EdiblePickable.mouth_position(get_tree())
+		_move_from = car.to_local(_hand.global_position)
+		_move_to = car.to_local(mouth)
+		_move_t0 = _t
+		_move_dur = 1.0
+		_log("AUTOTEST main dans la pochette : %s ; pilule tenue=%s" % [st.call(), bag._taker._held.size()])
+	if at.call(3.9):
+		_shot("pochette_3_vers_la_bouche")
+	if at.call(4.6):
+		_log("AUTOTEST pilule portée à la bouche : " + st.call())
+		_pb_held.release(_hand)
+		_pb_held = null
+	if at.call(5.0):
+		# une pilule sortie et posée sur le siège
+		_hand.global_position = bag_item.global_transform * Vector3(0.0, 0.01, -0.02)
+		_pb_held = bag._taker
+		_pb_held.grab(_hand)
+		_move_from = car.to_local(_hand.global_position)
+		_move_to = Vector3(-0.35, 0.95, -0.1)
+		_move_t0 = _t
+		_move_dur = 0.5
+	if at.call(5.7):
+		_pb_held.release(_hand)
+		_pb_held = null
+	if at.call(6.3):
+		var loose: Array = []
+		for n in car.find_children("*", "RigidBody3D", true, false):
+			if n.get_node_or_null("Grab") is EdiblePickable:
+				loose.append(n)
+		_log("AUTOTEST pilule sortie et posée : %d pilule(s) hors pochette %s ; %s" % [loose.size(), loose.map(func(n): return "%s %s" % [n.name, car.to_local(n.global_position)]), st.call()])
+		_shot("pochette_4_pilule_posee")
+		for n in loose:
+			n.get_node("Grab").toggle()   # F en la visant
+	if at.call(6.8):
+		_log("AUTOTEST F sur la pilule posée : " + st.call())
+		bag.toggle()   # F sur le zip : fermée
+	if at.call(7.4):
+		_log("AUTOTEST refermée : %s ; zone pilules active=%s" % [st.call(), bag._taker.enabled])
+		_shot("pochette_5_refermee")
+		get_tree().quit()
+
+
+# --- Lieu de départ (forcé par override.cfg : [nfp] start_site="motel") ---------
+
+var _ls := {}
+
+
+func _run_autotest_start_site(delta: float) -> void:
+	var road: RoadGenerator = $RoadGenerator
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	$Weather.random_events = false
+	$FallingTrees.enabled = false
+	car.external_input = true
+	_inside = false
+	var site: Node3D = road.find_child("StartSite", true, false)
+	var kmh: float = car.forward_speed * 3.6
+	if at.call(0.05):
+		$Weather.hour = 14.0
+		$Weather.set_weather("degage", true)
+		car.handbrake_lever.set_angle_deg(0.0, true)
+		car.gear_lever.set_notch(1, true)   # N le temps des photos
+	if at.call(1.0):
+		var info: Dictionary = road.get_start_site()
+		var lp := road.to_local(car.global_position)
+		var q := PhysicsRayQueryParameters3D.create(car.global_position + Vector3.UP, car.global_position + Vector3.DOWN * 5.0, 1, [car.get_rid()])
+		var hit := get_world_3d().direct_space_state.intersect_ray(q)
+		var under := "rien"
+		if hit:
+			under = "%s (y=%.2f)" % [hit["collider"].name, hit["position"].y]
+		_log("AUTOTEST lieu=%s noeud=%s voiture latéral=%.1f s=%.1f y=%.2f sur_lieu=%s sol=%s" % [info.get("type", "?"), site != null, -lp.x, lp.z, car.global_position.y, road.in_start_site(lp), under])
+		_ls["y0"] = car.global_position.y
+	if site == null:
+		if at.call(3.0):
+			_log("AUTOTEST ÉCHEC : pas de StartSite")
+			get_tree().quit()
+		return
+	var sx := site.global_transform
+	var depth: float = site.get("depth")
+	var center := sx * Vector3(0, 1.0, depth * 0.5)
+	cam.fov = 65.0
+	if _t < 2.6:
+		cam.global_position = sx * Vector3(-depth * 0.2, 13.0, -14.0)
+		cam.look_at(center)
+		if at.call(2.4):
+			_shot("lieu_%s_1_vue" % site.get("site_type"))
+		return
+	if _t < 4.2:
+		var slen: float = site.get("length")
+		cam.global_position = sx * Vector3(-slen * 0.5 - 7.0, 2.0, -5.0)
+		cam.look_at(sx * Vector3(-slen * 0.1, 2.0, depth * 0.45))
+		if at.call(4.0):
+			_shot("lieu_%s_2_route" % site.get("site_type"))
+		return
+	if _t < 5.8:
+		cam.global_position = car.global_position + car.global_basis.z * -6.0 + Vector3.UP * 2.6
+		cam.look_at(car.global_position + Vector3.UP)
+		if at.call(5.6):
+			_shot("lieu_%s_3_voiture" % site.get("site_type"))
+			_log("AUTOTEST stabilité : voiture y=%.2f (départ %.2f), vitesse %.2f m/s" % [car.global_position.y, _ls.get("y0", 0.0), car.linear_velocity.length()])
+		return
+	if at.call(5.8):
+		car.gear_lever.set_notch(2, true)   # D
+	# sortie vers la route : vise la voie de droite un peu plus loin
+	var fwd: Vector3 = car.global_basis.z
+	var info2 := road.sample_road(car.global_position + fwd * 10.0)
+	if info2["found"]:
+		var target: Vector3 = info2["point"] + info2["right"] * 1.75 + info2["dir"] * 6.0
+		var to_t := target - car.global_position
+		to_t.y = 0.0
+		_steer(clampf(fwd.cross(to_t.normalized()).y * 2.0, -1.0, 1.0))
+	car.throttle_input = clampf((25.0 - kmh) * 0.15, 0.0, 1.0)
+	car.brake_input = 0.0
+	_cabin_cam(Vector3(0.0, 3.2, -8.0), Vector3(0.0, 1.0, 12.0))
+	var here := road.sample_road(car.global_position)
+	var lat: float = absf(float(here["lateral"])) if here["found"] else -1.0
+	_ls["vmax"] = maxf(_ls.get("vmax", 0.0), kmh)
+	if lat >= 0.0 and lat < 3.0 and not _ls.has("t_road"):
+		_ls["t_road"] = _t
+		_log("AUTOTEST sur la route après %.1f s (écart à l'axe %.1f m, %.0f km/h)" % [_t - 5.8, lat, kmh])
+	if at.call(9.0):
+		_shot("lieu_%s_4_sortie" % site.get("site_type"))
+	if at.call(16.0):
+		_shot("lieu_%s_5_route" % site.get("site_type"))
+		_log("AUTOTEST fin : écart à l'axe %.1f m, vmax %.0f km/h, route atteinte=%s" % [lat, _ls["vmax"], _ls.has("t_road")])
+		get_tree().quit()
+
+
+# --- Police : bas-côté, barrage, derrière ; on la sème, puis on se fait prendre ----
+
+var _pv := {"phase": 0, "lat": 1.75, "v": 100.0}
+var _pol: Pursuer
+
+
+func _pol_log(msg: String) -> void:
+	_log("AUTOTEST [%.1f s] %s" % [_t, msg])
+
+
+func _run_autotest_police(delta: float) -> void:
+	var road: RoadGenerator = $RoadGenerator
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	$Weather.random_events = false
+	$FallingTrees.enabled = false
+	car.external_input = true
+	_inside = false
+	var kmh: float = car.forward_speed * 3.6
+	if at.call(0.05):
+		$Weather.hour = 15.0
+		$Weather.set_weather("degage", true)
+		car.handbrake_lever.set_angle_deg(0.0, true)
+		car.gear_lever.set_notch(2, true)
+		_pol = Pursuer.new()
+		_pol.name = "Pursuer"
+		_pol.road_path = NodePath("../RoadGenerator")
+		_pol.car_path = NodePath("../SUV4x4")
+		_pol.auto_encounters = false
+		# poursuivante lente et vite semée : le test reste court
+		_pol.speed_start = 95.0
+		_pol.speed_end = 95.0
+		_pol.lose_gap = 150.0
+		_pol.lose_time = 3.0
+		add_child(_pol)
+		_pol.chase_started.connect(func(k): _pol_log("poursuite lancée (%s), écart %.0f m, vitesse police %.0f km/h" % [k, _pol.gap, _pol.get_speed_kmh()]); _pv["t_chase"] = _t; _pv["v"] = 160.0; _pv["lat"] = 1.75)
+		_pol.lost.connect(func(): _pol_log("SEMÉE (phase %d)" % _pv["phase"]); _pv["t_lost"] = _t)
+		_pol.caught.connect(func(): _pol_log("RATTRAPÉ (écart %.1f m)" % _pol.gap); _pv["t_caught"] = _t)
+	if at.call(1.0):
+		_pol.start_patrols()
+		_pol_log("patrouilles : état %d" % _pol.state)
+	# conduite : tient la voie demandée à la vitesse demandée
+	var fwd: Vector3 = car.global_basis.z
+	var info := road.sample_road(car.global_position + fwd * (8.0 + absf(car.forward_speed) * 0.45))
+	if info["found"]:
+		var target: Vector3 = info["point"] + info["right"] * float(_pv["lat"])
+		var to_t := target - car.global_position
+		to_t.y = 0.0
+		_steer(clampf(fwd.cross(to_t.normalized()).y * 2.2, -1.0, 1.0))
+	var v: float = _pv["v"]
+	car.throttle_input = 1.0 if v > 155.0 else clampf((v - kmh) * 0.15, 0.0, 1.0)
+	car.brake_input = clampf((kmh - v - 4.0) * 0.1, 0.0, 1.0)
+	cam.fov = 70.0
+	if not _pv.has("cam_set"):
+		_cabin_cam(Vector3(0.0, 3.2, -8.0), Vector3(0.0, 1.0, 12.0))
+	_pv.erase("cam_set")
+	if _pol == null or _t < 1.5:
+		return
+	var car_s: float = road.sample_road(car.global_position)["s"]
+	var ph: int = _pv["phase"]
+	# --- 1 : voiture garée sur le bas-côté
+	if ph == 0 and _t > 3.0:
+		_pv["phase"] = 1
+		_pol_log("bas-côté : %s" % _pol.force_encounter("bord", 200.0))
+	if ph == 1:
+		if _pol.state == Pursuer.State.WAIT:
+			if _pol.gap > -45.0 and not _pv.has("s1a"):
+				_pv["s1a"] = true
+				_shot("police_1_bascote")
+			if _pol.gap > -25.0:
+				_pv["cam_set"] = true
+				_cabin_cam(Vector3(-2.5, 2.0, 2.0), Vector3(3.0, 0.5, 25.0))
+				if not _pv.has("s1b"):
+					_pv["s1b"] = true
+					_shot("police_1_bascote_proche")
+		if _pv.has("t_chase") and _t - float(_pv["t_chase"]) > 2.0 and not _pv.has("s1c"):
+			_pv["s1c"] = true
+		if _pv.has("t_chase") and _t - float(_pv["t_chase"]) < 6.0:
+			_pv["cam_set"] = true
+			_cabin_cam(Vector3(0.0, 2.6, 6.0), Vector3(0.0, 1.0, -20.0))
+			if _t - float(_pv["t_chase"]) > 1.5 and not _pv.has("s1d"):
+				_pv["s1d"] = true
+				_shot("police_1_demarre")
+		if _pv.has("t_lost"):
+			_pv["phase"] = 2
+			_pv.erase("t_chase")
+			_pv.erase("t_lost")
+			_pv["v"] = 100.0
+	# --- 2 : barrage
+	if ph == 2 and not _pv.has("b_set") and kmh > 90.0:
+		_pv["b_set"] = true
+		_pol_log("barrage : %s" % _pol.force_encounter("barrage", 230.0))
+		_pv["b_info"] = _pol.get_block_info()
+		_pol_log("barrage : %s" % [_pv["b_info"]])
+	if ph == 2 and _pv.has("b_set"):
+		var bi: Array = _pv["b_info"]
+		if bi.size() == 4 and not _pv.has("t_chase"):
+			var d0: float = float(bi[0]) - car_s
+			if d0 < 90.0:
+				_pv["v"] = 42.0
+			if car_s < float(bi[0]) + 4.0:
+				_pv["lat"] = -float(bi[1])
+			elif car_s < float(bi[2]) + 4.0:
+				_pv["lat"] = -float(bi[3])
+			else:
+				_pv["lat"] = 1.75
+			if d0 < 60.0 and not _pv.has("s2a"):
+				_pv["s2a"] = true
+				_shot("police_2_barrage")
+			if d0 < 35.0 and d0 > -30.0:
+				_pv["cam_set"] = true
+				cam.global_position = car.global_position + Vector3.UP * 16.0 - fwd * 6.0
+				cam.look_at(car.global_position + fwd * 18.0)
+				if d0 < 8.0 and not _pv.has("s2b"):
+					_pv["s2b"] = true
+					_shot("police_2_chicane")
+			# choc contre une voiture du barrage ?
+			var prev: float = _pv.get("kmh_prev", kmh)
+			if prev - kmh > 12.0:
+				_pol_log("CHOC dans le barrage : %.0f -> %.0f km/h" % [prev, kmh])
+		if _pv.has("t_chase") and _t - float(_pv["t_chase"]) < 5.0:
+			_pv["cam_set"] = true
+			_cabin_cam(Vector3(0.0, 2.6, 6.0), Vector3(0.0, 1.0, -20.0))
+			if _t - float(_pv["t_chase"]) > 2.5 and not _pv.has("s2c"):
+				_pv["s2c"] = true
+				_shot("police_2_demarre")
+		if _pv.has("t_lost"):
+			_pv["phase"] = 3
+			_pv.erase("t_chase")
+			_pv.erase("t_lost")
+			_pv["v"] = 100.0
+			_pv["t3"] = _t
+	_pv["kmh_prev"] = kmh
+	# --- 3 : surgit derrière, puis on freine : rattrapé
+	if ph == 3:
+		if not _pv.has("d_set") and _t - float(_pv["t3"]) > 2.0:
+			_pv["d_set"] = true
+			_pol_log("derrière : %s" % _pol.force_encounter("derriere"))
+			_pv["v"] = 100.0
+		if _pv.has("t_chase"):
+			var el: float = _t - float(_pv["t_chase"])
+			_pv["v"] = 100.0 if el < 14.0 else 0.0
+			if fmod(el, 2.0) < delta:
+				_pol_log("écart %.0f m, police %.0f km/h, nous %.0f km/h" % [_pol.gap, _pol.get_speed_kmh(), kmh])
+			if el > 12.0 and el < 13.0:
+				_pv["cam_set"] = true
+				_cabin_cam(Vector3(0.0, 2.6, 6.0), Vector3(0.0, 1.0, -20.0))
+				if el > 12.8 and not _pv.has("s3"):
+					_pv["s3"] = true
+					_shot("police_3_derriere")
+	if _pv.has("t_caught") and _t - float(_pv["t_caught"]) > 1.5:
+		_pol_log("fin : %d poursuites" % _pol.encounters)
+		get_tree().quit()
+	if fmod(_t, 5.0) < delta:
+		_pol_log("phase %d, état %d, écart %.0f m, police %.0f km/h, nous %.0f km/h" % [_pv["phase"], _pol.state, _pol.gap, _pol.get_speed_kmh(), kmh])
+	if _t > 200.0:
+		_pol_log("ÉCHEC : délai dépassé")
+		get_tree().quit()
+
+
+# --- Manque : montée lente, voix à 45 %, rien pendant l'effet d'une pilule --------
+
+var _cr: Node
+var _cr_log := {}
+
+
+func _run_autotest_craving(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	if at.call(0.05):
+		_cr = preload("res://world/pills/pill_addiction.gd").new()
+		_cr.set("car_path", NodePath("../SUV4x4"))
+		add_child(_cr)
+	if _cr == null:
+		return
+	if at.call(1.0):
+		_cr_log["c0"] = _cr.craving
+	if at.call(5.0):
+		var rate: float = (_cr.craving - float(_cr_log["c0"])) / 4.0
+		_log("AUTOTEST manque : départ %.2f, +%.4f/s -> effets visibles (35 %%) après %.0f s, black-out après %.0f s" % [_cr_log["c0"], rate, 0.35 / maxf(rate, 1e-6), 1.0 / maxf(rate, 1e-6)])
+		_cr.craving = 0.449
+	if at.call(7.0):
+		var v: AudioStreamPlayer = _cr.get_node("CravingVoice")
+		_log("AUTOTEST voix : dite=%s, en lecture=%s, flux=%s" % [_cr.get("_voice_said"), v.playing, v.stream != null])
+		_cr.take_pill()
+	if at.call(12.0):
+		_log("AUTOTEST 5 s après la pilule (effet en cours) : manque %.3f, voix réarmée=%s" % [_cr.craving, not _cr.get("_voice_said")])
 		get_tree().quit()

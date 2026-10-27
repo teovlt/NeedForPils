@@ -129,7 +129,7 @@ func _draw_right_panel() -> void:
 		_draw_pursuer(pursuer, cx)
 
 
-## Écart avec la voiture de l'Essaim, à droite de l'heure (rouge clignotant de près).
+## Écart avec la voiture de police, à droite de l'heure (rouge clignotant de près).
 func _draw_pursuer(p: Pursuer, cx: float) -> void:
 	var g := maxf(p.gap, 0.0)
 	var col := Color(0.8, 0.82, 0.86)
