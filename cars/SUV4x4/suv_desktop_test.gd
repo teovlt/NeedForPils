@@ -7,7 +7,7 @@ extends Node3D
 
 @export var autotest := false
 ## Scénario du test automatique : "objets" (rangements) ou "arbres".
-@export_enum("objets", "arbres", "aleatoire", "phares", "retros", "portes", "boite", "combine", "essuie", "plafonnier", "nature", "pluie", "balayage", "menu", "lunette", "moteur", "klaxon", "vitres", "ceinture", "cle", "depart", "pare_soleil", "cle_f", "physique", "eclairage", "radio", "radio_nuit", "radio_pwr", "ambiance", "rangements", "ceintures", "vitesses", "sapins", "balises", "playlist", "animaux", "pochette", "lieu", "police", "manque", "zoo", "balade", "klaxon_animaux", "police_vue") var autotest_scenario := "objets"
+@export_enum("objets", "arbres", "aleatoire", "phares", "retros", "portes", "boite", "combine", "essuie", "plafonnier", "nature", "pluie", "balayage", "menu", "lunette", "moteur", "klaxon", "vitres", "ceinture", "cle", "depart", "pare_soleil", "cle_f", "physique", "eclairage", "radio", "radio_nuit", "radio_pwr", "ambiance", "rangements", "ceintures", "vitesses", "sapins", "balises", "playlist", "animaux", "pochette", "lieu", "police", "manque", "zoo", "balade", "klaxon_animaux", "police_vue", "pochette_places") var autotest_scenario := "objets"
 
 @onready var car: SUV4x4 = $SUV4x4
 @onready var cam: Camera3D = $Camera3D
@@ -124,6 +124,8 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_horn_animals(delta)
 		elif autotest_scenario == "police_vue":
 			_run_autotest_police_view(delta)
+		elif autotest_scenario == "pochette_places":
+			_run_autotest_bag_places(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -3478,3 +3480,55 @@ func _run_autotest_police_view(delta: float) -> void:
 		if at.call(4.8): _shot("police_vue_barrage")
 	else:
 		get_tree().quit()
+
+
+# --- Pochette rangée dans chaque rangement (gros plans) -----------------------------
+
+const BP_ZONES := [["Storage/Glovebox", Vector3(-0.2, 1.3, 0.2), Vector3(-0.52, 0.86, 0.83)],
+	["Storage/Console", Vector3(0.0, 1.45, -0.1), Vector3(0.0, 0.8, 0.2)],
+	["Doors/DoorFL/Pocket", Vector3(0.45, 1.45, -0.05), Vector3(0.80, 0.7, 0.5)],
+	["Doors/DoorFR/Pocket", Vector3(-0.45, 1.45, -0.05), Vector3(-0.80, 0.7, 0.5)],
+	["", Vector3(-0.2, 1.5, -0.4), Vector3(-0.45, 0.85, 0.15)]]
+
+
+func _run_autotest_bag_places(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	$Weather.random_events = false
+	$FallingTrees.enabled = false
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = false
+	if at.call(0.05):
+		$Weather.hour = 13.0
+		$Weather.set_weather("degage", true)
+		car.get_node("GloveboxLid").set_angle_deg(-80.0, true)
+		car.get_node("ConsoleLid").set_angle_deg(-100.0, true)
+	var i := int((_t - 1.0) / 1.0)
+	if _t < 1.0:
+		return
+	if i >= BP_ZONES.size():
+		get_tree().quit()
+		return
+	var bag := car.find_child("PillBag", true, false) as RigidBody3D
+	var zd: Array = BP_ZONES[i]
+	if not has_meta("bp%d" % i):
+		set_meta("bp%d" % i, true)
+		var z := bag.get_parent() as StorageZone
+		if z: z.on_item_taken(bag)
+		ItemPhysics.stop(bag)
+		var rng := RandomNumberGenerator.new()
+		var ok := false
+		if zd[0] == "":
+			car.get_node("Storage")._place_loose(bag, rng, [])
+			ok = true
+		else:
+			ok = (car.get_node(zd[0]) as StorageZone).try_random_place(bag, rng, [])
+		var g := bag.get_node("Grab") as VRPickable
+		_log("AUTOTEST pochette -> %s : %s, boîte %s, haut=%s" % [zd[0] if zd[0] != "" else "en vrac", ok, g.get_local_aabb().size, bag.global_basis.y.snapped(Vector3.ONE * 0.01)])
+	cam.fov = 55.0
+	_cabin_cam(zd[1], zd[2])
+	if fmod(_t - 1.0, 1.0) > 0.85 and not has_meta("bps%d" % i):
+		set_meta("bps%d" % i, true)
+		_shot("pochette_place_%d" % i)

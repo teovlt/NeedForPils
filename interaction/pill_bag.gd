@@ -74,6 +74,13 @@ func _ready() -> void:
 	_build.call_deferred()
 
 
+## Boîte englobante fixe (repère de l'objet) : le maillage est construit en différé, et
+## la boîte calculée sur les maillages pouvait être lue avant (vide) : la pochette était
+## alors rangée de travers, à moitié dans le fond du rangement.
+func get_local_aabb() -> AABB:
+	return AABB(Vector3(-SIZE.x * 0.5, -0.0145, -SIZE.y * 0.5), Vector3(SIZE.x, 0.029, SIZE.y))
+
+
 func _build() -> void:
 	if _bag_built:
 		return

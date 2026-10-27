@@ -3,7 +3,7 @@
 [ext_resource type="Script" path="res://interaction/pill_bag.gd" id="1_bag"]
 
 [sub_resource type="BoxShape3D" id="Box_item"]
-size = Vector3(0.1, 0.018, 0.14)
+size = Vector3(0.1, 0.028, 0.14)
 
 [node name="PillBag" type="RigidBody3D"]
 collision_layer = 0
@@ -16,7 +16,7 @@ freeze_mode = 1
 [node name="Model" type="Node3D" parent="."]
 
 [node name="Shape" type="CollisionShape3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.005, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
 shape = SubResource("Box_item")
 
 [node name="Grab" type="Node3D" parent="."]
