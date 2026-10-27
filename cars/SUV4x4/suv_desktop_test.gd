@@ -7,7 +7,7 @@ extends Node3D
 
 @export var autotest := false
 ## Scénario du test automatique : "objets" (rangements) ou "arbres".
-@export_enum("objets", "arbres", "aleatoire", "phares", "retros", "portes", "boite", "combine", "essuie", "plafonnier", "nature", "pluie", "balayage", "menu", "lunette", "moteur", "klaxon", "vitres", "ceinture", "cle", "depart", "pare_soleil", "cle_f", "physique", "eclairage", "radio", "radio_nuit", "radio_pwr", "ambiance", "rangements", "ceintures", "vitesses", "sapins", "balises", "playlist", "animaux", "pochette", "lieu", "police", "manque", "zoo", "balade") var autotest_scenario := "objets"
+@export_enum("objets", "arbres", "aleatoire", "phares", "retros", "portes", "boite", "combine", "essuie", "plafonnier", "nature", "pluie", "balayage", "menu", "lunette", "moteur", "klaxon", "vitres", "ceinture", "cle", "depart", "pare_soleil", "cle_f", "physique", "eclairage", "radio", "radio_nuit", "radio_pwr", "ambiance", "rangements", "ceintures", "vitesses", "sapins", "balises", "playlist", "animaux", "pochette", "lieu", "police", "manque", "zoo", "balade", "klaxon_animaux") var autotest_scenario := "objets"
 
 @onready var car: SUV4x4 = $SUV4x4
 @onready var cam: Camera3D = $Camera3D
@@ -120,6 +120,8 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_zoo(delta)
 		elif autotest_scenario == "balade":
 			_run_autotest_drive_animals(delta)
+		elif autotest_scenario == "klaxon_animaux":
+			_run_autotest_horn_animals(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -3297,3 +3299,122 @@ func _run_autotest_drive_animals(delta: float) -> void:
 		_log("AUTOTEST fin : vus à moins de 60 m devant : %s" % counts)
 		_log("AUTOTEST écart latéral des animaux qui traversaient au passage de la voiture : %s" % [_bl["close"].values()])
 		get_tree().quit()
+
+
+# --- Klaxon : les animaux assez proches fuient (sans freiner, 60 km/h) ------------
+
+var _ka := {"i": -1}
+const KA_TRIALS := [["deer", "proche"], ["sheep", "sur la route"], ["deer", "trop loin puis proche"]]
+
+
+func _run_autotest_horn_animals(delta: float) -> void:
+	var road: RoadGenerator = $RoadGenerator
+	var am = road.get_node("Animals")
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	$Weather.random_events = false
+	$FallingTrees.enabled = false
+	am.enabled = false
+	am.crossings_enabled = false
+	car.external_input = true
+	_inside = false
+	var kmh: float = car.forward_speed * 3.6
+	if at.call(0.05):
+		$Weather.hour = 15.0
+		$Weather.set_weather("degage", true)
+		car.handbrake_lever.set_angle_deg(0.0, true)
+		car.gear_lever.set_notch(2, true)
+	var fwd: Vector3 = car.global_basis.z
+	var info := road.sample_road(car.global_position + fwd * (8.0 + absf(car.forward_speed) * 0.45))
+	if info["found"]:
+		var target: Vector3 = info["point"] + info["right"] * 1.75
+		var to_t := target - car.global_position
+		to_t.y = 0.0
+		_steer(clampf(fwd.cross(to_t.normalized()).y * 2.2, -1.0, 1.0))
+	car.throttle_input = clampf((60.0 - kmh) * 0.15, 0.0, 1.0)
+	car.brake_input = 0.0
+	_cabin_cam(Vector3(0.0, 3.0, -6.0), Vector3(0.0, 1.0, 16.0))
+	cam.fov = 70.0
+	var i: int = _ka["i"]
+	if i < 0 and _t > 8.0 and kmh > 55.0:
+		i = 0
+		_ka["i"] = 0
+		_ka_start(am, 0)
+	if i < 0 or i >= KA_TRIALS.size():
+		return
+	var group: Array = _ka["group"]
+	var near := 999.0
+	var on_road := false
+	for a in group:
+		if is_instance_valid(a):
+			near = minf(near, a.global_position.distance_to(car.global_position))
+			if absf(am.lateral_of(a.global_position)) < 2.5:
+				on_road = true
+	var mode: String = KA_TRIALS[i][1]
+	var honk := false
+	if mode == "proche":
+		honk = near < 55.0 and not _ka.has("honked")
+	elif mode == "sur la route":
+		honk = on_road and near < 70.0 and not _ka.has("honked")
+	else:
+		if near > 90.0 and near < 140.0 and not _ka.has("far_done"):
+			honk = true
+			_ka["far_t"] = _ka.get("far_t", 0.0) + delta
+			if _ka["far_t"] > 1.0:
+				_ka["far_done"] = true
+				var st := PackedStringArray()
+				for a in group:
+					st.append("état %d%s" % [a.state, " fuit" if a.is_scared() else ""])
+				_log("AUTOTEST   klaxon à %.0f m (hors de portée) : %s" % [near, ", ".join(st)])
+		elif near < 50.0 and not _ka.has("honked"):
+			honk = true
+	if honk:
+		car.horn.press("test")
+		if not _ka.has("honk_start") and near < 90.0:
+			_ka["honk_start"] = _t
+			_ka["honk_d"] = near
+	elif car.horn.is_honking():
+		car.horn.unpress("test")
+	if _ka.has("honk_start") and _t - float(_ka["honk_start"]) > 0.6 and not _ka.has("honked"):
+		_ka["honked"] = true
+		car.horn.unpress("test")
+	if _ka.has("honk_start") and _t - float(_ka["honk_start"]) > 1.2 and not _ka.has("shot"):
+		_ka["shot"] = true
+		_shot("klaxon_%d_%s" % [i + 1, KA_TRIALS[i][0]])
+	if _ka.has("honk_start") and _t - float(_ka["honk_start"]) > 1.5 and not _ka.has("report"):
+		_ka["report"] = true
+		var st := PackedStringArray()
+		for a in group:
+			if is_instance_valid(a):
+				st.append("%s côté %.1f m %s" % [a.species, am.lateral_of(a.global_position), "FUIT" if a.state == 3 else "état %d" % a.state])
+		_log("AUTOTEST   klaxon à %.0f m : %s" % [_ka["honk_d"], ", ".join(st)])
+	if _t - float(_ka["t0"]) > 14.0:
+		var hits: int = am.animals_hit - int(_ka["hits0"])
+		var st := PackedStringArray()
+		for a in group:
+			if is_instance_valid(a):
+				st.append("côté %.0f m" % am.lateral_of(a.global_position))
+		_log("AUTOTEST essai %d (%s, %s) : %s, chocs=%d, après : %s" % [i + 1, KA_TRIALS[i][0], mode, "ÉVITÉ" if hits == 0 else "TOUCHÉ", hits, ", ".join(st)])
+		for a in group:
+			if is_instance_valid(a):
+				a.queue_free()
+		_ka["i"] = i + 1
+		if i + 1 >= KA_TRIALS.size():
+			_log("AUTOTEST klaxon : %d animaux effrayés au total" % am.horn_scares)
+			get_tree().quit()
+		else:
+			_ka_start(am, i + 1)
+
+
+func _ka_start(am, i: int) -> void:
+	for k in ["honked", "honk_start", "honk_d", "shot", "report", "far_done", "far_t"]:
+		_ka.erase(k)
+	var sp: String = KA_TRIALS[i][0]
+	var dist := 160.0 if KA_TRIALS[i][1].begins_with("trop") else 85.0
+	_ka["group"] = am.spawn_crossing(sp, dist, 1 if i % 2 == 0 else -1)
+	if sp == "sheep":
+		_ka["group"] = _ka["group"].slice(0, 4)
+	_ka["t0"] = _t
+	_ka["hits0"] = am.animals_hit
+	_log("AUTOTEST essai %d : %s ×%d à %.0f m (%s)" % [i + 1, sp, (_ka["group"] as Array).size(), dist, KA_TRIALS[i][1]])

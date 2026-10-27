@@ -27,6 +27,7 @@ var heading := 0.0                # cap (rad, autour de Y ; 0 = +Z)
 var target := Vector3.ZERO        # point visé (MARCHE / TRAVERSE / FUIT)
 var crossing := false             # fait partie d'une traversée déclenchée
 var _cross_called := false
+var _scare_delay := -1.0          # klaxon entendu : temps de réaction restant
 var crossed := false              # a fini de traverser
 var was_hit := false
 var size_scale := 1.0
@@ -116,6 +117,10 @@ func _physics_process(delta: float) -> void:
 		_update_hit(delta)
 		_animate(delta)
 		return
+	if _scare_delay >= 0.0:
+		_scare_delay -= delta
+		if _scare_delay < 0.0:
+			_do_scare()
 	var car_d := 999.0
 	var car_v := 0.0
 	if car:
@@ -226,6 +231,32 @@ func _flee_from(p: Vector3) -> void:
 		away = (away + (manager.call("away_from_road", global_position) as Vector3) * 0.8).normalized()
 	target = global_position + away * randf_range(14.0, 22.0)
 	set_state(State.FLEE)
+
+
+## Coup de klaxon entendu : après un temps de réaction, l'animal renonce à traverser
+## (ou finit de dégager la route du côté où il est) et s'enfuit loin de la voiture.
+func scare() -> void:
+	if state == State.HIT or _scare_delay >= 0.0:
+		return
+	_scare_delay = randf_range(0.15, 0.5)
+
+
+func is_scared() -> bool:
+	return _scare_delay >= 0.0 or (state == State.FLEE and not crossing)
+
+
+func _do_scare() -> void:
+	if state == State.HIT:
+		return
+	_play(cfg.get("alarm", []), true)
+	_freeze = -2.0
+	if crossing:
+		crossing = false
+		crossed = true
+		_state_t = 0.0
+		_flee_from_road()   # dégage du côté où il se trouve
+	elif car:
+		_flee_from(car.global_position)
 
 
 func _flee_from_road() -> void:

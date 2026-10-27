@@ -65,6 +65,8 @@ const IMPACT_SOUND := "res://audio/animals/impact.wav"
 @export var first_crossing := Vector2(8.0, 18.0)
 @export var hard_distance := 15000.0
 @export var reaction_time := Vector2(3.5, 5.5)
+## Klaxon : les animaux à moins de cette distance (m) de la voiture l'entendent et fuient.
+@export var horn_range := 70.0
 
 var road: Node3D          # RoadGenerator
 var car: RigidBody3D
@@ -72,6 +74,7 @@ var animals: Array = []
 var animals_hit := 0
 var crossings := 0
 var crossings_avoided := 0
+var horn_scares := 0
 var travelled := 0.0
 
 var _sounds := {}
@@ -113,6 +116,7 @@ func _physics_process(delta: float) -> void:
 	animals = animals.filter(func(a): return is_instance_valid(a))
 	_despawn_far()
 	_check_crossings_done()
+	_check_horn()
 	if not enabled:
 		return
 	_ambient_t -= delta
@@ -128,6 +132,19 @@ func _physics_process(delta: float) -> void:
 				_next_cross = 1.5    # route cachée (virage, bosse) : on réessaie un peu plus loin
 			else:
 				_next_cross = randf_range(iv.x, iv.y)
+
+
+## Klaxon (HornPad du 4x4) : fait fuir les animaux assez proches.
+func _check_horn() -> void:
+	var horn = car.get("horn")
+	if horn == null or not horn.call("is_honking"):
+		return
+	var cp := car.global_position
+	for a in animals:
+		if a.state != ANIMAL.State.HIT and not a.is_scared() \
+				and a.global_position.distance_to(cp) < horn_range:
+			a.scare()
+			horn_scares += 1
 
 
 # --- Aide pour les animaux ----------------------------------------------------
