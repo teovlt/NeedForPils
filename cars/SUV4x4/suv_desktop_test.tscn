@@ -33,6 +33,7 @@ script = ExtResource("1_test")
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.75, 0.5, 4)
 start_gear = 2
 start_handbrake_engaged = false
+start_engine_running = true
 
 [node name="Camera3D" type="Camera3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3, -7)

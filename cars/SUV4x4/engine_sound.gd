@@ -3,8 +3,8 @@ extends AudioStreamPlayer3D
 ## Bruit du moteur du 4x4, généré par code (pas de fichier son).
 ##
 ## Régime (tr/min) calculé à partir du rapport engagé et de la vitesse :
-## - D : boîte auto à 4 rapports internes qui passent selon le régime et
-##   l'accélérateur (on entend les changements de rapport) ;
+## - D : boîte auto à 6 rapports internes, gérée par la voiture (suv_4x4.gd,
+##   auto_gear) : on entend les changements de rapport ;
 ## - 2 : bloquée sur les 2 premiers rapports, 1 : sur le premier (le moteur
 ##   tourne plus vite à la même vitesse) ; R : un seul rapport court ;
 ## - N (ou frein à main serré) : le moteur monte dans les tours avec l'accélérateur.
@@ -14,8 +14,6 @@ extends AudioStreamPlayer3D
 
 @export var idle_rpm := 800.0
 @export var redline_rpm := 5600.0
-## tr/min par km/h pour les 4 rapports internes de la boîte auto (D, 2, 1).
-@export var gear_rpm_per_kmh := PackedFloat32Array([140.0, 85.0, 55.0, 38.0])
 ## tr/min par km/h en marche arrière.
 @export var reverse_rpm_per_kmh := 160.0
 @export var volume := 0.55
@@ -23,7 +21,7 @@ extends AudioStreamPlayer3D
 var car: Node   # SUV4x4
 
 var rpm := 800.0
-var auto_gear := 0          # rapport interne de la boîte auto (0 = 1re)
+var auto_gear := 0          # copie du rapport interne de la voiture (0 = 1re)
 var engine_load := 0.0      # charge moteur lissée (0-1)
 
 var _playback: AudioStreamGeneratorPlayback
@@ -35,6 +33,10 @@ var _rumble_lp := 0.0
 var _shift_timer := 0.0
 var _smooth_rpm := 800.0
 var _smooth_load := 0.0
+var _state := 2            # 0 coupé, 1 démarreur, 2 en marche (lu sur la voiture)
+var _was_running := true
+var _flare := 0.0          # coup d'accélérateur au démarrage
+var _starter_phase := 0.0
 
 
 func _ready() -> void:
@@ -58,6 +60,24 @@ func _process(delta: float) -> void:
 
 ## Régime cible selon le rapport, la vitesse et l'accélérateur.
 func _update_rpm(delta: float) -> void:
+	var st = car.get("engine_state")
+	_state = 2 if st == null else int(st)
+	if _state != 2:
+		# coupé : le moteur s'arrête ; démarreur : il est entraîné lentement (~230 tr/min)
+		var t0 := 0.0
+		if _state == 1:
+			t0 = 230.0 + 70.0 * sin(Time.get_ticks_msec() * 0.028)
+		_smooth_rpm = lerpf(_smooth_rpm, t0, clampf(delta * (8.0 if _state == 1 else 2.2), 0.0, 1.0))
+		rpm = _smooth_rpm
+		_smooth_load = 0.0
+		engine_load = 0.0
+		_was_running = false
+		auto_gear = 0
+		return
+	if not _was_running:
+		_was_running = true
+		_flare = 1.0   # le moteur prend : petite montée dans les tours puis ralenti
+	_flare = maxf(_flare - delta * 1.1, 0.0)
 	var kmh := absf(car.forward_speed) * 3.6
 	var throttle: float = car.throttle_input
 	var gear: int = car.get_gear()   # 0 R, 1 N, 2 D, 3 « 2 », 4 « 1 »
@@ -74,21 +94,18 @@ func _update_rpm(delta: float) -> void:
 			ratio = reverse_rpm_per_kmh
 			auto_gear = 0
 		else:
-			var top := 3 if gear == 2 else (1 if gear == 3 else 0)
-			auto_gear = mini(auto_gear, top)
-			# passage des rapports : plus on accélère, plus on monte haut dans les tours
-			var shift_up := 2100.0 + 2600.0 * throttle
-			if auto_gear < top and kmh * gear_rpm_per_kmh[auto_gear] > shift_up and _shift_timer <= 0.0:
-				auto_gear += 1
+			# rapport interne choisi par la boîte auto de la voiture (6 rapports)
+			var g: int = car.auto_gear
+			if g != auto_gear:
 				_shift_timer = 0.6
-			elif auto_gear > 0 and kmh * gear_rpm_per_kmh[auto_gear] < 1250.0 and _shift_timer <= 0.0:
-				auto_gear -= 1
-				_shift_timer = 0.6
-			ratio = gear_rpm_per_kmh[auto_gear]
+				auto_gear = g
+			var ratios: PackedFloat32Array = car.auto_rpm_per_kmh
+			ratio = ratios[auto_gear]
 		# convertisseur de couple : à basse vitesse, le moteur peut tourner plus vite que les roues
 		var slip := idle_rpm + throttle * 1900.0 * clampf(1.0 - kmh / 25.0, 0.0, 1.0)
 		target = maxf(kmh * ratio, slip)
 		target = maxf(target, idle_rpm)
+	target += 650.0 * _flare * _flare
 	target = minf(target, redline_rpm + 150.0 * sin(Time.get_ticks_msec() * 0.06) * float(target > redline_rpm))
 	# le régime suit vite en montée, un peu moins vite en descente
 	var k := 7.0 if target > _smooth_rpm else 4.5
@@ -114,6 +131,13 @@ func _fill_audio() -> void:
 	var hiss := 0.05 + 0.22 * engine_load * (0.3 + rpm_n)
 	var step := f / _rate
 	var lp_k := clampf(0.08 + rpm_n * 0.25, 0.0, 1.0)
+	# moteur qui s'arrête / entraîné par le démarreur : plus faible, sans souffle
+	var life := clampf(rpm / idle_rpm, 0.0, 1.0)
+	if _state != 2:
+		amp *= life * life * (1.6 if _state == 1 else 1.0)
+		hiss *= 0.3
+	var starter := 0.22 * volume if _state == 1 else 0.0
+	var st_step := (310.0 + rpm * 0.25) / _rate
 	for i in frames:
 		_phase += step
 		if _phase >= 1.0:
@@ -127,4 +151,9 @@ func _fill_audio() -> void:
 		var white := randf() * 2.0 - 1.0
 		_noise_lp += (white - _noise_lp) * lp_k    # souffle d'admission / échappement
 		var out := (s * 0.8 + _noise_lp * hiss) * amp
+		if starter > 0.0:
+			# démarreur : sifflement électrique + engrenage qui grince
+			_starter_phase = fmod(_starter_phase + st_step, 1.0)
+			var sp := _starter_phase * TAU
+			out += (0.6 * sin(sp) + 0.3 * sin(2.0 * sp) + 0.25 * (randf() * 2.0 - 1.0)) * starter
 		_playback.push_frame(Vector2(out, out))

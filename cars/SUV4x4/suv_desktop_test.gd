@@ -7,7 +7,7 @@ extends Node3D
 
 @export var autotest := false
 ## Scénario du test automatique : "objets" (rangements) ou "arbres".
-@export_enum("objets", "arbres", "aleatoire", "phares", "retros", "portes", "boite", "combine", "essuie", "plafonnier", "nature", "pluie", "balayage", "menu", "lunette", "moteur", "klaxon", "vitres", "ceinture") var autotest_scenario := "objets"
+@export_enum("objets", "arbres", "aleatoire", "phares", "retros", "portes", "boite", "combine", "essuie", "plafonnier", "nature", "pluie", "balayage", "menu", "lunette", "moteur", "klaxon", "vitres", "ceinture", "cle", "depart", "pare_soleil", "cle_f", "physique", "eclairage", "radio", "radio_nuit", "radio_pwr", "ambiance", "rangements", "ceintures", "vitesses") var autotest_scenario := "objets"
 
 @onready var car: SUV4x4 = $SUV4x4
 @onready var cam: Camera3D = $Camera3D
@@ -70,6 +70,32 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_windows(delta)
 		elif autotest_scenario == "ceinture":
 			_run_autotest_belt(delta)
+		elif autotest_scenario == "cle":
+			_run_autotest_key(delta)
+		elif autotest_scenario == "depart":
+			_run_autotest_start(delta)
+		elif autotest_scenario == "pare_soleil":
+			_run_autotest_visor(delta)
+		elif autotest_scenario == "cle_f":
+			_run_autotest_key_f(delta)
+		elif autotest_scenario == "physique":
+			_run_autotest_physics(delta)
+		elif autotest_scenario == "eclairage":
+			_run_autotest_cluster_light(delta)
+		elif autotest_scenario == "radio":
+			_run_autotest_radio(delta)
+		elif autotest_scenario == "radio_nuit":
+			_run_autotest_radio_night(delta)
+		elif autotest_scenario == "radio_pwr":
+			_run_autotest_radio_power(delta)
+		elif autotest_scenario == "ambiance":
+			_run_autotest_ambience(delta)
+		elif autotest_scenario == "rangements":
+			_run_autotest_storage_spots(delta)
+		elif autotest_scenario == "ceintures":
+			_run_autotest_all_belts(delta)
+		elif autotest_scenario == "vitesses":
+			_run_autotest_gears(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -1065,7 +1091,7 @@ func _run_autotest_engine(delta: float) -> void:
 	_cabin_cam(Vector3(0.42, 1.52, -0.2), Vector3(0.42, 1.25, 4.0))
 	var es = car.engine_sound
 	if fmod(_t, 0.5) < delta and _t > 0.2:
-		_log("AUTOTEST moteur t=%.1f levier=%s vitesse=%.0f km/h rapport interne=%d régime=%.0f charge=%.2f" % [_t, car.gear_lever.get_notch_label(), car.forward_speed * 3.6, es.auto_gear + 1, es.rpm, es.engine_load])
+		_log("AUTOTEST moteur t=%.1f levier=%s vitesse=%.0f km/h rapport interne=%d régime=%.0f charge=%.2f" % [_t, car.gear_lever.get_notch_label(), car.forward_speed * 3.6, car.auto_gear + 1, es.rpm, es.engine_load])
 	if at.call(40.0):
 		_rec.set_recording_active(false)
 		_rec.get_recording().save_to_wav(ProjectSettings.globalize_path("res://.godot/autotest_moteur.wav"))
@@ -1308,3 +1334,921 @@ func _run_autotest_belt(delta: float) -> void:
 		_rec.set_recording_active(false)
 		_rec.get_recording().save_to_wav(ProjectSettings.globalize_path("res://.godot/autotest_ceinture.wav"))
 	if at.call(14.0): get_tree().quit()
+
+
+var _key_angle_log := []
+
+
+func _run_autotest_key(delta: float) -> void:
+	# Clé : posée sur le siège, mise dans le contact, tournée jusqu'au démarreur, moteur
+	# qui part ; trousseau qui se balance en roulant ; arrêt, clé retirée ; touche M.
+	var w: WeatherSystem = $Weather
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	w.random_events = false
+	$FallingTrees.enabled = false
+	car.external_input = true
+	var ign = car.ignition
+	var key: RigidBody3D = car._find_key_item()
+	var grab: VRInteractable = key.get_node("Grab")
+	var eye := Vector3(0.45, 1.45, -0.05)
+	var ign_local: Vector3 = car.to_local(ign.global_position)
+	car.throttle_input = 0.6 if _t > 7.0 and _t < 9.0 else (1.0 if _t > 0.3 and _t < 1.3 else 0.0)
+	car.brake_input = 0.0 if (_t > 7.0 and _t < 9.0) or (_t > 0.3 and _t < 1.3) else 1.0
+	_inside = false
+	if _t < 1.6 or (_t > 11.4 and _t < 12.4):
+		cam.fov = 60.0
+		_cabin_cam(eye, Vector3(-0.3, 0.9, 0.1))      # siège passager
+	elif _t > 4.4 and _t < 4.9:
+		cam.fov = 60.0
+		_cabin_cam(eye, Vector3(0.45, 1.2, 0.75))     # combiné
+	else:
+		cam.fov = 24.0
+		_cabin_cam(eye, ign_local + Vector3(0.0, -0.03, 0.0))   # contact et trousseau
+	if at.call(0.05):
+		w.hour = 14.0
+		w.set_weather("degage", true)
+		_hand = Node3D.new()
+		add_child(_hand)
+		# départ : moteur coupé, clé sur le siège passager
+		ign.set_key_angle(0.0)
+		ign.key_held = false
+		car.engine_state = 0
+		var k: RigidBody3D = ign.eject()
+		var storage := car.get_node("Storage") as CarStorage
+		k.global_position = storage.to_global(Vector3(-0.45, 1.1, -0.05))
+		storage.receive(k, Vector3.ZERO)
+	if at.call(1.4):
+		_shot("cle_1_siege")
+		_log("AUTOTEST clé sur le siège : contact=%d moteur=%d clé dans le contact=%s ; plein gaz 1 s moteur coupé -> %.1f km/h" % [car.get_ignition_level(), car.engine_state, ign.has_key(), absf(car.forward_speed) * 3.6])
+		_hand.global_transform = key.global_transform
+		grab.grab(_hand)
+	# la main porte la clé jusqu'au barillet
+	if _t > 1.4 and _t <= 3.0 and grab.is_grabbed():
+		var k2 := clampf((_t - 1.4) / 1.5, 0.0, 1.0)
+		var from: Vector3 = car.to_global(Vector3(-0.45, 0.95, -0.05))
+		var to: Vector3 = ign.global_position + (ign.global_basis as Basis).z * 0.02
+		_hand.global_transform = Transform3D(ign.global_basis, from.lerp(to, k2) + Vector3.UP * 0.15 * sin(k2 * PI))
+		grab.grab_update(_hand)
+	if at.call(3.1):
+		grab.release(_hand)
+		_log("AUTOTEST lâchée près du barillet : clé dans le contact=%s" % ign.has_key())
+	if at.call(3.8): _shot("cle_2_inseree")
+	# tourner le poignet jusqu'à II
+	if at.call(4.0):
+		_hand.global_transform = Transform3D(ign.global_basis, ign.global_position + (ign.global_basis as Basis).z * 0.04)
+		grab.grab(_hand)
+	var twist := 0.0
+	if _t > 4.0 and _t <= 4.3: twist = (_t - 4.0) / 0.3 * 72.0
+	elif _t > 4.3 and _t <= 5.0: twist = 72.0
+	elif _t > 5.0 and _t <= 6.4: twist = 104.0
+	if _t > 4.0 and _t <= 6.4 and grab.is_grabbed():
+		_hand.global_basis = (ign.global_basis as Basis) * Basis(Vector3.BACK, -deg_to_rad(twist))
+		grab.grab_update(_hand)
+	if at.call(4.7):
+		_shot("cle_3_contact")
+		_log("AUTOTEST clé sur II : contact=%d moteur=%d voyant ceinture=%d" % [car.get_ignition_level(), car.engine_state, car.get_belt_warning()])
+		_rec = AudioEffectRecord.new()
+		AudioServer.add_bus_effect(0, _rec)
+		_rec.set_recording_active(true)
+	if at.call(5.4): _log("AUTOTEST démarreur : contact=%d moteur=%d régime=%.0f" % [car.get_ignition_level(), car.engine_state, car.engine_sound.rpm])
+	if at.call(6.3): _log("AUTOTEST démarreur tenu 1,3 s : moteur=%d" % car.engine_state)
+	if at.call(6.4): grab.release(_hand)
+	if at.call(6.9):
+		_log("AUTOTEST clé lâchée : revenue sur %d, moteur=%d, régime=%.0f" % [car.get_ignition_level(), car.engine_state, car.engine_sound.rpm])
+		_shot("cle_4_moteur")
+	# en roulant : angle du trousseau par rapport à la verticale de la voiture
+	if _t > 6.9 and _t < 10.0 and int(_t * 10.0) != int(t0 * 10.0):
+		var cn: Node3D = grab._charm_nodes[0]
+		var down: Vector3 = car.global_basis.inverse() * (-cn.global_basis.y)
+		_key_angle_log.append("%.1fs %3.0fkm/h avant/arrière %+.0f°" % [_t, absf(car.forward_speed) * 3.6, rad_to_deg(atan2(down.z, -down.y))])
+	if at.call(8.2): _shot("cle_5_acceleration")
+	if at.call(9.25): _shot("cle_6_freinage")
+	if at.call(10.0):
+		_log("AUTOTEST trousseau : " + ", ".join(_key_angle_log.slice(0, _key_angle_log.size(), 3)))
+		grab.toggle()   # F : coupe le moteur
+	if at.call(10.6):
+		_log("AUTOTEST touche F : contact=%d moteur=%d" % [car.get_ignition_level(), car.engine_state])
+		_rec.set_recording_active(false)
+		_rec.get_recording().save_to_wav(ProjectSettings.globalize_path("res://.godot/autotest_cle.wav"))
+		_hand.global_transform = Transform3D(ign.global_basis, ign.global_position + (ign.global_basis as Basis).z * 0.04)
+		grab.grab(_hand)
+	if _t > 10.6 and _t <= 11.0 and grab.is_grabbed():
+		_hand.global_position = ign.global_position + (ign.global_basis as Basis).z * (0.04 + (_t - 10.6) * 0.25)
+		grab.grab_update(_hand)
+	if at.call(11.1):
+		_log("AUTOTEST main tirée : clé dans le contact=%s, tenue=%s" % [ign.has_key(), grab.is_grabbed()])
+		_hand.global_position = car.to_global(Vector3(-0.4, 1.0, -0.05))
+		grab.grab_update(_hand)
+		grab.release(_hand)
+	if at.call(12.0): _shot("cle_7_retiree")
+	if at.call(12.5): car._key_shortcut()   # touche M
+	if at.call(14.5):
+		_log("AUTOTEST touche M : clé dans le contact=%s contact=%d moteur=%d" % [ign.has_key(), car.get_ignition_level(), car.engine_state])
+		get_tree().quit()
+
+
+func _run_autotest_start(delta: float) -> void:
+	# Départ comme dans le jeu (start_engine_running = false) : où est la clé, moteur coupé.
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	$Weather.random_events = false
+	$FallingTrees.enabled = false
+	car.external_input = true
+	car.throttle_input = 1.0
+	car.brake_input = 0.0
+	if at.call(2.0):
+		var key: RigidBody3D = car._find_key_item()
+		var where := key.get_parent().name
+		var z := key.get_parent() as StorageZone
+		if z:
+			where = z.zone_name
+		_log("AUTOTEST départ : clé dans « %s » (%s), contact=%d moteur=%d, plein gaz 2 s -> %.1f km/h, meshes de la clé=%d" % [where, car.to_local(key.global_position), car.get_ignition_level(), car.engine_state, absf(car.forward_speed) * 3.6, key.find_children("*", "MeshInstance3D", true, false).size()])
+		get_tree().quit()
+
+
+func _run_autotest_visor(delta: float) -> void:
+	# Pare-soleil : rabattre, pivoter contre la vitre, clé sous la sangle conducteur.
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	$Weather.random_events = false
+	$FallingTrees.enabled = false
+	car.external_input = true
+	car.throttle_input = 0.0
+	car.brake_input = 1.0
+	_inside = false
+	var vl = car.sun_visors[0]
+	var vr = car.sun_visors[1]
+	var ign = car.ignition
+	var key: RigidBody3D = car._find_key_item()
+	var kgrab: VRInteractable = key.get_node("Grab")
+	var eye := Vector3(0.45, 1.45, -0.05)
+	var eye_g: Vector3 = car.to_global(eye)
+	cam.fov = 70.0
+	if _t > 9.0 and _t < 13.5:
+		cam.fov = 26.0
+		_cabin_cam(eye, car.to_local(ign.global_position))
+	elif _t > 15.0:
+		_cabin_cam(Vector3(-0.1, 1.42, -0.2), Vector3(0.0, 1.62, 0.42))
+	else:
+		_cabin_cam(eye, Vector3(0.55, 1.62, 0.42))
+	if at.call(0.05):
+		$Weather.hour = 14.0
+		$Weather.set_weather("degage", true)
+		_hand = Node3D.new()
+		add_child(_hand)
+		# départ comme dans le jeu : moteur coupé, clé sous la sangle du pare-soleil
+		ign.set_key_angle(0.0)
+		car.engine_state = 0
+		var k: RigidBody3D = ign.eject()
+		if k:
+			vl.store_key(k)
+	if at.call(1.0):
+		_shot("ps_1_releve")
+		var pick := _ray_pick(eye_g, key.global_position)
+		_log("AUTOTEST pare-soleil relevé : clé sous la sangle=%s, clé attrapable=%s, visé la clé -> %s" % [key.get_parent().name, kgrab.enabled, pick.name if pick else "rien"])
+		# main sur le bord libre du panneau, qu'on rabat vers le bas
+		var sw: Node3D = vl._swing_node
+		_hand.global_position = sw.to_global(Vector3(-0.2, 0.0, -0.15))
+		vl.grab(_hand)
+	if _t > 1.0 and _t <= 2.2 and vl.is_grabbed():
+		var a := clampf((_t - 1.0) / 1.0, 0.0, 1.0) * deg_to_rad(90.0)
+		var sw2: Node3D = vl._swing_node
+		_hand.global_position = sw2.to_global(Vector3(-0.2, -sin(a) * 0.15, -cos(a) * 0.15))
+		vl.grab_update(_hand)
+	if at.call(2.3):
+		vl.release(_hand)
+		_log("AUTOTEST rabattu à la main : angle=%.0f° clé attrapable=%s" % [rad_to_deg(vl.flip), kgrab.enabled])
+	if at.call(3.3):
+		_shot("ps_2_rabattu")
+		var pick2 := _ray_pick(eye_g, key.global_position)
+		_log("AUTOTEST visé la clé -> %s" % (pick2.get_parent().name if pick2 else "rien"))
+		# décrocher et pivoter vers la vitre
+		_hand.global_position = vl.global_transform * Vector3(-0.2, -0.12, 0.0)
+		vl.grab(_hand)
+	if _t > 3.3 and _t <= 4.5 and vl.is_grabbed():
+		var b := clampf((_t - 3.3) / 1.0, 0.0, 1.0) * deg_to_rad(90.0)
+		_hand.global_position = vl.global_transform * Vector3(-cos(b) * 0.2, -0.12, -sin(b) * 0.2)
+		vl.grab_update(_hand)
+	if at.call(4.6):
+		vl.release(_hand)
+		_log("AUTOTEST pivoté contre la vitre : pivot=%.0f° rabat=%.0f°" % [rad_to_deg(vl.swing), rad_to_deg(vl.flip)])
+	if at.call(5.2): _shot("ps_3_vitre")
+	if at.call(5.4): vl.toggle()   # contre la vitre -> relevé
+	if at.call(6.8):
+		_log("AUTOTEST F (vitre -> relevé) : pivot=%.0f° rabat=%.0f° clé attrapable=%s" % [rad_to_deg(vl.swing), rad_to_deg(vl.flip), kgrab.enabled])
+		vl.toggle()   # relevé -> rabattu
+	if at.call(7.8):
+		_log("AUTOTEST F (relevé -> rabattu) : rabat=%.0f°" % rad_to_deg(vl.flip))
+		_hand.global_transform = key.global_transform
+		kgrab.grab(_hand)
+	# la main prend la clé et la porte au contact
+	if _t > 7.8 and _t <= 9.2 and kgrab.is_grabbed():
+		var k2 := clampf((_t - 7.8) / 1.2, 0.0, 1.0)
+		var from: Vector3 = vl._holder.global_position
+		var to: Vector3 = ign.global_position + (ign.global_basis as Basis).z * 0.02
+		_hand.global_transform = Transform3D(ign.global_basis, from.lerp(to, k2))
+		kgrab.grab_update(_hand)
+	if at.call(9.3):
+		kgrab.release(_hand)
+		_log("AUTOTEST clé prise au pare-soleil et lâchée au contact : dans le contact=%s" % ign.has_key())
+		kgrab.toggle()   # F : démarrer
+	if at.call(10.8):
+		_log("AUTOTEST démarrage : moteur=%d" % car.engine_state)
+		_shot("ps_4_demarre")
+		kgrab.toggle()   # F : couper
+	if at.call(11.6):
+		_hand.global_transform = Transform3D(ign.global_basis, ign.global_position + (ign.global_basis as Basis).z * 0.04)
+		kgrab.grab(_hand)
+	if _t > 11.6 and _t <= 13.2 and kgrab.is_grabbed():
+		var k3 := clampf((_t - 11.6) / 1.4, 0.0, 1.0)
+		var from2: Vector3 = ign.global_position + (ign.global_basis as Basis).z * 0.04
+		_hand.global_position = from2.lerp(vl._holder.global_position, k3)
+		kgrab.grab_update(_hand)
+	if at.call(13.3):
+		kgrab.release(_hand)
+		_log("AUTOTEST clé remise sous la sangle : %s (moteur=%d)" % [key.get_parent().name, car.engine_state])
+	if at.call(14.0): _shot("ps_5_cle_remise")
+	if at.call(14.2):
+		vl.toggle()   # rabattu -> contre la vitre
+	if at.call(15.0):
+		vl._auto_flip = 0.0
+		vl._auto_swing = 0.0
+		vr.toggle()   # passager rabattu (miroir de courtoisie)
+	if at.call(16.5):
+		_log("AUTOTEST relevé avec la clé : rabat=%.0f° clé attrapable=%s ; passager rabat=%.0f°" % [rad_to_deg(vl.flip), kgrab.enabled, rad_to_deg(vr.flip)])
+		_shot("ps_6_passager")
+	if at.call(16.8): get_tree().quit()
+
+
+func _run_autotest_key_f(delta: float) -> void:
+	# F en regardant la clé (pare-soleil rabattu, puis posée sur le siège) : elle va au contact.
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	$Weather.random_events = false
+	$FallingTrees.enabled = false
+	car.external_input = true
+	car.throttle_input = 0.0
+	car.brake_input = 1.0
+	_inside = false
+	var vl = car.sun_visors[0]
+	var ign = car.ignition
+	var key: RigidBody3D = car._find_key_item()
+	var kgrab: VRInteractable = key.get_node("Grab")
+	var eye := Vector3(0.45, 1.45, -0.05)
+	cam.fov = 75.0
+	_cabin_cam(eye, Vector3(0.4, 1.35, 0.5))
+	if at.call(0.05):
+		$Weather.hour = 14.0
+		$Weather.set_weather("degage", true)
+		ign.set_key_angle(0.0)
+		car.engine_state = 0
+		var k: RigidBody3D = ign.eject()
+		if k:
+			vl.store_key(k)
+		vl.toggle()   # pare-soleil rabattu
+	if at.call(1.2):
+		var pick := _ray_pick(car.to_global(eye), key.global_position)
+		_log("AUTOTEST visé la clé dans le pare-soleil -> %s" % (pick.get_parent().name if pick else "rien"))
+		if pick:
+			pick.toggle()   # F
+	if at.call(1.4): _shot("clef_1_vol")
+	if at.call(2.0):
+		_shot("clef_2_contact")
+		_log("AUTOTEST F sur la clé : dans le contact=%s contact=%d moteur=%d" % [ign.has_key(), car.get_ignition_level(), car.engine_state])
+		kgrab.toggle()   # F de nouveau : démarre
+	if at.call(3.6):
+		_log("AUTOTEST 2e F : moteur=%d contact=%d" % [car.engine_state, car.get_ignition_level()])
+		kgrab.toggle()   # coupe
+	if at.call(4.3):
+		var k2: RigidBody3D = ign.eject()
+		var storage := car.get_node("Storage") as CarStorage
+		k2.global_position = storage.to_global(Vector3(-0.45, 1.1, -0.05))
+		storage.receive(k2, Vector3.ZERO)
+	if at.call(5.0):
+		_log("AUTOTEST clé posée sur le siège : parent=%s" % key.get_parent().name)
+		kgrab.toggle()
+	if at.call(5.7):
+		_log("AUTOTEST F sur la clé posée : dans le contact=%s" % ign.has_key())
+		get_tree().quit()
+
+
+var _phys_items := {}
+var _phys_max_pen := 0.0
+var _phys_pen_frames := 0
+var _phys_worst := ""
+var _phys_who := {}
+
+
+func _run_autotest_physics(delta: float) -> void:
+	# Objets posés en vrac : accélération franche, gros freinage, virages ; on note où ils vont.
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	$Weather.random_events = false
+	$FallingTrees.enabled = false
+	car.external_input = true
+	_inside = false
+	var storage := car.get_node("Storage") as CarStorage
+	car.throttle_input = 1.0 if _t > 2.0 and _t < 6.0 else (0.55 if _t > 8.0 and _t < 13.0 else 0.0)
+	car.brake_input = 1.0 if (_t < 2.0 or (_t > 6.0 and _t < 7.8) or _t > 13.0) else 0.0
+	var steer := 0.0
+	if _t > 8.5 and _t < 10.5: steer = 0.7
+	elif _t > 10.5 and _t < 12.5: steer = -0.7
+	car.set("_kb_steer", steer)
+	cam.fov = 78.0
+	_cabin_cam(Vector3(0.42, 1.45, -0.1), Vector3(-0.35, 0.98, 0.42))
+	if at.call(0.05):
+		$Weather.hour = 14.0
+		$Weather.set_weather("degage", true)
+		# objets posés à la main (lâchés juste au-dessus de leur surface)
+		var spots := {
+			"Phone": Vector3(-0.47, 0.92, -0.02), "Joint": Vector3(-0.32, 0.92, 0.18),
+			"PillCapsule": Vector3(-0.42, 1.2, 0.76), "Thermos": Vector3(-0.42, 0.66, 0.62),
+			"Cigarette": Vector3(0.0, 0.98, 0.05),
+		}
+		for n in spots:
+			var it := car.find_child(n, true, false) as RigidBody3D
+			if it == null:
+				continue
+			var z := it.get_parent() as StorageZone
+			if z:
+				z.on_item_taken(it)
+			ItemPhysics.stop(it)
+			if it.has_meta("rest_xf"):
+				it.remove_meta("rest_xf")
+			it.global_position = car.to_global(spots[n])
+			storage.receive(it, car.linear_velocity)
+			_phys_items[n] = it
+	if _t > 0.5 and int(_t * 2.0) != int(t0 * 2.0):
+		var parts := PackedStringArray()
+		for n in _phys_items:
+			var it: RigidBody3D = _phys_items[n]
+			var st := ItemPhysics.get_state(it)
+			var p: Vector3 = car.to_local(it.global_position)
+			parts.append("%s(%.2f,%.2f,%.2f)%s" % [n.left(5), p.x, p.y, p.z, "^" if st.get("air", false) else ""])
+		var gl: Vector3 = storage.get_meta("_g", Vector3.ZERO)
+		var ph := ItemPhysics.get_state(_phys_items["Phone"])
+		_log("AUTOTEST phys t=%.1f %3.0fkm/h g ressentie av=%+.1f lat=%+.1f vert=%+.1f phone v=%.2f | %s" % [_t, absf(car.forward_speed) * 3.6, gl.z, gl.x, gl.y, (ph.get("vel", Vector3.ZERO) as Vector3).length(), " ".join(parts)])
+	# intrusion dans un volume plein (siège, dossier, console...) à chaque image
+	for it2 in storage.get_children():
+		if it2 is RigidBody3D:
+			var st2 := ItemPhysics.get_state(it2)
+			if st2.is_empty():
+				continue
+			var p2: Vector3 = st2["pos"]
+			var h2: Vector3 = st2["half"]
+			for ob in storage.obstacles:
+				var b2: AABB = ob
+				if p2.y >= b2.end.y - 0.012 or p2.y + h2.y * 2.0 <= b2.position.y:
+					continue
+				var pen := minf(minf(p2.x + h2.x - b2.position.x, b2.end.x - p2.x + h2.x), minf(p2.z + h2.z - b2.position.z, b2.end.z - p2.z + h2.z))
+				if pen > 0.003:
+					if pen > _phys_max_pen:
+						_phys_worst = "%s dans le volume %d à t=%.1f (bas %.3f, haut %.3f, demi-taille %s, en l'air=%s)" % [it2.name, storage.obstacles.find(ob), _t, p2.y, p2.y + h2.y * 2.0, h2, st2["air"]]
+					_phys_max_pen = maxf(_phys_max_pen, pen)
+					_phys_pen_frames += 1
+					_phys_who[it2.name] = _phys_who.get(it2.name, 0) + 1
+	# deux lancers : un objet jeté vers l'arrière contre le dossier conducteur, un autre
+	# jeté en travers vers la console centrale depuis le plancher passager
+	if at.call(6.0) or at.call(14.0):
+		var cg := car.find_child("Cigarette", true, false) as RigidBody3D
+		var cs := ItemPhysics.get_state(cg)
+		var cpos: Vector3 = cs.get("pos", Vector3.ZERO)
+		var org: Vector3 = car.to_local(cg.global_position)
+		_log("AUTOTEST écart position simulée / affichée de la cigarette à %.0f km/h : %.1f cm" % [absf(car.forward_speed) * 3.6, Vector2(org.x - cpos.x, org.z - cpos.z).length() * 100.0])
+	if at.call(14.6):
+		var a1 := car.find_child("Phone", true, false) as RigidBody3D
+		var z1 := a1.get_parent() as StorageZone
+		if z1: z1.on_item_taken(a1)
+		ItemPhysics.stop(a1)
+		a1.global_position = car.to_global(Vector3(0.45, 1.25, 0.25))
+		storage.receive(a1, car.linear_velocity + car.global_basis * Vector3(0.0, 0.5, -3.5))
+		var a2 := car.find_child("Thermos", true, false) as RigidBody3D
+		var z2 := a2.get_parent() as StorageZone
+		if z2: z2.on_item_taken(a2)
+		ItemPhysics.stop(a2)
+		a2.global_position = car.to_global(Vector3(-0.45, 0.75, 0.45))
+		storage.receive(a2, car.linear_velocity + car.global_basis * Vector3(3.0, 0.3, 0.0))
+	if at.call(16.2):
+		var p1: Vector3 = car.to_local(car.find_child("Phone", true, false).global_position)
+		var p2b: Vector3 = car.to_local(car.find_child("Thermos", true, false).global_position)
+		_log("AUTOTEST lancers : téléphone jeté vers l'arrière -> (%.2f, %.2f, %.2f) (dossier conducteur de z -0,40 à -0,13) ; thermos jeté vers la console -> (%.2f, %.2f, %.2f) (console x ±0,15)" % [p1.x, p1.y, p1.z, p2b.x, p2b.y, p2b.z])
+		_log("AUTOTEST intrusions dans un volume plein : %d images, au plus %.1f mm ; pire : %s ; par objet : %s" % [_phys_pen_frames, _phys_max_pen * 1000.0, _phys_worst, _phys_who])
+		get_tree().quit()
+	for k in [1.5, 5.5, 7.0, 9.8, 12.0, 14.5]:
+		if at.call(k):
+			_shot("phys_%04.1f" % k)
+	if at.call(14.9):
+		var rep := PackedStringArray()
+		for z in car.find_children("*", "Node3D", true, false):
+			if z is StorageZone and not z.exact_snap:
+				for c in z.get_children():
+					if c is RigidBody3D:
+						var lp: Vector3 = z.to_local((c as RigidBody3D).global_position)
+						var inside: bool = absf(lp.x) <= z.size.x * 0.5 + 0.01 and absf(lp.z) <= z.size.z * 0.5 + 0.01 and lp.y > -0.01 and lp.y < z.size.y + 0.02
+						rep.append("%s dans %s : %s (%.2f, %.2f, %.2f)" % [c.name, z.zone_name, "OK" if inside else "SORTI", lp.x, lp.y, lp.z])
+		_log("AUTOTEST compartiments : " + " ; ".join(rep))
+	pass   # fin : voir les lancers (16,2 s)
+
+
+func _run_autotest_cluster_light(delta: float) -> void:
+	# Lumière des compteurs, de nuit phares éteints : contact coupé / mis, vue conducteur et passager.
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	var w: WeatherSystem = $Weather
+	w.random_events = false
+	$FallingTrees.enabled = false
+	car.external_input = true
+	car.throttle_input = 0.0
+	car.brake_input = 1.0
+	_inside = false
+	var ign = car.ignition
+	var glow: SpotLight3D = car.get_node("InstrumentCluster/Glow")
+	cam.fov = 62.0
+	if _t > 3.8 and _t < 5.6:
+		_cabin_cam(Vector3(-0.35, 1.35, 0.15), Vector3(0.45, 1.1, 0.5))   # depuis le siège passager
+	else:
+		_cabin_cam(Vector3(0.45, 1.45, -0.05), Vector3(0.45, 1.12, 0.6))
+	if at.call(0.05):
+		w.hour = 23.0
+		w.time_scale = 0.0 if "time_scale" in w else 1.0
+		w.set_weather("degage", true)
+		car.light_stalk.set_notch(0, true)   # phares éteints
+		ign.set_key_angle(0.0)
+		car.engine_state = 0
+	if at.call(1.6):
+		_shot("eclairage_1_coupe")
+		_log("AUTOTEST contact coupé : lumière visible=%s énergie=%.2f" % [glow.visible, glow.light_energy])
+		ign.set_key_angle(deg_to_rad(70.0))
+		car.engine_state = 2
+	if at.call(3.0):
+		_shot("eclairage_2_contact")
+		_log("AUTOTEST contact mis, moteur en marche : énergie=%.2f couleur=%s" % [glow.light_energy, glow.light_color])
+	if at.call(4.5):
+		_shot("eclairage_3_passager")
+		car.handbrake_lever.set_angle_deg(car.handbrake_full_deg - 5.0, true)
+	if at.call(5.4):
+		_shot("eclairage_4_frein_a_main")
+		_log("AUTOTEST frein à main + ceinture : couleur=%s" % glow.light_color)
+	if at.call(5.7):
+		w.hour = 14.0
+	if at.call(6.6):
+		_shot("eclairage_5_jour")
+		get_tree().quit()
+
+
+var _spk_closed := Vector3.ZERO
+
+
+func _run_autotest_radio(delta: float) -> void:
+	# Autoradio : touches, présélection, volume, portière ouverte, contact coupé.
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	var w: WeatherSystem = $Weather
+	w.random_events = false
+	$FallingTrees.enabled = false
+	car.external_input = true
+	car.throttle_input = 0.0
+	car.brake_input = 1.0
+	_inside = false
+	var r = car.radio
+	var ign = car.ignition
+	var eye := Vector3(0.45, 1.45, -0.05)
+	if _t > 5.0 and _t < 6.0:
+		cam.fov = 60.0
+		_cabin_cam(Vector3(0.2, 1.3, -0.6), Vector3(1.2, 1.0, 0.4))
+	else:
+		cam.fov = 26.0
+		_cabin_cam(eye, car.to_local(r.global_position))
+	var status := func() -> String:
+		var playing := 0
+		for p in r.speakers:
+			if p.playing: playing += 1
+		return "allumée=%s station=%d (%s) volume=%.2f haut-parleurs actifs=%d, %.1f dB" % [r.is_on(), r.station, r.STATIONS[r.station]["name"], r.volume, playing, r.speakers[0].volume_db]
+	if at.call(0.05):
+		w.hour = 14.0
+		w.set_weather("degage", true)
+		_hand = Node3D.new()
+		add_child(_hand)
+		_rec = AudioEffectRecord.new()
+		AudioServer.add_bus_effect(0, _rec)
+		_rec.set_recording_active(true)
+	if at.call(1.0):
+		_shot("radio_1")
+		_log("AUTOTEST radio au départ : " + status.call())
+		var pick := _ray_pick(car.to_global(eye), r.get_node("Radio_next").global_position)
+		_log("AUTOTEST visé la touche ▶ -> %s" % (pick.name if pick else "rien"))
+		var g: VRInteractable = r.get_node("Radio_next")
+		_hand.global_transform = g.global_transform
+		g.grab(_hand)
+		g.release(_hand)
+	if at.call(1.15): _shot("radio_2_recherche")
+	if at.call(2.0):
+		_log("AUTOTEST touche ▶ : " + status.call())
+		_shot("radio_3_station")
+		(r.get_node("Radio_p2") as VRInteractable).toggle()   # touche 3
+	if at.call(3.0):
+		_log("AUTOTEST touche 3 : " + status.call())
+		var k: VRInteractable = r.get_node("Radio_knob")
+		_hand.global_transform = k.global_transform
+		k.grab(_hand)
+	if _t > 3.0 and _t <= 3.8 and (r.get_node("Radio_knob") as VRInteractable).is_grabbed():
+		var kk: VRInteractable = r.get_node("Radio_knob")
+		var a := clampf((_t - 3.0) / 0.7, 0.0, 1.0) * deg_to_rad(110.0)
+		_hand.global_basis = (r.global_basis as Basis) * Basis(Vector3.BACK, -a)   # poignet dans le sens horaire
+		kk.grab_update(_hand)
+	if at.call(3.9):
+		(r.get_node("Radio_knob") as VRInteractable).release(_hand)
+		_shot("radio_4_volume")
+		_log("AUTOTEST bouton tourné de 110° : " + status.call())
+		_spk_closed = r.speakers[0].global_position
+		car.get_node("Doors/DoorFL").set_angle_deg(-70.0, true)   # portière conducteur ouverte
+	if at.call(4.6):
+		var sp: Node3D = r.speakers[0]
+		var to_spk: Vector3 = car.global_basis.inverse() * (sp.global_position - cam.global_position).normalized()
+		var face: Vector3 = car.global_basis.inverse() * (sp.global_basis.z)
+		_log("AUTOTEST portière ouverte : haut-parleur avant gauche déplacé de %.2f m, vers %s (voiture), tourné vers %s" % [sp.global_position.distance_to(_spk_closed), to_spk.snapped(Vector3.ONE * 0.01), face.snapped(Vector3.ONE * 0.01)])
+	if at.call(5.5): _shot("radio_5_porte")
+	if at.call(6.0):
+		car.get_node("Doors/DoorFL").set_angle_deg(0.0, true)
+		ign.set_key_angle(0.0)   # contact coupé
+		car.engine_state = 0
+	if at.call(6.5): _log("AUTOTEST contact coupé : " + status.call())
+	if at.call(7.0): ign.set_key_angle(deg_to_rad(35.0))   # accessoires
+	if at.call(7.4): _log("AUTOTEST contact sur I (accessoires) : " + status.call())
+	if at.call(7.6): (r.get_node("Radio_knob") as VRInteractable).toggle()
+	if at.call(7.9): _log("AUTOTEST F sur le bouton (arrêt) : " + status.call())
+	if at.call(8.1):
+		_rec.set_recording_active(false)
+		_rec.get_recording().save_to_wav(ProjectSettings.globalize_path("res://.godot/autotest_radio.wav"))
+		get_tree().quit()
+
+
+func _run_autotest_radio_night(delta: float) -> void:
+	# Lueur de l'écran de l'autoradio : nuit radio éteinte / allumée, puis jour.
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	var w: WeatherSystem = $Weather
+	w.random_events = false
+	$FallingTrees.enabled = false
+	car.external_input = true
+	car.throttle_input = 0.0
+	car.brake_input = 1.0
+	_inside = false
+	var r = car.radio
+	var glow: SpotLight3D = r.get_node("ScreenGlow")
+	cam.fov = 55.0
+	_cabin_cam(Vector3(0.35, 1.38, 0.05), Vector3(0.0, 1.0, 0.6))
+	if at.call(0.05):
+		w.hour = 23.0
+		w.time_scale = 0.0
+		w.set_weather("degage", true)
+		car.light_stalk.set_notch(0, true)
+		r.power = false
+	if at.call(1.2):
+		_shot("radionuit_1_eteinte")
+		_log("AUTOTEST nuit, radio éteinte : lueur visible=%s énergie=%.3f" % [glow.visible, glow.light_energy])
+		r.power = true
+	if at.call(2.4):
+		_shot("radionuit_2_allumee")
+		_log("AUTOTEST nuit, radio allumée : lueur visible=%s énergie=%.3f (obscurité %.2f)" % [glow.visible, glow.light_energy, w.get_darkness()])
+		w.hour = 13.0
+	if at.call(3.6):
+		_log("AUTOTEST jour, radio allumée : lueur visible=%s énergie=%.3f (obscurité %.2f)" % [glow.visible, glow.light_energy, w.get_darkness()])
+		get_tree().quit()
+
+
+func _run_autotest_radio_power(delta: float) -> void:
+	# Touche PWR de l'autoradio, de nuit.
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	var w: WeatherSystem = $Weather
+	w.random_events = false
+	$FallingTrees.enabled = false
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = false
+	var r = car.radio
+	var glow: SpotLight3D = r.get_node("ScreenGlow")
+	var btn: VRInteractable = r.get_node("Radio_power")
+	var eye := Vector3(0.45, 1.45, -0.05)
+	cam.fov = 24.0
+	_cabin_cam(eye, car.to_local(r.global_position))
+	var status := func() -> String:
+		var n := 0
+		for p in r.speakers:
+			if p.playing: n += 1
+		return "allumée=%s haut-parleurs actifs=%d écran=%s lueur=%s" % [r.is_on(), n, r._freq_lbl.visible, glow.visible]
+	if at.call(0.05):
+		w.hour = 22.0
+		w.time_scale = 0.0
+		w.set_weather("degage", true)
+		car.light_stalk.set_notch(0, true)
+		_hand = Node3D.new()
+		add_child(_hand)
+	if at.call(1.0):
+		_shot("radiopwr_1_allumee")
+		var pick := _ray_pick(car.to_global(eye), btn.global_position)
+		_log("AUTOTEST au départ : %s ; visé la touche PWR -> %s" % [status.call(), pick.name if pick else "rien"])
+		_hand.global_transform = btn.global_transform
+		btn.grab(_hand)
+		btn.release(_hand)
+	if at.call(1.8):
+		_shot("radiopwr_2_eteinte")
+		_log("AUTOTEST touche PWR : " + status.call())
+		btn.toggle()   # F
+	if at.call(2.6):
+		_log("AUTOTEST F sur PWR : " + status.call())
+		get_tree().quit()
+
+
+func _run_autotest_ambience(delta: float) -> void:
+	# Ambiance : fermé, vitres ouvertes, portière, vent en roulant, nuit.
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	var w: WeatherSystem = $Weather
+	w.random_events = false
+	$FallingTrees.enabled = false
+	car.external_input = true
+	car.throttle_input = 0.8 if _t > 7.0 and _t < 10.5 else 0.0
+	car.brake_input = 0.0 if _t > 7.0 and _t < 11.0 else 1.0
+	_inside = false
+	cam.fov = 70.0
+	_cabin_cam(Vector3(0.45, 1.45, -0.05), Vector3(0.3, 1.3, 1.0))
+	var amb = car.ambience
+	var status := func() -> String:
+		var bus := AudioServer.get_bus_index("Ambiance")
+		var lp := AudioServer.get_bus_effect(bus, 0) as AudioEffectLowPassFilter
+		var beds := PackedStringArray()
+		for b in amb._bed_gain:
+			beds.append("%s %.2f" % [b, amb._bed_gain[b]])
+		return "ouverture=%.2f bus=%.1f dB filtre=%.0f Hz vent=%.1f dB | %s" % [amb.exposure, AudioServer.get_bus_volume_db(bus), lp.cutoff_hz, amb._wind.volume_db, ", ".join(beds)]
+	if at.call(0.05):
+		w.hour = 9.0
+		w.time_scale = 0.0
+		w.set_weather("degage", true)
+		car.radio.power = false
+		_rec = AudioEffectRecord.new()
+		AudioServer.add_bus_effect(0, _rec)
+		_rec.set_recording_active(true)
+	if at.call(2.9): _log("AUTOTEST tout fermé (%.0f km/h) : %s" % [absf(car.forward_speed) * 3.6, status.call()])
+	if at.call(3.0):
+		car.window_cranks["FL"].set_opening(1.0)
+		car.window_cranks["FR"].set_opening(1.0)
+	if at.call(5.9): _log("AUTOTEST vitres avant ouvertes : " + status.call())
+	if at.call(6.0): car.get_node("Doors/DoorFL").set_angle_deg(-60.0, true)
+	if at.call(6.8):
+		_log("AUTOTEST + portière ouverte : " + status.call())
+		car.get_node("Doors/DoorFL").set_angle_deg(0.0, true)
+	if at.call(10.4): _log("AUTOTEST en roulant vitres ouvertes (%.0f km/h) : %s" % [absf(car.forward_speed) * 3.6, status.call()])
+	if at.call(10.5):
+		car.window_cranks["FL"].set_opening(0.0)
+		car.window_cranks["FR"].set_opening(0.0)
+	if at.call(11.4): _log("AUTOTEST vitres refermées (%.0f km/h) : %s" % [absf(car.forward_speed) * 3.6, status.call()])
+	if at.call(11.5):
+		w.hour = 23.0
+		car.window_cranks["FL"].set_opening(1.0)
+	if at.call(15.5): _log("AUTOTEST nuit, vitre conducteur ouverte : " + status.call())
+	if at.call(15.6): _log("AUTOTEST cris d'oiseaux joués en 15,6 s : %d" % amb.calls_played)
+	if at.call(16.0):
+		_rec.set_recording_active(false)
+		_rec.get_recording().save_to_wav(ProjectSettings.globalize_path("res://.godot/autotest_ambiance.wav"))
+		get_tree().quit()
+
+
+var _spot_excess := 0.0
+var _spot_frames := 0
+var _spot_worst := ""
+var _spot_who := {}
+
+
+func _run_autotest_storage_spots(delta: float) -> void:
+	# Objets dans les rangements (thermos dans le vide-poche, téléphone et joint dans la
+	# boîte à gants, cigarette dans l'accoudoir) : on secoue, rien ne doit dépasser.
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	$Weather.random_events = false
+	$FallingTrees.enabled = false
+	car.external_input = true
+	_inside = false
+	car.throttle_input = 1.0 if _t > 2.0 and _t < 6.0 else (0.55 if _t > 8.0 and _t < 13.0 else 0.0)
+	car.brake_input = 1.0 if (_t < 2.0 or (_t > 6.0 and _t < 7.8) or _t > 13.0) else 0.0
+	var steer := 0.0
+	if _t > 8.5 and _t < 10.5: steer = 0.8
+	elif _t > 10.5 and _t < 12.5: steer = -0.8
+	car.set("_kb_steer", steer)
+	var pocket := car.get_node("Doors/DoorFL/Pocket") as StorageZone
+	var glove := car.get_node("Storage/Glovebox") as StorageZone
+	var console := car.get_node("Storage/Console") as StorageZone
+	if _t < 13.5:
+		cam.fov = 60.0
+		_cabin_cam(Vector3(0.45, 1.45, -0.05), Vector3(0.80, 0.7, 0.5))   # vide-poche conducteur
+	else:
+		cam.fov = 55.0
+		_cabin_cam(Vector3(-0.2, 1.3, 0.2), Vector3(-0.52, 0.86, 0.83))   # boîte à gants ouverte
+	if at.call(0.05):
+		$Weather.hour = 14.0
+		$Weather.set_weather("degage", true)
+		car.get_node("GloveboxLid").set_angle_deg(-80.0, true)
+		car.get_node("ConsoleLid").set_angle_deg(-100.0, true)
+	if at.call(0.3):
+		var plan := {"Thermos": pocket, "Phone": glove, "Joint": glove, "Cigarette": console}
+		for n in plan:
+			var it := car.find_child(n, true, false) as RigidBody3D
+			var z := it.get_parent() as StorageZone
+			if z: z.on_item_taken(it)
+			ItemPhysics.stop(it)
+			if it.has_meta("rest_xf"): it.remove_meta("rest_xf")
+			var dst: StorageZone = plan[n]
+			it.global_position = dst.global_position + dst.global_basis.y * 0.05
+			dst.store(it)
+	if at.call(1.0):
+		car.get_node("GloveboxLid").set_angle_deg(0.0, true)
+		car.get_node("ConsoleLid").set_angle_deg(0.0, true)
+	# chaque image : l'empreinte de chaque objet rangé reste-t-elle dans son compartiment ?
+	for z2 in [pocket, glove, console]:
+		var zone: StorageZone = z2
+		for c in zone.get_children():
+			if c is RigidBody3D:
+				var st := ItemPhysics.get_state(c)
+				if st.is_empty() or c.has_meta("rest_xf") or _t < 1.2:
+					continue   # pas encore posé (ou état pas encore recalculé)
+				var p: Vector3 = st["pos"]
+				var h: Vector3 = st["half"]
+				var ex := maxf(maxf(absf(p.x) + h.x - zone.size.x * 0.5, absf(p.z) + h.z - zone.size.z * 0.5), 0.0)
+				if ex > 0.003:
+					_spot_frames += 1
+					_spot_who[c.name] = _spot_who.get(c.name, 0) + 1
+					if ex > _spot_excess:
+						_spot_excess = ex
+						_spot_worst = "%s dans %s à t=%.1f pos=%s demi=%s taille=%s orig=%s air=%s" % [c.name, zone.zone_name, _t, p, h, zone.size, (c as Node3D).position, st.get("air")]
+	if at.call(5.5): _shot("rangement_1_acceleration")
+	if at.call(7.0): _shot("rangement_2_freinage")
+	if at.call(11.0): _shot("rangement_3_virage")
+	if at.call(13.6): car.get_node("GloveboxLid").set_angle_deg(-80.0, true)
+	if at.call(14.6):
+		_shot("rangement_4_boite_a_gants")
+		var rep := PackedStringArray()
+		for z3 in [pocket, glove, console]:
+			for c in (z3 as StorageZone).get_children():
+				if c is RigidBody3D:
+					rep.append("%s dans %s, orientation %.0f°" % [c.name, (z3 as StorageZone).zone_name, rad_to_deg(float(ItemPhysics.get_state(c).get("yaw", 0.0)))])
+		_log("AUTOTEST rangements : " + " ; ".join(rep))
+		_log("AUTOTEST dépassements hors du compartiment : %d images, au plus %.1f mm (%s) par objet %s" % [_spot_frames, _spot_excess * 1000.0, _spot_worst, _spot_who])
+		get_tree().quit()
+
+
+func _run_autotest_all_belts(delta: float) -> void:
+	# Ceintures de toutes les places : seule celle du conducteur fait biper.
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	$Weather.random_events = false
+	$FallingTrees.enabled = false
+	car.external_input = true
+	car.throttle_input = 0.35 if _t > 1.0 and _t < 9.0 else 0.0
+	car.brake_input = 0.0 if _t > 1.0 and _t < 9.0 else 1.0
+	_inside = false
+	var belts: Array = car.seatbelts
+	var drv = belts[0]
+	var rl = belts[2]
+	cam.fov = 75.0
+	if _t >= 8.7 and _t < 9.2:
+		_cabin_cam(Vector3(0.15, 1.45, 0.45), Vector3(-0.5, 1.0, -0.15))   # place passager
+	else:
+		_cabin_cam(Vector3(0.0, 1.68, -0.30), Vector3(0.0, 0.85, -1.05))   # banquette arrière, vue plongeante
+	var states := func() -> String:
+		var parts := PackedStringArray()
+		for b in belts:
+			parts.append("%s=%s" % [b.name.replace("Seatbelt", "").replace("", ""), "bouclée" if b.is_buckled() else "libre"])
+		return " ".join(parts)
+	if at.call(0.05):
+		$Weather.hour = 14.0
+		$Weather.set_weather("degage", true)
+		_hand = Node3D.new()
+		add_child(_hand)
+		drv.toggle()   # conducteur bouclé
+	if at.call(0.8): _shot("ceintures_1_libres")
+	if at.call(4.0):
+		_log("AUTOTEST conducteur bouclé, autres libres, %.0f km/h : voyant=%d carillon(s)=%s | %s" % [absf(car.forward_speed) * 3.6, car.get_belt_warning(), [belts[0]._chime_mode, belts[1]._chime_mode, belts[2]._chime_mode, belts[3]._chime_mode, belts[4]._chime_mode], states.call()])
+		drv.toggle()   # conducteur débouclé
+	if at.call(5.5):
+		_log("AUTOTEST conducteur débouclé : voyant=%d carillon conducteur=%d" % [car.get_belt_warning(), drv._chime_mode])
+		drv.toggle()
+		# arrière gauche bouclée à la main
+		_hand.global_position = rl._tongue.global_position
+		rl._tongue.grab(_hand)
+	if _t > 5.5 and _t <= 7.0 and rl._tongue.is_grabbed():
+		var k := clampf((_t - 5.5) / 1.4, 0.0, 1.0)
+		var start: Vector3 = rl._rest_point()
+		var mid := Vector3(0.55, 1.15, -0.6)
+		var end: Vector3 = rl._buckled_tongue_point()
+		_hand.global_position = car.to_global(start.lerp(mid, k).lerp(mid.lerp(end, k), k))
+		rl._tongue.grab_update(_hand)
+		if not rl._tongue.enabled:
+			rl._tongue.release(_hand)
+	if at.call(7.2):
+		_log("AUTOTEST arrière gauche à la main : bouclée=%s" % rl.is_buckled())
+		for i in [1, 3, 4]:
+			belts[i]._tongue.toggle()   # F sur le pêne : se bouclent seules
+	if at.call(8.6):
+		_log("AUTOTEST toutes bouclées : " + states.call())
+		_shot("ceintures_2_bouclees")
+		belts[3]._buckle.toggle()   # bouton rouge de la ceinture du milieu
+	if at.call(9.1): _shot("ceintures_passager")
+	if at.call(9.9):
+		_log("AUTOTEST bouton rouge arrière milieu : " + states.call())
+		_shot("ceintures_3_milieu_libre")
+		get_tree().quit()
+
+
+# Boîte auto 6 rapports : plein gaz en D jusqu'au bridage (154 km/h), lever de pied,
+# kickdown, puis « 2 » et « 1 ». Journal toutes les secondes.
+var _gear_log := {"max": 0.0, "t100": -1.0, "shifts": [], "last": 0}
+
+func _run_autotest_gears(delta: float) -> void:
+	var w: WeatherSystem = $Weather
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	w.random_events = false
+	$FallingTrees.enabled = false
+	car.external_input = true
+	var kmh: float = car.forward_speed * 3.6
+	if at.call(0.05):
+		w.set_weather("degage", true)
+		w.rain_volume = 0.0
+		car.handbrake_lever.set_angle_deg(0.0, true)
+		car.gear_lever.set_notch(2, true)   # D
+		_gear_log = {"max": 0.0, "t100": -1.0, "shifts": [], "last": 0}
+		# piste d'essai droite et plate, loin au-dessus de la carte
+		var strip := StaticBody3D.new()
+		var cs := CollisionShape3D.new()
+		var box := BoxShape3D.new()
+		box.size = Vector3(40.0, 1.0, 4000.0)
+		cs.shape = box
+		strip.add_child(cs)
+		var mi := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = box.size
+		mi.mesh = bm
+		strip.add_child(mi)
+		add_child(strip)
+		strip.global_position = Vector3(0.0, 400.0, 0.0)
+		car.global_transform = Transform3D(Basis(), Vector3(0.0, 401.2, -1950.0))
+		car.linear_velocity = Vector3.ZERO
+		car.angular_velocity = Vector3.ZERO
+	var thr := 0.0
+	var brk := 0.0
+	if _t < 0.5:
+		brk = 1.0
+	elif _t < 45.0:
+		thr = 1.0
+		if kmh >= 100.0 and _gear_log["t100"] < 0.0:
+			_gear_log["t100"] = _t - 0.5
+			_log("AUTOTEST 0-100 km/h : %.1f s" % (_t - 0.5))
+	elif _t < 52.0:
+		thr = 0.0   # lever de pied puis freinage jusqu'à 70 km/h
+		brk = 0.5 if kmh > 70.0 else 0.0
+	elif _t < 56.0:
+		thr = 1.0   # kickdown
+	elif _t < 64.0:
+		thr = 0.0
+		brk = 0.6 if kmh > 95.0 else 0.0
+		if at.call(57.0): car.gear_lever.set_notch(3, true)   # « 2 » (à ~100 km/h : pas de surrégime)
+	elif _t < 74.0:
+		thr = 1.0
+		if at.call(69.0): car.gear_lever.set_notch(4, true)   # « 1 »
+	if car.auto_gear != _gear_log["last"]:
+		_gear_log["shifts"].append("%d→%d à %.0f km/h (t=%.1f)" % [_gear_log["last"] + 1, car.auto_gear + 1, kmh, _t])
+		_gear_log["last"] = car.auto_gear
+	if _t < 45.0:
+		_gear_log["max"] = maxf(_gear_log["max"], kmh)
+	var fwd := car.global_basis.z
+	# tout droit vers +Z, en corrigeant l'écart latéral
+	var to_t := Vector3(0.0, 0.0, car.global_position.z + 30.0 + absf(car.forward_speed)) - car.global_position
+	to_t.y = 0.0
+	car._kb_steer = clampf(fwd.cross(to_t.normalized()).y * 2.0, -1.0, 1.0)
+	car.throttle_input = thr
+	car.brake_input = brk
+	_inside = false
+	_cabin_cam(Vector3(0.42, 1.52, -0.2), Vector3(0.42, 1.25, 4.0))
+	if fmod(_t, 1.0) < delta and _t > 0.5:
+		_log("AUTOTEST t=%.0f levier=%s rapport=%d vitesse=%.0f km/h régime=%.0f" % [_t, car.gear_lever.get_notch_label(), car.auto_gear + 1, kmh, car.engine_sound.rpm])
+	if at.call(30.0): _shot("vitesses_combine")
+	if at.call(44.9):
+		_log("AUTOTEST vitesse max en D : %.1f km/h" % _gear_log["max"])
+	if at.call(74.0):
+		_log("AUTOTEST passages : " + " | ".join(PackedStringArray(_gear_log["shifts"])))
+		get_tree().quit()

@@ -35,6 +35,11 @@ func _text(center_x: float, baseline_y: float, text: String, font_size: int, col
 
 func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), BG)
+	# contact coupé (clé sur 0 ou I, ou absente) : écran éteint
+	var level: int = car.get_ignition_level() if car and car.has_method("get_ignition_level") else 2
+	if level < 2:
+		draw_rect(Rect2(Vector2.ZERO, size), Color.BLACK)
+		return
 	# Vu du siège, la jante du volant cache le haut de l'écran (surtout sur les côtés)
 	# et les branches cachent le bas : le contenu tient dans une arche au centre.
 	_draw_speedometer(Vector2(165, 145), 72.0)
@@ -97,6 +102,8 @@ func _draw_right_panel() -> void:
 		if cur:
 			draw_rect(Rect2(x - 13.0, 110.0, 26.0, 28.0), Color(0.95, 0.65, 0.1), false, 2.0)
 		_text(x, 132.0, gears[i], 22 if cur else 17, Color(1.0, 0.75, 0.2) if cur else Color(0.45, 0.47, 0.5))
+		if cur and i >= 2 and car.engine_state == 2:
+			_text(x + 9.0, 137.0, str(car.auto_gear + 1), 11, Color(1.0, 0.75, 0.2))   # rapport interne (D4…)
 	# Voyants
 	var lights: Dictionary = car.get_lights_on()
 	var hb_on: bool = car.get_handbrake_amount() > 0.3
@@ -110,6 +117,9 @@ func _draw_right_panel() -> void:
 	# ceinture non bouclée : fixe à l'arrêt, clignote quand le carillon sonne
 	var belt: int = car.get_belt_warning() if car.has_method("get_belt_warning") else 0
 	var belt_on := belt == 1 or (belt == 2 and fmod(_blink, 0.7) < 0.42)
+	# batterie / charge : rouge contact mis tant que le moteur ne tourne pas
+	var running: bool = car.is_engine_running() if car.has_method("is_engine_running") else true
+	_icon_battery(Vector2(266.0, 138.0), Color(1.0, 0.18, 0.12, DIM if running else 1.0))
 	_icon_seatbelt(Vector2(266.0, 172.0), Color(1.0, 0.18, 0.12, 1.0 if belt_on else DIM))
 	var addiction: PillAddiction = car.get_addiction() if car.has_method("get_addiction") else null
 	if addiction:
@@ -201,3 +211,12 @@ func _icon_seatbelt(p: Vector2, c: Color) -> void:
 	draw_line(p + Vector2(7, 7), p + Vector2(9, 15), c, 4.0, true)
 	draw_line(p + Vector2(6, -8), p + Vector2(-10, 8), c, 2.5, true)
 	draw_circle(p + Vector2(-10, 8), 2.5, c)
+
+
+func _icon_battery(p: Vector2, c: Color) -> void:
+	draw_rect(Rect2(p.x - 12.0, p.y - 7.0, 24.0, 15.0), c, false, 2.5)
+	draw_rect(Rect2(p.x - 9.0, p.y - 10.0, 4.0, 3.0), c)
+	draw_rect(Rect2(p.x + 5.0, p.y - 10.0, 4.0, 3.0), c)
+	draw_line(p + Vector2(-8, 1), p + Vector2(-3, 1), c, 2.0)
+	draw_line(p + Vector2(4, 1), p + Vector2(9, 1), c, 2.0)
+	draw_line(p + Vector2(6.5, -1.5), p + Vector2(6.5, 3.5), c, 2.0)

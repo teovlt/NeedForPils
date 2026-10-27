@@ -15,6 +15,9 @@ extends VRInteractable
 ## Axe local (0 = X, 1 = Y, 2 = Z) qui doit rester vers le haut quand l'objet est posé.
 ## -1 = automatique (le plus petit côté vers le haut : l'objet est posé à plat).
 @export_range(-1, 2) var rest_up_axis := -1
+## Coefficient de frottement de l'objet posé (glisse plus ou moins quand la voiture
+## freine, accélère ou tourne). Multiplié par celui de la surface.
+@export_range(0.05, 1.5) var friction := 0.45
 
 var item: RigidBody3D
 var hand_velocity := Vector3.ZERO
@@ -59,6 +62,7 @@ func _on_grab_begin(hand: Node3D) -> void:
 func _on_grab_update(hand: Node3D) -> void:
 	if hand != _active_hand:
 		return
+	CarStorage.pin_body(item)
 	var xf := hand.global_transform * _offset
 	var dt := get_physics_process_delta_time()
 	hand_velocity = hand_velocity.lerp((xf.origin - _last_pos) / maxf(dt, 0.001), 0.5)
@@ -95,7 +99,9 @@ func _take(hand: Node3D) -> void:
 		item.remove_meta("free_timer")
 	if item.has_meta("rest_xf"):
 		item.remove_meta("rest_xf")
+	ItemPhysics.stop(item)
 	item.top_level = true
+	CarStorage.pin_body(item)
 	_offset = hand.global_transform.affine_inverse() * item.global_transform
 	_last_pos = item.global_position
 	hand_velocity = Vector3.ZERO

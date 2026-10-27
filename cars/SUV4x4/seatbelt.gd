@@ -1,5 +1,8 @@
 extends Node3D
-## Ceinture de sécurité 3 points du conducteur.
+## Ceinture de sécurité (une par place). Par défaut : 3 points, conducteur.
+## Les autres places réutilisent ce script avec leurs positions (`side` = -1 pour une
+## place de droite, `two_point` pour la ceinture ventrale de la place du milieu
+## arrière) et `warn` = faux : elles ne déclenchent ni voyant ni carillon.
 ##
 ## - Sangle : part du renvoi (D-ring) sur le montant B, passe par la boucle métallique
 ##   (pêne) et finit à l'ancrage bas, sur le côté extérieur du siège.
@@ -38,6 +41,17 @@ signal buckled_changed(buckled: bool)
 ## Longueur max de sangle déroulable depuis le renvoi.
 @export var max_reach := 1.25
 @export var warn_speed_kmh := 10.0
+## Côté de la place : 1 = gauche (renvoi et ancrage côté porte gauche, +X), -1 = droite.
+@export var side := 1.0
+## Ceinture ventrale 2 points (place du milieu arrière) : pas de renvoi, la sangle va
+## de l'ancrage au pêne ; débouclée, le pêne est posé sur l'assise (`rest_point`).
+@export var two_point := false
+@export var rest_point := Vector3.ZERO
+## Yeux de l'occupant (la boucle est tournée vers eux) et inclinaison de la boucle.
+@export var eye := Vector3(0.45, 1.45, -0.05)
+@export var buckle_up := Vector3(0.12, 1.0, 0.05)
+## Voyant et carillon (seulement la ceinture du conducteur).
+@export var warn := true
 @export var chime_volume := 0.45
 
 var buckled := false
@@ -84,15 +98,17 @@ func _ready() -> void:
 	add_child(parts)
 	# renvoi sur le montant B, face vers l'habitacle (-X)
 	var dring := parts.get_node("Belt_DRing") as Node3D
-	dring.reparent(self, false)
-	dring.transform = Transform3D(_basis_facing(Vector3.LEFT, Vector3.UP), d_ring + Vector3(0.016, 0.0, 0.0))
+	if two_point:
+		dring.queue_free()
+	else:
+		dring.reparent(self, false)
+		dring.transform = Transform3D(_basis_facing(Vector3(-side, 0.0, 0.0), Vector3.UP), d_ring + Vector3(0.016 * side, 0.0, 0.0))
 	# ancrage bas sur le flanc du siège, face vers la porte (+X)
 	var anchor := parts.get_node("Belt_Anchor") as Node3D
 	anchor.reparent(self, false)
-	anchor.transform = Transform3D(_basis_facing(Vector3.RIGHT, Vector3(0.0, 1.0, 0.25)), lower_anchor + Vector3(-0.01, -0.012, 0.0))
+	anchor.transform = Transform3D(_basis_facing(Vector3(side, 0.0, 0.0), Vector3(0.0, 1.0, 0.25)), lower_anchor + Vector3(-0.01 * side, -0.012, 0.0))
 	# boucle : penchée vers le conducteur, bouton tourné vers ses yeux
-	var eye := Vector3(0.45, 1.45, -0.05)
-	var up := Vector3(0.12, 1.0, 0.05).normalized()
+	var up := buckle_up.normalized()
 	var to_eye := eye - buckle_slot
 	_buckle_basis = _basis_facing(to_eye - up * to_eye.dot(up), up)
 	_buckle = Grip.new()
@@ -146,7 +162,8 @@ func _ready() -> void:
 	_player.stream = gen
 	_player.unit_size = 4.0
 	_player.max_distance = 20.0
-	_player.position = Vector3(0.45, 1.05, 0.75)   # derrière le combiné
+	# carillon : derrière le combiné ; autres places : le clac vient de la boucle
+	_player.position = Vector3(0.45, 1.05, 0.75) if warn else buckle_slot
 	add_child(_player)
 	_player.play()
 	_playback = _player.get_stream_playback()
@@ -163,7 +180,7 @@ static func _basis_facing(face: Vector3, up: Vector3) -> Basis:
 
 
 func _rest_point() -> Vector3:
-	return d_ring.lerp(lower_anchor, rest_ratio)
+	return rest_point if two_point else d_ring.lerp(lower_anchor, rest_ratio)
 
 
 func _buckled_tongue_point() -> Vector3:
@@ -177,7 +194,8 @@ func is_buckled() -> bool:
 ## 0 : ceinture mise ; 1 : non mise (voyant fixe) ; 2 : non mise en roulant (voyant
 ## clignotant et carillon).
 func get_warning_level() -> int:
-	if buckled:
+	var level: int = _car.get_ignition_level() if _car and _car.has_method("get_ignition_level") else 2
+	if buckled or level < 2 or not warn:
 		return 0
 	return 2 if _chime_mode > 0 else 1
 
@@ -208,10 +226,12 @@ func _grip_update(kind: String, hand: Node3D) -> void:
 	if kind != "tongue" or _state != HELD:
 		return
 	var p := _car.to_local(hand.global_position)
-	# la sangle n'est pas infinie : le pêne reste à portée du renvoi
-	var off := p - d_ring
-	if off.length() > max_reach:
-		p = d_ring + off.normalized() * max_reach
+	# la sangle n'est pas infinie : le pêne reste à portée du renvoi (ou de l'ancrage)
+	var origin := lower_anchor if two_point else d_ring
+	var reach := max_reach * (0.6 if two_point else 1.0)
+	var off := p - origin
+	if off.length() > reach:
+		p = origin + off.normalized() * reach
 	_tongue_pos = p
 	if p.distance_to(_buckled_tongue_point()) < 0.025:
 		_latch(hand)
@@ -292,7 +312,7 @@ func _process(delta: float) -> void:
 			_auto_t = minf(_auto_t + delta / 0.9, 1.0)
 			var k := smoothstep(0.0, 1.0, _auto_t)
 			# passe devant le torse (comme une main qui tire la sangle)
-			var mid := (shoulder_path[1] + Vector3(0.0, 0.0, 0.12))
+			var mid := ((lap_path[1] if two_point else shoulder_path[1]) + Vector3(0.0, 0.0, 0.12))
 			var a := _auto_from.lerp(mid, k)
 			var b := mid.lerp(_buckled_tongue_point(), k)
 			_tongue_pos = a.lerp(b, k)
@@ -307,8 +327,9 @@ func _process(delta: float) -> void:
 
 func _update_warning(delta: float) -> void:
 	var kmh := absf(float(_car.get("forward_speed"))) * 3.6 if _car else 0.0
-	if buckled:
-		_chime_mode = 0
+	var level: int = _car.get_ignition_level() if _car and _car.has_method("get_ignition_level") else 2
+	if buckled or level < 2 or not warn:
+		_chime_mode = 0   # ceinture mise, contact coupé, ou place sans alerte
 		return
 	if kmh > warn_speed_kmh or (_chime_mode > 0 and kmh > 5.0):
 		unbelted_drive_time += delta
@@ -322,8 +343,15 @@ func _update_warning(delta: float) -> void:
 
 func _update_visual() -> void:
 	# orientation du pêne : tiré par la sangle vers le renvoi ; aligné sur la boucle tout près
-	var to_d := (d_ring - _tongue_pos)
-	var hang := _basis_facing(Vector3.LEFT, to_d if to_d.length() > 0.01 else Vector3.UP)
+	var inward := Vector3(-side, 0.0, 0.0)
+	var hang: Basis
+	if two_point:
+		# posé à plat sur l'assise, tiré vers l'ancrage
+		var to_a := lower_anchor - _tongue_pos
+		hang = _basis_facing(Vector3.UP, to_a if to_a.length() > 0.01 else Vector3.FORWARD)
+	else:
+		var to_d := (d_ring - _tongue_pos)
+		hang = _basis_facing(inward, to_d if to_d.length() > 0.01 else Vector3.UP)
 	var near := clampf(1.0 - _tongue_pos.distance_to(_buckled_tongue_point()) / 0.15, 0.0, 1.0)
 	var b := hang.slerp(_buckle_basis, near) if near > 0.0 else hang
 	_tongue.transform = Transform3D(b, _tongue_pos)
@@ -331,17 +359,20 @@ func _update_visual() -> void:
 	_imesh.clear_surfaces()
 	var body_n := Vector3(0.0, 0.35, 1.0).normalized()
 	if buckled:
-		var sh := PackedVector3Array([d_ring])
-		sh.append_array(shoulder_path)
-		sh.append(_tongue_pos)
-		_ribbon(sh, [Vector3.LEFT, body_n, body_n, body_n, body_n])
+		if not two_point:
+			var sh := PackedVector3Array([d_ring])
+			sh.append_array(shoulder_path)
+			sh.append(_tongue_pos)
+			_ribbon(sh, [inward, body_n, body_n, body_n, body_n])
 		var lap := PackedVector3Array([lower_anchor])
 		lap.append_array(lap_path)
 		lap.append(_tongue_pos)
 		_ribbon(lap, [Vector3(0, 1, 0.3).normalized(), body_n, body_n, body_n, body_n])
+	elif two_point:
+		_ribbon(PackedVector3Array([lower_anchor, _tongue_pos]), [Vector3.UP, Vector3.UP])
 	else:
-		_ribbon(PackedVector3Array([d_ring, _tongue_pos]), [Vector3.LEFT, Vector3.LEFT])
-		_ribbon(PackedVector3Array([_tongue_pos, lower_anchor]), [Vector3.LEFT, Vector3.LEFT])
+		_ribbon(PackedVector3Array([d_ring, _tongue_pos]), [inward, inward])
+		_ribbon(PackedVector3Array([_tongue_pos, lower_anchor]), [inward, inward])
 
 
 ## Ruban plat le long d'une polyligne ; `normals` = face de la sangle à chaque point.
