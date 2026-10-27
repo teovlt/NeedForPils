@@ -1,7 +1,7 @@
 [gd_scene format=3]
 
 [ext_resource type="PackedScene" path="res://props/pill_smiley.glb" id="1_model"]
-[ext_resource type="Script" path="res://interaction/vr_pickable.gd" id="2_pick"]
+[ext_resource type="Script" path="res://interaction/edible_pickable.gd" id="2_pick"]
 
 [sub_resource type="BoxShape3D" id="Box_item"]
 size = Vector3(0.009, 0.004, 0.009)

@@ -8,8 +8,7 @@
 [ext_resource type="Script" path="res://cars/SUV4x4/windshield_rain.gd" id="6_rain"]
 [ext_resource type="Script" path="res://interaction/car_storage.gd" id="7_storage"]
 [ext_resource type="Script" path="res://interaction/storage_zone.gd" id="8_zone"]
-[ext_resource type="PackedScene" path="res://props/items/pill_capsule_item.tscn" id="9_capsule"]
-[ext_resource type="PackedScene" path="res://props/items/pill_smiley_item.tscn" id="10_smiley"]
+[ext_resource type="PackedScene" path="res://props/items/pill_bag_item.tscn" id="9_bag"]
 [ext_resource type="PackedScene" path="res://props/items/cigarette_item.tscn" id="11_cig"]
 [ext_resource type="PackedScene" path="res://props/items/joint_item.tscn" id="12_joint"]
 [ext_resource type="PackedScene" path="res://props/items/phone_item.tscn" id="13_phone"]
@@ -335,11 +334,8 @@ zone_name = "Boîte à gants"
 size = Vector3(0.49, 0.15, 0.22)
 access_hinge = NodePath("../../GloveboxLid")
 
-[node name="PillCapsule" parent="Storage/Glovebox" instance=ExtResource("9_capsule")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.1, 0, 0.02)
-
-[node name="PillSmiley" parent="Storage/Glovebox" instance=ExtResource("10_smiley")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.08, 0, -0.04)
+[node name="PillBag" parent="Storage/Glovebox" instance=ExtResource("9_bag")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
 
 [node name="Console" type="Node3D" parent="Storage"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.62, 0.05)

@@ -16,6 +16,10 @@ const GROUP := "pill_spawner"
 @export var car_path: NodePath
 @export var addiction_path: NodePath
 @export var enabled := true
+## Pilules géantes posées sur la route (désactivé le 27/10 : les pilules se prennent
+## maintenant dans la pochette du 4x4, voir interaction/pill_bag.gd). Le nœud reste
+## pour la distance parcourue et l'accès à la route utilisés par ChaseDirector.
+@export var road_pills := false
 ## Pas de pilule avant cette distance parcourue (m).
 @export var safe_start_distance := 120.0
 ## Distance (m) entre deux pilules (mini/maxi).
@@ -82,6 +86,8 @@ func get_road() -> RoadGenerator:
 
 ## Pose une pilule (ou une rangée) devant la voiture (distance auto si <= 0).
 func spawn_ahead(distance := -1.0) -> void:
+	if not road_pills:
+		return
 	var speed := (_car as RigidBody3D).linear_velocity.length() if _car is RigidBody3D else 0.0
 	if distance <= 0.0:
 		distance = clampf(speed * 6.0 + 40.0, 90.0, 220.0)
@@ -99,6 +105,8 @@ func spawn_ahead(distance := -1.0) -> void:
 
 
 func spawn_at(distance: float, lateral: float) -> RoadPill:
+	if not road_pills:
+		return null
 	var sample := _road.sample_ahead(_car.global_position, distance)
 	if not sample["found"]:
 		return null
@@ -135,7 +143,7 @@ func _check_pickups() -> void:
 
 
 func _on_tree_falling(tree: FallingTree) -> void:
-	if not enabled or randf() >= bait_chance or _car == null:
+	if not road_pills or not enabled or randf() >= bait_chance or _car == null:
 		return
 	var car_s := _road.sample_road(_car.global_position)
 	var tree_s := _road.sample_road(tree.road_point)
