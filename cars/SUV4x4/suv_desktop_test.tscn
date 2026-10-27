@@ -46,6 +46,7 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -320)
 straight_start = 410.0
 keep_behind = 320.0
 target_path = NodePath("../SUV4x4")
+start_site = false
 
 [node name="FallingTrees" type="Node" parent="."]
 script = ExtResource("6_trees")

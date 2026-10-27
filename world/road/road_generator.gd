@@ -99,6 +99,24 @@ var _relief0 := 0.0   # altitude du relief au départ : la route part toujours d
 ## Hauteur moyenne des collines qui bordent la vallée (m, à 80 m de l'axe).
 @export var valley_hill_height := 24.0
 ## Anneau de collines et de montagnes lointaines autour du joueur.
+## Lieu de départ : la voiture démarre garée à côté de la route, sur un lieu tiré au
+## hasard (supérette désaffectée, aire de repos, camp de caravanes, motel). Le terrain
+## y est aplani et le décor (arbres, champs, balises) l'évite. Construit par
+## world/start/start_site.gd. Le réglage de projet « nfp/start_site » (override.cfg)
+## force un type (tests).
+@export var start_site := true
+@export_enum("aleatoire", "superette", "aire", "camp", "motel") var start_site_type := "aleatoire"
+const SITE_TYPES := ["superette", "aire", "camp", "motel"]
+## Profondeur (depuis le bord du lieu, à 6 m de l'axe) et longueur le long de la route.
+const SITE_SIZES := {"superette": Vector2(27.0, 38.0), "aire": Vector2(13.0, 46.0),
+	"camp": Vector2(30.0, 38.0), "motel": Vector2(30.0, 50.0)}
+const SITE_BLEND := 12.0
+## Lieu de départ (repère du bruit = repère local de départ : s = z, latéral = -x) :
+## {type, s_car, s0, s1, lat0, lat1, y}. Vide si aucun.
+var _site := {}
+
+## Animaux du décor (promeneurs et traversées, world/animals/animal_manager.gd).
+@export var animals_enabled := true
 @export var horizon_mountains := true   # taches de couleur du décor (~80 m)
 const NATURE_TINT_SHADER := preload("res://world/road/nature_tint.gdshader")
 ## Force de la variation de couleur du décor (0 = couleurs d'origine).
@@ -178,6 +196,15 @@ func _ready() -> void:
 	_relief0 = relief(_pos + world_offset)
 
 	_target = get_node_or_null(target_path) as Node3D
+	var forced := str(ProjectSettings.get_setting("nfp/start_site", ""))
+	if (start_site or forced != "") and _target:
+		_plan_site(forced)
+	if animals_enabled and _target is RigidBody3D:
+		var am: Node = preload("res://world/animals/animal_manager.gd").new()
+		am.name = "Animals"
+		am.set("road", self)
+		am.set("car", _target)
+		add_child(am)
 	# Premiers tronçons tout de suite (synchrone) pour que la voiture ait un sol :
 	# jusqu'à 80 m devant la voiture (la route peut commencer loin derrière elle).
 	var t0 := _target.global_position if _target else global_position
@@ -189,6 +216,8 @@ func _ready() -> void:
 	while not _collision_queue.is_empty():
 		var item: Dictionary = _collision_queue.pop_front()
 		_add_collision(item["chunk"], item["faces"])
+	if not _site.is_empty():
+		_build_site.call_deferred()
 
 
 func _physics_process(delta: float) -> void:
@@ -504,6 +533,16 @@ func relief(world_pos: Vector3) -> float:
 ## `world_xz.y` doit être l'altitude de la route à cette rangée (les appelants passent
 ## un point de la rangée décalé latéralement, donc à l'altitude de la route).
 func _terrain_height(world_xz: Vector3, ax: float) -> float:
+	var h := _terrain_height_raw(world_xz, ax)
+	if not _site.is_empty():
+		var w := _site_weight(world_xz, 0.0)
+		if w > 0.0:
+			# lieu de départ : terrain plat juste sous le niveau de la route
+			h = lerpf(h, float(_site["y"]) - world_xz.y - 0.08, w)
+	return h
+
+
+func _terrain_height_raw(world_xz: Vector3, ax: float) -> float:
 	if ax <= TERRAIN_COLS[3]:
 		for k in range(1, 4):
 			if ax <= TERRAIN_COLS[k]:
@@ -819,7 +858,8 @@ func _spawn_props(chunk: Node3D, job: Dictionary) -> void:
 	_spawn_fields(chunk, job)
 
 	# Camion en panne sur l'accotement
-	if truck_scene and job["index"] > 3 and rng.randf() < broken_truck_chance:
+	if truck_scene and job["index"] > 3 and rng.randf() < broken_truck_chance \
+			and not in_start_site(rp[n >> 1] + offset, 60.0):
 		var i := rng.randi_range(n >> 2, (3 * n) >> 2)
 		var right := rr[i]
 		var fwd := Vector3.UP.cross(right)
@@ -842,6 +882,8 @@ func _spawn_props(chunk: Node3D, job: Dictionary) -> void:
 			var fwd := Vector3.UP.cross(rr[i]).normalized()
 			for side in [-1.0, 1.0]:
 				var p: Vector3 = rp[i] + rr[i] * (5.0 * side)
+				if in_start_site(p + offset, 2.0):
+					continue   # entrée du lieu de départ
 				p.y += -0.04 + _terrain_height(p + offset, 5.0) - 0.1
 				var post: Node3D = ROAD_POST.new()
 				post.name = "RoadPost"
@@ -985,7 +1027,9 @@ func _plan_fields(s0: float, s1: float, noise_pos: Vector3) -> Array:
 				var chance := clampf(bw[2] * 0.85 + bw[1] * 0.3, 0.0, 0.85) * field_chance * (1.0 - bw[3])
 				var plan := {"side": side, "s0": start + FIELD_GAP * 0.5, "s1": start + FIELD_LEN - FIELD_GAP * 0.5,
 					"near": -1, "far": -1, "fence": false}
-				if start > straight_start * 0.6 and r.randf() < chance:
+				var on_site: bool = not _site.is_empty() and side == 1 \
+					and start + FIELD_LEN > float(_site["s0"]) - 15.0 and start < float(_site["s1"]) + 15.0
+				if start > straight_start * 0.6 and not on_site and r.randf() < chance:
 					plan["near"] = _pick_crop(r)
 					var x := r.randf()
 					plan["far"] = plan["near"] if x < 0.5 else (-1 if x < 0.62 else _pick_crop(r))
@@ -1286,6 +1330,9 @@ func _plan_chalet(job: Dictionary, rng: RandomNumberGenerator) -> void:
 	var x := rng.randf_range(20.0, 36.0) * (1.0 if rng.randf() < 0.5 else -1.0)
 	if _field_at(job["fields"], rs[i], x) >= 0:
 		return
+	var rr: PackedVector3Array = job["rows_r"]
+	if in_start_site(rp[i] + rr[i] * x + job["offset"], 10.0):
+		return
 	job["chalet"] = {"i": i, "x": x}
 
 
@@ -1481,6 +1528,8 @@ func _place_nature(spot: Vector2, k: int, sp: Dictionary, cat: String, job: Dict
 	var ax := absf(x)
 	if ax < 5.2 or _field_at(job["fields"], rs[i], x) >= 0:
 		return   # pas sur l'accotement ni dans un champ
+	if in_start_site(rp[i] + rr[i] * x + offset, 4.0):
+		return   # lieu de départ
 	if job.has("chalet"):
 		var ch: Dictionary = job["chalet"]
 		if absf((rs[i] - rs[ch["i"]])) < 7.5 and absf(x - ch["x"]) < 7.0:
@@ -1561,6 +1610,59 @@ func _flush_nature(chunk: Node3D, per_species: Dictionary) -> void:
 			"bush":
 				mmi.visibility_range_end = 260.0
 		chunk.add_child(mmi)
+
+
+# --- Lieu de départ ---------------------------------------------------------------
+
+func _plan_site(forced: String) -> void:
+	var t := forced if forced in SITE_TYPES else start_site_type
+	if not t in SITE_TYPES:
+		t = SITE_TYPES[_rng.randi() % SITE_TYPES.size()]
+	var size: Vector2 = SITE_SIZES[t]
+	var s_car := to_local(_target.global_position).z
+	_site = {"type": t, "s_car": s_car, "s0": s_car - size.y * 0.5, "s1": s_car + size.y * 0.5,
+		"lat0": 4.3, "lat1": 6.0 + size.x, "y": 0.0, "depth": size.x, "length": size.y}
+
+
+## Poids du lieu de départ en un point (repère du bruit) : 1 dedans (agrandi de
+## `margin`), 0 à SITE_BLEND m au-delà.
+func _site_weight(p: Vector3, margin: float) -> float:
+	var lat := -p.x
+	var sv := p.z
+	var dx := maxf(maxf(float(_site["lat0"]) - margin - lat, lat - float(_site["lat1"]) - margin), 0.0)
+	var ds := maxf(maxf(float(_site["s0"]) - margin - sv, sv - float(_site["s1"]) - margin), 0.0)
+	return 1.0 - smoothstep(0.0, SITE_BLEND, sqrt(dx * dx + ds * ds))
+
+
+## Le point (repère du bruit) est-il sur le lieu de départ (agrandi de `margin`) ?
+func in_start_site(p: Vector3, margin := 0.0) -> bool:
+	if _site.is_empty():
+		return false
+	var lat := -p.x
+	return lat > float(_site["lat0"]) - margin and lat < float(_site["lat1"]) + margin \
+		and p.z > float(_site["s0"]) - margin and p.z < float(_site["s1"]) + margin
+
+
+## Infos du lieu de départ (vide si aucun).
+func get_start_site() -> Dictionary:
+	return _site
+
+
+func _build_site() -> void:
+	var b: Node3D = preload("res://world/start/start_site.gd").new()
+	b.name = "StartSite"
+	b.set("site_type", _site["type"])
+	b.set("depth", _site["depth"])
+	b.set("length", _site["length"])
+	b.set("car", _target)
+	# repère du lieu : X le long de la route, Z vers l'extérieur (à droite), origine au
+	# bord du lieu (6 m de l'axe), au niveau de la voiture le long de la route
+	var origin := Vector3(-6.0, float(_site["y"]), float(_site["s_car"]))
+	var sample := sample_ahead(to_global(origin + Vector3(6.0, 0, 0)), 0.0)
+	var parent: Node3D = sample["chunk"] if sample.get("found", false) else self
+	parent.add_child(b)
+	b.global_transform = global_transform * Transform3D(Basis(Vector3(0, 0, 1), Vector3.UP, Vector3(-1, 0, 0)), origin)
+	b.call("build")
 
 
 # --- Pluie et recentrage --------------------------------------------------------
