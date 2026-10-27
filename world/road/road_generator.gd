@@ -7,7 +7,7 @@ extends Node3D
 ##   Le calcul des maillages se fait dans un thread (pas d'à-coups en VR).
 ## - Défauts : nids-de-poule creusés dans la géométrie (la voiture tressaute),
 ##   dos-d'âne, rustines, fissures, flaques dans les trous quand il pleut.
-## - Décor : accotements, fossés, collines, arbres, camions en panne, bornes.
+## - Décor : accotements, fossés, collines, arbres, camions en panne, balises souples (RoadPost).
 ## - Recentrage de l'origine du monde tous les `origin_shift_distance` m
 ##   (évite les tremblements dus à la précision des flottants loin de l'origine).
 ## Les autres scripts peuvent appeler sample_road(position) pour connaître la route.
@@ -61,6 +61,7 @@ signal origin_shifted(offset: Vector3)
 @export var biome_size := 700.0
 @export_range(0.0, 1.0) var broken_truck_chance := 0.05
 @export var post_spacing := 50.0
+const ROAD_POST := preload("res://world/road/road_post.gd")
 
 @export_group("Monde")
 @export var origin_shift_distance := 1500.0
@@ -86,7 +87,6 @@ var _noise := FastNoiseLite.new()
 var _noise_small := FastNoiseLite.new()
 var _road_mat: ShaderMaterial
 var _terrain_mat: StandardMaterial3D
-var _post_mesh: BoxMesh
 var _biome_noise := FastNoiseLite.new()
 var _mountain_noise := FastNoiseLite.new()
 ## Taille des régions de montagne (m) et part de la carte en montagne (0 = jamais, 1 = beaucoup).
@@ -172,12 +172,6 @@ func _ready() -> void:
 	_terrain_mat = StandardMaterial3D.new()
 	_terrain_mat.vertex_color_use_as_albedo = true
 	_terrain_mat.roughness = 1.0
-
-	_post_mesh = BoxMesh.new()
-	_post_mesh.size = Vector3(0.12, 1.0, 0.12)
-	var post_mat := StandardMaterial3D.new()
-	post_mat.albedo_color = Color(0.92, 0.92, 0.9)
-	_post_mesh.material = post_mat
 
 	_setup_nature()
 	_relief0 = 0.0
@@ -829,25 +823,18 @@ func _spawn_props(chunk: Node3D, job: Dictionary) -> void:
 		truck.add_child(tb)
 		chunk.add_child(truck)
 
-	# Bornes réfléchissantes
-	var mm := MultiMesh.new()
-	mm.transform_format = MultiMesh.TRANSFORM_3D
-	mm.mesh = _post_mesh
-	var xforms: Array[Transform3D] = []
+	# Balises de bord de route (plastique souple : se couchent quand on les touche)
 	for i in n + 1:
 		var s := rs[i]
 		if i > 0 and floor(s / post_spacing) != floor(rs[i - 1] / post_spacing):
+			var fwd := Vector3.UP.cross(rr[i]).normalized()
 			for side in [-1.0, 1.0]:
 				var p: Vector3 = rp[i] + rr[i] * (5.0 * side)
-				p.y += -0.04 + _terrain_height(p + offset, 5.0) + 0.5
-				xforms.append(Transform3D(Basis.IDENTITY, p))
-	mm.instance_count = xforms.size()
-	for k in xforms.size():
-		mm.set_instance_transform(k, xforms[k])
-	if xforms.size() > 0:
-		var mmi := MultiMeshInstance3D.new()
-		mmi.multimesh = mm
-		chunk.add_child(mmi)
+				p.y += -0.04 + _terrain_height(p + offset, 5.0) - 0.1
+				var post: Node3D = ROAD_POST.new()
+				post.name = "RoadPost"
+				post.transform = Transform3D(Basis(-rr[i], Vector3.UP, fwd), p)
+				chunk.add_child(post)
 
 
 # --- Végétation ------------------------------------------------------------------
@@ -893,6 +880,17 @@ const NATURE_SPECIES := [
 	["scree",         "rock",   [0.2, 0.0, 0.0, 3.0], Vector2(0.7, 1.5), 0.0, 0.0],
 	["flower_alpine", "flower", [0.0, 0.0, 0.0, 6.0], Vector2(0.8, 1.5), 0.0, 0.0],
 ]
+## Couronne des arbres (mesurée sur les modèles, échelle 1) : [hauteur des branches les
+## plus basses, rayon des branches à ce niveau]. Les sapins ont des branches dès 0,9-1,7 m :
+## sans ce volume, le capot passait dessous et l'habitacle traversait les aiguilles.
+const TREE_FOLIAGE := {
+	"pine_tall": [1.70, 1.90], "pine_small": [0.90, 1.03], "spruce": [1.50, 1.52],
+	"larch": [1.10, 1.74], "tree_oak": [2.75, 2.16], "tree_autumn": [2.55, 1.83],
+	"birch": [2.55, 1.44], "poplar": [1.90, 0.81], "tree_dead": [3.00, 0.89], "tree": [2.00, 1.99],
+}
+## Part du rayon des branches qui bloque (les pointes, clairsemées, peuvent frôler).
+const FOLIAGE_RADIUS_FACTOR := 0.8
+
 ## Nombre d'éléments par tronçon de 40 m et par biome [sapins, mixte, prairie, montagne].
 const NATURE_COUNTS := {
 	"tree":   [Vector2i(14, 24), Vector2i(7, 14), Vector2i(1, 4), Vector2i(6, 12)],
@@ -918,7 +916,13 @@ func _setup_nature() -> void:
 		var m := _nature_mesh(sp[0])
 		if m.is_empty():
 			continue
-		_nature.append({"name": sp[0], "cat": sp[1], "w": sp[2], "scale": sp[3], "radius": sp[4], "height": sp[5], "mesh": m["mesh"], "mesh_xf": m["xf"]})
+		var entry := {"name": sp[0], "cat": sp[1], "w": sp[2], "scale": sp[3], "radius": sp[4], "height": sp[5], "mesh": m["mesh"], "mesh_xf": m["xf"]}
+		if sp[1] == "rock" and float(sp[4]) > 0.0:
+			# enveloppe convexe simplifiée du rocher (repère du maillage)
+			var convex := (m["mesh"] as Mesh).create_convex_shape(true, true)
+			if convex and convex.points.size() >= 4:
+				entry["hull"] = convex.points
+		_nature.append(entry)
 	for ft in FIELD_CROPS:
 		_nature_mesh(ft["mesh"])
 	for extra in ["hay_bale", "fence_wood", "chalet"]:
@@ -1437,7 +1441,7 @@ func _spawn_nature(chunk: Node3D, job: Dictionary, rng: RandomNumberGenerator) -
 					spots.append(Vector2(clampi(i0 + int(round(cos(a) * r / row_step)), 0, n), x0 + sin(a) * r))
 			for spot in spots:
 				_place_nature(spot, k, sp, cat, job, rng, per_species, chunk, bw)
-		# arbres sur les collines de la vallée (sans collision, hors d'atteinte)
+		# arbres sur les collines de la vallée (avec collision : on peut y monter en 4x4)
 		if cat == "tree":
 			var hill_count := int(round(rng.randf_range(lo, hi) * 1.3 * nature_density)) + 4
 			for c in hill_count:
@@ -1449,7 +1453,7 @@ func _spawn_nature(chunk: Node3D, job: Dictionary, rng: RandomNumberGenerator) -
 						k = idx[j]
 						break
 				var x := rng.randf_range(VALLEY_START + 3.0, TERRAIN_COLS[-1] - 2.0) * (1.0 if rng.randf() < 0.5 else -1.0)
-				_place_nature(Vector2(rng.randi_range(0, n), x), k, _nature[k], cat, job, rng, per_species, chunk, bw, false)
+				_place_nature(Vector2(rng.randi_range(0, n), x), k, _nature[k], cat, job, rng, per_species, chunk, bw)
 	_flush_nature(chunk, per_species)
 
 
@@ -1483,13 +1487,35 @@ func _place_nature(spot: Vector2, k: int, sp: Dictionary, cat: String, job: Dict
 	# collision des arbres et des gros rochers
 	if sp["radius"] > 0.0 and collide:
 		var body := _nature_body(chunk)
-		var cs := CollisionShape3D.new()
-		var shape := CylinderShape3D.new()
-		shape.radius = sp["radius"] * sc
-		shape.height = sp["height"] * sc
-		cs.shape = shape
-		cs.position = p + Vector3(0, shape.height * 0.5 - sink, 0)
-		body.add_child(cs)
+		if cat == "rock" and sp.has("hull"):
+			# rocher : enveloppe convexe du modèle, tournée et mise à l'échelle comme lui
+			var pts := PackedVector3Array()
+			for v in sp["hull"]:
+				pts.append(xf.basis * v)
+			var hull := ConvexPolygonShape3D.new()
+			hull.points = pts
+			var rcs := CollisionShape3D.new()
+			rcs.shape = hull
+			rcs.position = xf.origin
+			body.add_child(rcs)
+		else:
+			var cs := CollisionShape3D.new()
+			var shape := CylinderShape3D.new()
+			shape.radius = sp["radius"] * sc
+			shape.height = sp["height"] * sc
+			cs.shape = shape
+			cs.position = p + Vector3(0, shape.height * 0.5 - sink, 0)
+			body.add_child(cs)
+		if cat == "tree" and TREE_FOLIAGE.has(sp["name"]):
+			# couronne : cylindre des branches basses jusqu'à 2,5 m au-dessus
+			var fol: Array = TREE_FOLIAGE[sp["name"]]
+			var fcs := CollisionShape3D.new()
+			var fshape := CylinderShape3D.new()
+			fshape.radius = float(fol[1]) * FOLIAGE_RADIUS_FACTOR * sc
+			fshape.height = 2.5 * sc
+			fcs.shape = fshape
+			fcs.position = p + Vector3(0, (float(fol[0]) - 0.1) * sc + fshape.height * 0.5, 0)
+			body.add_child(fcs)
 
 
 func _nature_body(chunk: Node3D) -> StaticBody3D:
