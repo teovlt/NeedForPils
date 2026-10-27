@@ -142,6 +142,8 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_pick_in_zones(delta)
 		elif autotest_scenario == "vue_accoudoir":
 			_run_autotest_console_view(delta)
+		elif autotest_scenario == "paquet":
+			_run_autotest_cig_pack(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -4085,4 +4087,91 @@ func _run_autotest_console_view(delta: float) -> void:
 				_log("AUTOTEST accoudoir : %s à %s (local voiture)" % [c.name, car.to_local(c.global_position)])
 		var hb := car.get_node("Handbrake")
 		_log("AUTOTEST frein à main : %s" % car.to_local(hb.global_position))
+		get_tree().quit()
+
+
+# --- Paquet de cigarettes : toujours dans la voiture (endroit et nombre aléatoires),
+# ouverture, cigarette sortie à la souris, allumée et fumée ; briquet toujours présent --
+
+var _cp := {}
+
+
+func _run_autotest_cig_pack(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = false
+	var pack_body := car.find_child("CigarettePack", true, false) as RigidBody3D
+	var pack := pack_body.get_node("Grab") as CigarettePack
+	var lt := car.find_child("Lighter", true, false) as RigidBody3D
+	if at.call(0.05):
+		$Weather.hour = 14.0
+		car.get_node("GloveboxLid").set_angle_deg(-80.0, true)
+		car.get_node("ConsoleLid").set_angle_deg(-100.0, true)
+	if at.call(0.6):
+		var cabin: AABB = car.get_node("Storage").cabin
+		var wp := {}
+		var wl := {}
+		var inside := 0
+		for i in 30:
+			car.get_node("Storage").randomize_items()
+			for pair in [[pack_body, wp], [lt, wl]]:
+				var b: RigidBody3D = pair[0]
+				var z := b.get_parent()
+				var nm := str(z.get("zone_name")) if z.get("zone_name") else "en vrac"
+				pair[1][nm] = pair[1].get(nm, 0) + 1
+				var lpos := car.to_local(b.global_position)
+				if cabin.grow(0.05).has_point(lpos) and b.visible:
+					inside += 1
+		_log("AUTOTEST 30 tirages : paquet %s ; briquet %s ; dans l'habitacle %d/60" % [wp, wl, inside])
+		var counts := {}
+		for i in 200:
+			var n := randi_range(pack.count_range.x, pack.count_range.y)
+			counts[n] = true
+		_log("AUTOTEST paquet : %d cigarettes (bornes %s), boîte %s" % [pack.cigarette_count, pack.count_range, pack.get_local_aabb().size])
+		# paquet posé sur le siège passager pour la suite
+		car.get_node("Storage")._place_loose(pack_body, RandomNumberGenerator.new(), [])
+	var view_p := pack_body.global_position + car.global_basis.y * 0.05
+	if _t > 0.7 and _t < 6.0:
+		cam.global_position = view_p + car.global_basis * Vector3(0.12, 0.22, 0.18)
+		cam.look_at(view_p)
+		cam.fov = 45.0
+	if at.call(1.2):
+		_shot("paquet_1_ferme")
+		_mouse_hand.hovered = pack
+		_mouse_hand._toggle()
+		_cp["n0"] = pack.cigarettes_left()
+		_log("AUTOTEST F en visant le paquet -> ouvert=%s, cigarettes=%d, zone cigarettes active=%s" % [pack.open, pack.cigarettes_left(), pack._taker.enabled])
+	if at.call(1.8):
+		_shot("paquet_2_ouvert")
+		# visée souris sur le dessus du paquet ouvert
+		var o := cam.global_position
+		var target := pack_body.global_transform * Vector3(0, CigarettePack.SIZE.y - CigarettePack.LID_H + 0.015, 0)
+		var dir := (target - o).normalized()
+		var bp := pack.ray_hit_distance(o, dir, 2.0, 0.0)
+		var bt := pack._taker.ray_hit_distance(o, dir, 2.0, pack._taker.grab_distance * 0.3)
+		_log("AUTOTEST visée sur les cigarettes : paquet %s, cigarettes %.3f" % [bp, bt])
+		_mouse_hand.hovered = pack._taker
+		_mouse_hand._try_grab()
+		var held = _mouse_hand.held
+		_log("AUTOTEST clic -> tenu %s ; cigarettes restantes %d (avant %d)" % [held.name if held else "rien", pack.cigarettes_left(), _cp["n0"]])
+	if _t > 1.8 and _t < 3.5 and _mouse_hand.held:
+		_mouse_hand.global_position = view_p + car.global_basis * Vector3(0.0, 0.12 * minf((_t - 1.8) / 0.5, 1.0), 0.05)
+		_mouse_hand.held.grab_update(_mouse_hand)
+	if at.call(2.6):
+		_shot("paquet_3_sortie")
+		_mouse_hand._toggle()
+		var cig = null
+		for c in get_tree().get_nodes_in_group("smokables"):
+			if c.is_grabbed():
+				cig = c
+		_log("AUTOTEST F sur la cigarette sortie -> allumée=%s" % [cig.lit if cig else null])
+	if at.call(3.5):
+		_mouse_hand._release()
+		_mouse_hand.hovered = pack
+		_mouse_hand._toggle()
+		_log("AUTOTEST paquet refermé : ouvert=%s, zone cigarettes active=%s" % [pack.open, pack._taker.enabled])
+	if at.call(4.0):
 		get_tree().quit()

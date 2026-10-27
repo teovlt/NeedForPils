@@ -64,6 +64,11 @@ class Taker:
 		bag.refresh_state()
 
 	func toggle() -> void:
+		for h in _held:   # pilule sortie et tenue : F l'avale
+			var g = _held[h]
+			if g and is_instance_valid(g) and g.has_method("toggle"):
+				g.toggle()
+				return
 		bag.eat_from_bag()
 
 

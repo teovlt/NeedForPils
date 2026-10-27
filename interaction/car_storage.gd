@@ -90,9 +90,20 @@ func randomize_items() -> void:
 					report.append("%s -> %s" % [it.name, z.zone_name])
 					placed = true
 					break
-		if not placed:
-			_place_loose(it, rng, loose_taken)
+		if not placed and _place_loose(it, rng, loose_taken):
 			report.append("%s -> en vrac" % it.name)
+			placed = true
+		if not placed:
+			# plus de place libre en vrac : un compartiment qui l'accepte, sinon en vrac
+			# sans éviter les autres objets ; l'objet est toujours quelque part dans la voiture
+			for z in fill_zones:
+				if z.try_random_place(it, rng, taken[z]):
+					report.append("%s -> %s" % [it.name, z.zone_name])
+					placed = true
+					break
+		if not placed:
+			_place_loose(it, rng, [])
+			report.append("%s -> en vrac (serré)" % it.name)
 	print("Objets rangés au hasard : ", ", ".join(report))
 
 
@@ -102,10 +113,10 @@ func _volume(item: RigidBody3D) -> float:
 
 
 ## Pose un objet en vrac sur un des `loose_spots` (siège passager par défaut).
-func _place_loose(item: RigidBody3D, rng: RandomNumberGenerator, taken: Array) -> void:
+func _place_loose(item: RigidBody3D, rng: RandomNumberGenerator, taken: Array) -> bool:
 	var grab := item.get_node_or_null("Grab") as VRPickable
 	if loose_spots.is_empty() or grab == null:
-		return
+		return false
 	if item.get_parent() != self:
 		item.reparent(self, false)
 	item.freeze = true
@@ -132,7 +143,8 @@ func _place_loose(item: RigidBody3D, rng: RandomNumberGenerator, taken: Array) -
 			continue
 		taken.append(rect)
 		settle(item, Transform3D(basis, Vector3(cx - centre.x, s.position.y - box.position.y + 0.001, cz - centre.z)), 0.0)
-		return
+		return true
+	return false
 
 
 func receive(item: RigidBody3D, velocity: Vector3) -> void:
