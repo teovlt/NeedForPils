@@ -23,11 +23,11 @@ signal chase_started(kind: String)
 signal lost
 
 const GROUP := "pursuer"
-const BODY := preload("res://cars/Models/Doge/doge-body.glb")
-const WHEEL := preload("res://cars/Models/Doge/Wheel.glb")
-## Roues de la Doge (positions reprises de cars/Doge.tscn) et rayon.
-const WHEEL_POS := [Vector3(0.8548, 0.0, -1.5), Vector3(-0.9492, 0.0, -1.5), Vector3(0.8548, 0.0, 1.264), Vector3(-0.9492, 0.0, 1.264)]
-const WHEEL_RADIUS := 0.37
+## Voiture low poly (props/police_car/police_car_build.py) : nœud Body et 4 roues Wheel_*.
+const BODY := preload("res://props/police_car/police_car.glb")
+const WHEEL_RADIUS := 0.34
+## Centre du toit (z) pour la rampe de gyrophares.
+const ROOF_Z := -0.1
 const RATE := 22050
 const KINDS := ["bord", "barrage", "derriere"]
 const BLUE := Color(0.15, 0.35, 1.0)
@@ -538,7 +538,7 @@ func _set_collision(on: bool) -> void:
 
 # --- Modèle -------------------------------------------------------------------------
 
-## Voiture de police : caisse, rampe de gyrophares bleus, bandes et « POLICE » sur les
+## Voiture de police : caisse low poly, rampe de gyrophares bleus et « POLICE » sur les
 ## flancs et le coffre ; phares si `head`, collision (boîte) si `solid`.
 func _make_car(parent: Node3D, head: bool, solid: bool) -> Dictionary:
 	var body := BODY.instantiate() as Node3D
@@ -547,13 +547,12 @@ func _make_car(parent: Node3D, head: bool, solid: bool) -> Dictionary:
 	if aabb.size == Vector3.ZERO:
 		aabb = AABB(Vector3(-0.95, 0.0, -2.4), Vector3(1.9, 1.4, 4.8))
 	var wheels: Array[Node3D] = []
-	for wp in WHEEL_POS:
-		var w := WHEEL.instantiate() as Node3D
-		w.position = wp + Vector3(0.0, WHEEL_RADIUS, 0.0)
-		parent.add_child(w)
-		wheels.append(w)
+	for n in ["Wheel_FL", "Wheel_FR", "Wheel_BL", "Wheel_BR"]:
+		var w := body.find_child(n, true, false) as Node3D
+		if w:
+			wheels.append(w)
 	var top := aabb.end.y
-	var cz := aabb.get_center().z
+	var cz := ROOF_Z + 0.2
 	var mats: Array[StandardMaterial3D] = []
 	var lights: Array[OmniLight3D] = []
 	var heads: Array[Node3D] = []
@@ -586,42 +585,32 @@ func _make_car(parent: Node3D, head: bool, solid: bool) -> Dictionary:
 	base.material_override = dark
 	base.position = Vector3(0, top - 0.03, cz - 0.2)
 	parent.add_child(base)
-	# bandes bleues et inscriptions
-	var stripe := StandardMaterial3D.new()
-	stripe.albedo_color = Color(0.1, 0.22, 0.65)
-	var mid_y := aabb.position.y + aabb.size.y * 0.42
+	# inscriptions (la bande bleue est dans le modèle) : portières et coffre
 	for sx in [-1.0, 1.0]:
-		var band := MeshInstance3D.new()
-		var sb := BoxMesh.new()
-		sb.size = Vector3(0.02, 0.12, aabb.size.z * 0.5)
-		band.mesh = sb
-		band.material_override = stripe
-		band.position = Vector3(sx * (aabb.size.x * 0.5 - 0.05) + aabb.get_center().x, mid_y - 0.12, cz)
-		parent.add_child(band)
-		var lab := _police_label(Vector3(sx * (aabb.size.x * 0.5 - 0.02) + aabb.get_center().x, mid_y + 0.05, cz), 90.0 * sx)
-		parent.add_child(lab)
-	parent.add_child(_police_label(Vector3(aabb.get_center().x, mid_y + 0.12, aabb.position.z - 0.03), 180.0))
+		parent.add_child(_police_label(Vector3(sx * 0.912, 0.89, -0.15), 90.0 * sx))
+	var rear := _police_label(Vector3(0.0, 0.74, -2.33), 180.0)
+	rear.pixel_size = 0.0032
+	parent.add_child(rear)
 	if head:
-		for x in [-0.7, 0.7]:
+		for x in [-0.6, 0.6]:
 			var spot := SpotLight3D.new()
 			spot.light_color = Color(0.95, 0.95, 1.0)
 			spot.light_energy = 6.0
 			spot.spot_range = 60.0
 			spot.spot_angle = 28.0
-			spot.position = Vector3(x, 0.75, aabb.end.z - 0.1)
+			spot.position = Vector3(x, 0.66, 2.32)
 			spot.rotation = Vector3(deg_to_rad(-4.0), PI, 0.0)   # éclaire vers +Z (l'avant)
 			parent.add_child(spot)
 			heads.append(spot)
-			var glow := MeshInstance3D.new()
-			var sphere := SphereMesh.new()
-			sphere.radius = 0.13
-			sphere.height = 0.26
-			glow.mesh = sphere
+			var glow := MeshInstance3D.new()   # phare allumé (plaque lumineuse sur le phare du modèle)
+			var plate := BoxMesh.new()
+			plate.size = Vector3(0.34, 0.12, 0.02)
+			glow.mesh = plate
 			var gm := StandardMaterial3D.new()
 			gm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 			gm.albedo_color = Color(1.0, 1.0, 0.95)
 			glow.material_override = gm
-			glow.position = Vector3(x, 0.72, aabb.end.z - 0.08)
+			glow.position = Vector3(x, 0.66, 2.285)
 			parent.add_child(glow)
 			heads.append(glow)
 	var shape: CollisionShape3D = null
@@ -643,8 +632,8 @@ func _police_label(pos: Vector3, yaw_deg: float) -> Label3D:
 	l.text = "POLICE"
 	l.font_size = 64
 	l.pixel_size = 0.0045
-	l.modulate = Color(0.97, 0.97, 1.0)
-	l.outline_modulate = Color(0.08, 0.18, 0.6)
+	l.modulate = Color(0.06, 0.16, 0.55)
+	l.outline_modulate = Color(0.97, 0.97, 1.0)
 	l.outline_size = 10
 	l.position = pos
 	l.rotation_degrees.y = yaw_deg

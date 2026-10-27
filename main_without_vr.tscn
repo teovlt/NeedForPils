@@ -6,7 +6,7 @@
 [ext_resource type="Texture2D" uid="uid://civ8bxmpkabmw" path="res://assets/resized_a945cb106cf174e0221430458e93dd3b.png" id="4_568qy"]
 [ext_resource type="Script" uid="uid://dxq4p56omxx80" path="res://addons/lowpolyterrain/LowPolyTerrainManager.gd" id="5_qbqqw"]
 [ext_resource type="Shader" uid="uid://dq4udl5a5fk1e" path="res://addons/lowpolyterrain/shader/terrain_paint_overlay.gdshader" id="6_fbb33"]
-[ext_resource type="PackedScene" uid="uid://ci52bv1m15cbs" path="res://cars/Doge.tscn" id="7_nqarn"]
+[ext_resource type="PackedScene" path="res://cars/SUV4x4/suv_4x4.tscn" id="7_nqarn"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_rtvg0"]
 albedo_texture = ExtResource("4_568qy")
@@ -298,4 +298,4 @@ prior_pt_init = NodePath("../RoadPoint")
 next_pt_init = NodePath("../RoadPoint017")
 
 [node name="car" parent="." unique_id=544004647 instance=ExtResource("7_nqarn")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.7206335, 0.034723997, 5.9563255)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.7206335, 0.5, 5.9563255)

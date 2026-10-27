@@ -5,7 +5,6 @@
 [ext_resource type="Script" uid="uid://bxp3i4cnonh8y" path="res://addons/road-generator/nodes/road_manager.gd" id="3_lquwl"]
 [ext_resource type="Script" uid="uid://cph7euje06kel" path="res://addons/road-generator/nodes/road_container.gd" id="4_7mycd"]
 [ext_resource type="Script" uid="uid://difs1qg4mpcpw" path="res://addons/road-generator/nodes/road_point.gd" id="5_272bh"]
-[ext_resource type="PackedScene" uid="uid://ci52bv1m15cbs" path="res://cars/Doge.tscn" id="5_kek77"]
 [ext_resource type="Texture2D" uid="uid://civ8bxmpkabmw" path="res://assets/resized_a945cb106cf174e0221430458e93dd3b.png" id="6_7mycd"]
 [ext_resource type="Shader" uid="uid://dq4udl5a5fk1e" path="res://addons/lowpolyterrain/shader/terrain_paint_overlay.gdshader" id="7_5vw27"]
 [ext_resource type="Script" uid="uid://dxq4p56omxx80" path="res://addons/lowpolyterrain/LowPolyTerrainManager.gd" id="7_272bh"]
@@ -97,8 +96,6 @@ metadata/_edit_lock_ = false
 
 [node name="Terrain_Assets" type="Node3D" parent="Ground/LowPolyTerrainManager" unique_id=93090746]
 
-[node name="car" parent="." unique_id=343289149 instance=ExtResource("5_kek77")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -7.393385, 0.42517424, -13.923313)
 [node name="Player" parent="." unique_id=1682639450 instance=ExtResource("3_h2yge")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.012529612, 0)
 visible = false
