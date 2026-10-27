@@ -153,5 +153,8 @@ func _release() -> void:
 
 
 func _toggle() -> void:
-	if hovered and hovered.has_method("toggle"):
+	# objet tenu d'abord (briquet, cigarette...), sinon celui qu'on vise
+	if held and is_instance_valid(held) and held.has_method("toggle"):
+		held.toggle()
+	elif hovered and hovered.has_method("toggle"):
 		hovered.toggle()

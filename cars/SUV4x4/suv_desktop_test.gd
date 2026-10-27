@@ -132,6 +132,8 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_smoke(delta)
 		elif autotest_scenario == "fumee_debug":
 			_run_autotest_smoke_debug(delta)
+		elif autotest_scenario == "fumer_souris":
+			_run_autotest_smoke_mouse(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -3742,4 +3744,34 @@ func _run_autotest_smoke_debug(delta: float) -> void:
 			p.emitting = true
 	if at.call(2.5):
 		_shot("fumee_debug")
+		get_tree().quit()
+
+
+# --- Souris (sans casque) : la touche F agit sur l'objet tenu --------------------
+
+func _run_autotest_smoke_mouse(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = true
+	var gl := car.find_child("Lighter", true, false).get_node("Grab") as Lighter
+	var gc := car.find_child("Cigarette", true, false).get_node("Grab") as Smokable
+	if at.call(0.5):
+		_mouse_hand.held = gl
+		gl.grab(_mouse_hand)
+		_mouse_hand._toggle()
+		_log("AUTOTEST souris : briquet tenu, F -> allumé=%s" % gl.lit)
+		_mouse_hand._release()
+		_log("AUTOTEST briquet lâché -> allumé=%s" % gl.lit)
+	if at.call(1.0):
+		_mouse_hand.held = gc
+		gc.grab(_mouse_hand)
+		_mouse_hand._toggle()
+		_log("AUTOTEST souris : cigarette tenue, F -> allumée=%s" % gc.lit)
+		_sm["b0"] = gc.burnt
+		_mouse_hand._toggle()
+	if at.call(3.0):
+		_log("AUTOTEST F -> bouffée : consumé %.1f -> %.1f mm, bouffées=%d" % [_sm["b0"] * 1000.0, gc.burnt * 1000.0, gc.puffs])
 		get_tree().quit()

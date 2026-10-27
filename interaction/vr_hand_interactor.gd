@@ -61,6 +61,12 @@ func _physics_process(_delta: float) -> void:
 			_release()
 		else:
 			held.grab_update(self)
+			# A / X sur l'objet tenu (allumer le briquet, la cigarette...)
+			var toggle_held := controller.is_button_pressed(toggle_action)
+			if toggle_held and not _toggle_down and held.has_method("toggle"):
+				held.toggle()
+				pulse(0.4, 0.05)
+			_toggle_down = toggle_held
 		return
 
 	# Recherche de l'objet interactif le plus proche.
