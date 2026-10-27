@@ -227,8 +227,10 @@ func _flee_from(p: Vector3) -> void:
 	if away.length() < 0.1:
 		away = -_fwd()
 	away = away.normalized()
-	if manager:   # s'éloigne aussi de la route
-		away = (away + (manager.call("away_from_road", global_position) as Vector3) * 0.8).normalized()
+	if manager:   # s'éloigne aussi de la route (surtout s'il est au bord : jamais vers la chaussée)
+		var lat: float = absf(float(manager.call("lateral_of", global_position)))
+		var w := 0.8 if lat > 9.0 else 2.5
+		away = (away + (manager.call("away_from_road", global_position) as Vector3) * w).normalized()
 	target = global_position + away * randf_range(14.0, 22.0)
 	set_state(State.FLEE)
 

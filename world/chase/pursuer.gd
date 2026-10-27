@@ -24,6 +24,10 @@ signal lost
 
 const GROUP := "pursuer"
 const BODY := preload("res://cars/Models/Doge/doge-body.glb")
+const WHEEL := preload("res://cars/Models/Doge/Wheel.glb")
+## Roues de la Doge (positions reprises de cars/Doge.tscn) et rayon.
+const WHEEL_POS := [Vector3(0.8548, 0.0, -1.5), Vector3(-0.9492, 0.0, -1.5), Vector3(0.8548, 0.0, 1.264), Vector3(-0.9492, 0.0, 1.264)]
+const WHEEL_RADIUS := 0.37
 const RATE := 22050
 const KINDS := ["bord", "barrage", "derriere"]
 const BLUE := Color(0.15, 0.35, 1.0)
@@ -107,6 +111,7 @@ var _visual: Node3D
 var _bar_mats: Array[StandardMaterial3D] = []
 var _bar_lights: Array[OmniLight3D] = []
 var _head: Array[Node3D] = []      # phares (lumières et halos)
+var _wheels: Array[Node3D] = []
 var _shape: CollisionShape3D
 var _lights_on := true
 var _siren: AudioStreamPlayer3D
@@ -124,6 +129,7 @@ func _ready() -> void:
 	_bar_mats = parts["mats"]
 	_bar_lights = parts["lights"]
 	_head = parts["head"]
+	_wheels = parts["wheels"]
 	_shape = parts["shape"]
 	_shape.disabled = true
 	_siren = AudioStreamPlayer3D.new()
@@ -286,7 +292,8 @@ func _setup_roadside(ahead: float) -> bool:
 		return false
 	kind = "bord"
 	_s = sample["s"]
-	_anchor_at(sample, _road.road_half_width - 0.1, deg_to_rad(randf_range(-6.0, 3.0)))
+	# sur l'accotement, bien dégagée de la voie de droite (~0,7 m entre les deux voitures)
+	_anchor_at(sample, _road.road_half_width + 0.45, deg_to_rad(randf_range(-2.0, 2.0)))
 	state = State.WAIT
 	gap = _car_s() - _s
 	_set_lights(false)
@@ -497,6 +504,10 @@ func _place(delta: float) -> void:
 	var dir: Vector3 = sample["dir"]
 	var basis := Basis(Vector3.UP, _yaw_off) * Basis.looking_at(-dir, Vector3.UP)   # +Z du modèle = avant
 	_visual.global_transform = Transform3D(basis, pos)
+	# roues qui tournent avec la vitesse
+	var spin := _speed / 3.6 / WHEEL_RADIUS * delta
+	for w in _wheels:
+		w.rotate_object_local(Vector3.RIGHT, spin)
 
 
 ## Gyrophares bleus alternés (voiture de police et 2e voiture du barrage).
@@ -535,6 +546,12 @@ func _make_car(parent: Node3D, head: bool, solid: bool) -> Dictionary:
 	var aabb := _local_aabb(body)
 	if aabb.size == Vector3.ZERO:
 		aabb = AABB(Vector3(-0.95, 0.0, -2.4), Vector3(1.9, 1.4, 4.8))
+	var wheels: Array[Node3D] = []
+	for wp in WHEEL_POS:
+		var w := WHEEL.instantiate() as Node3D
+		w.position = wp + Vector3(0.0, WHEEL_RADIUS, 0.0)
+		parent.add_child(w)
+		wheels.append(w)
 	var top := aabb.end.y
 	var cz := aabb.get_center().z
 	var mats: Array[StandardMaterial3D] = []
@@ -576,12 +593,12 @@ func _make_car(parent: Node3D, head: bool, solid: bool) -> Dictionary:
 	for sx in [-1.0, 1.0]:
 		var band := MeshInstance3D.new()
 		var sb := BoxMesh.new()
-		sb.size = Vector3(0.02, 0.16, aabb.size.z * 0.82)
+		sb.size = Vector3(0.02, 0.12, aabb.size.z * 0.5)
 		band.mesh = sb
 		band.material_override = stripe
-		band.position = Vector3(sx * (aabb.size.x * 0.5 + 0.012) + aabb.get_center().x, mid_y - 0.2, cz)
+		band.position = Vector3(sx * (aabb.size.x * 0.5 - 0.05) + aabb.get_center().x, mid_y - 0.12, cz)
 		parent.add_child(band)
-		var lab := _police_label(Vector3(sx * (aabb.size.x * 0.5 + 0.03) + aabb.get_center().x, mid_y + 0.05, cz), 90.0 * sx)
+		var lab := _police_label(Vector3(sx * (aabb.size.x * 0.5 - 0.02) + aabb.get_center().x, mid_y + 0.05, cz), 90.0 * sx)
 		parent.add_child(lab)
 	parent.add_child(_police_label(Vector3(aabb.get_center().x, mid_y + 0.12, aabb.position.z - 0.03), 180.0))
 	if head:
@@ -618,7 +635,7 @@ func _make_car(parent: Node3D, head: bool, solid: bool) -> Dictionary:
 		shape.shape = bs
 		shape.position = aabb.get_center()
 		sbody.add_child(shape)
-	return {"mats": mats, "lights": lights, "head": heads, "shape": shape}
+	return {"mats": mats, "lights": lights, "head": heads, "shape": shape, "wheels": wheels}
 
 
 func _police_label(pos: Vector3, yaw_deg: float) -> Label3D:

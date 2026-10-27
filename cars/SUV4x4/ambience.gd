@@ -7,7 +7,7 @@ extends Node
 ## - Cris isolés placés en 3D autour de la voiture (merle, mésange, pinson, coucou ;
 ##   chouette la nuit ; buse et cloches en montagne) : on entend d'où ils viennent et ils
 ##   restent derrière quand on roule.
-## - Tout passe par le bus audio « Ambiance » : vitres et portes fermées, très faible et
+## - Tout passe par le bus audio « Ambiance » : vitres et portes fermées, plus faible et
 ##   étouffé (filtre passe-bas) ; plus on ouvre, plus c'est fort et clair.
 ## - Souffle du vent par les fenêtres ouvertes, qui monte avec la vitesse.
 
@@ -18,8 +18,9 @@ const BUS := "Ambiance"
 ## Niveau des nappes, vitres ouvertes (dB).
 @export var bed_db := -6.0
 ## Atténuation de l'ambiance voiture fermée (dB) et coupure du filtre (Hz).
-@export var closed_db := -24.0
-@export var closed_cutoff := 650.0
+## (Moins fort qu'avant : à l'arrêt, vitres fermées, on entend encore les oiseaux.)
+@export var closed_db := -10.0
+@export var closed_cutoff := 2600.0
 @export var open_cutoff := 16000.0
 ## Intervalle entre deux cris d'oiseaux (ou cloches) placés autour de la voiture (s).
 @export var call_gap_min := 7.0

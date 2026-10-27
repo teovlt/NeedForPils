@@ -7,7 +7,7 @@ extends Node3D
 
 @export var autotest := false
 ## Scénario du test automatique : "objets" (rangements) ou "arbres".
-@export_enum("objets", "arbres", "aleatoire", "phares", "retros", "portes", "boite", "combine", "essuie", "plafonnier", "nature", "pluie", "balayage", "menu", "lunette", "moteur", "klaxon", "vitres", "ceinture", "cle", "depart", "pare_soleil", "cle_f", "physique", "eclairage", "radio", "radio_nuit", "radio_pwr", "ambiance", "rangements", "ceintures", "vitesses", "sapins", "balises", "playlist", "animaux", "pochette", "lieu", "police", "manque", "zoo", "balade", "klaxon_animaux") var autotest_scenario := "objets"
+@export_enum("objets", "arbres", "aleatoire", "phares", "retros", "portes", "boite", "combine", "essuie", "plafonnier", "nature", "pluie", "balayage", "menu", "lunette", "moteur", "klaxon", "vitres", "ceinture", "cle", "depart", "pare_soleil", "cle_f", "physique", "eclairage", "radio", "radio_nuit", "radio_pwr", "ambiance", "rangements", "ceintures", "vitesses", "sapins", "balises", "playlist", "animaux", "pochette", "lieu", "police", "manque", "zoo", "balade", "klaxon_animaux", "police_vue") var autotest_scenario := "objets"
 
 @onready var car: SUV4x4 = $SUV4x4
 @onready var cam: Camera3D = $Camera3D
@@ -122,6 +122,8 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_drive_animals(delta)
 		elif autotest_scenario == "klaxon_animaux":
 			_run_autotest_horn_animals(delta)
+		elif autotest_scenario == "police_vue":
+			_run_autotest_police_view(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -2979,6 +2981,7 @@ func _pol_log(msg: String) -> void:
 
 func _run_autotest_police(delta: float) -> void:
 	var road: RoadGenerator = $RoadGenerator
+	road.get_node("Animals").set("enabled", false)
 	var t0 := _t
 	_t += delta
 	var at := func(x: float) -> bool: return t0 < x and _t >= x
@@ -3028,6 +3031,13 @@ func _run_autotest_police(delta: float) -> void:
 		return
 	var car_s: float = road.sample_road(car.global_position)["s"]
 	var ph: int = _pv["phase"]
+	if _t > 12.0 and kmh < 5.0 and not _pv.has("blk") and not _pv.has("t_caught"):
+		_pv["blk"] = true
+		_pv["cam_set"] = true
+		cam.global_position = car.global_position + Vector3.UP * 9.0 - fwd * 4.0
+		cam.look_at(car.global_position + fwd * 4.0)
+		_shot("police_bloque")
+		_pol_log("BLOQUÉ : police à %s, voiture à %s" % [_pol.get_car_position(), car.global_position])
 	# --- 1 : voiture garée sur le bas-côté
 	if ph == 0 and _t > 3.0:
 		_pv["phase"] = 1
@@ -3418,3 +3428,53 @@ func _ka_start(am, i: int) -> void:
 	_ka["t0"] = _t
 	_ka["hits0"] = am.animals_hit
 	_log("AUTOTEST essai %d : %s ×%d à %.0f m (%s)" % [i + 1, sp, (_ka["group"] as Array).size(), dist, KA_TRIALS[i][1]])
+
+
+# --- Police vue de près (voiture garée et barrage), voiture du joueur à l'arrêt ----
+
+func _run_autotest_police_view(delta: float) -> void:
+	var road: RoadGenerator = $RoadGenerator
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	$Weather.random_events = false
+	$FallingTrees.enabled = false
+	road.get_node("Animals").set("enabled", false)
+	car.external_input = true
+	car.brake_input = 1.0
+	car.throttle_input = 0.0
+	_inside = false
+	if at.call(0.05):
+		$Weather.hour = 14.0
+		$Weather.set_weather("degage", true)
+		_pol = Pursuer.new()
+		_pol.road_path = NodePath("../RoadGenerator")
+		_pol.car_path = NodePath("../SUV4x4")
+		_pol.auto_encounters = false
+		add_child(_pol)
+	if at.call(0.5):
+		_pol.force_encounter("bord", 25.0)
+	if _pol == null or _t < 0.6:
+		return
+	var p := _pol.get_car_position()
+	var sm := road.sample_road(p)
+	var right: Vector3 = sm["right"]
+	var dir: Vector3 = sm["dir"]
+	cam.fov = 50.0
+	if _t < 2.0:
+		cam.global_position = p - right * 4.5 + dir * 3.0 + Vector3.UP * 1.3
+		cam.look_at(p + Vector3.UP * 0.6)
+		if at.call(1.8): _shot("police_vue_cote")
+	elif _t < 3.0:
+		cam.global_position = p - right * 3.0 - dir * 5.0 + Vector3.UP * 1.5
+		cam.look_at(p + Vector3.UP * 0.6)
+		if at.call(2.8): _shot("police_vue_arriere")
+	elif _t < 3.2:
+		if at.call(3.05): _pol.force_encounter("barrage", 30.0)
+	elif _t < 5.0:
+		var bi: Array = _pol.get_block_info()
+		cam.global_position = car.global_position + Vector3.UP * 5.0 + car.global_basis.z * 12.0 + car.global_basis.x * 6.0
+		cam.look_at(car.global_position + car.global_basis.z * 40.0)
+		if at.call(4.8): _shot("police_vue_barrage")
+	else:
+		get_tree().quit()
