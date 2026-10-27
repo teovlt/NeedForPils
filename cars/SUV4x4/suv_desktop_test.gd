@@ -7,7 +7,7 @@ extends Node3D
 
 @export var autotest := false
 ## Scénario du test automatique : "objets" (rangements) ou "arbres".
-@export_enum("objets", "arbres", "aleatoire", "phares", "retros", "portes", "boite", "combine", "essuie", "plafonnier", "nature", "pluie", "balayage", "menu", "lunette", "moteur", "klaxon", "vitres", "ceinture", "cle", "depart", "pare_soleil", "cle_f", "physique", "eclairage", "radio", "radio_nuit", "radio_pwr", "ambiance", "rangements", "ceintures", "vitesses", "sapins", "balises", "playlist", "animaux", "pochette", "lieu", "police", "manque") var autotest_scenario := "objets"
+@export_enum("objets", "arbres", "aleatoire", "phares", "retros", "portes", "boite", "combine", "essuie", "plafonnier", "nature", "pluie", "balayage", "menu", "lunette", "moteur", "klaxon", "vitres", "ceinture", "cle", "depart", "pare_soleil", "cle_f", "physique", "eclairage", "radio", "radio_nuit", "radio_pwr", "ambiance", "rangements", "ceintures", "vitesses", "sapins", "balises", "playlist", "animaux", "pochette", "lieu", "police", "manque", "zoo", "balade") var autotest_scenario := "objets"
 
 @onready var car: SUV4x4 = $SUV4x4
 @onready var cam: Camera3D = $Camera3D
@@ -36,7 +36,7 @@ func _physics_process(delta: float) -> void:
 	if autotest:
 		# traversées d'animaux aléatoires coupées, sauf dans leur propre scénario
 		var am := $RoadGenerator.get_node_or_null("Animals")
-		if am and autotest_scenario != "animaux":
+		if am and autotest_scenario not in ["animaux", "balade"]:
 			am.set("crossings_enabled", false)
 		if autotest_scenario == "arbres":
 			_run_autotest(delta)
@@ -116,6 +116,10 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_police(delta)
 		elif autotest_scenario == "manque":
 			_run_autotest_craving(delta)
+		elif autotest_scenario == "zoo":
+			_run_autotest_zoo(delta)
+		elif autotest_scenario == "balade":
+			_run_autotest_drive_animals(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -3150,4 +3154,146 @@ func _run_autotest_craving(delta: float) -> void:
 		_cr.take_pill()
 	if at.call(12.0):
 		_log("AUTOTEST 5 s après la pilule (effet en cours) : manque %.3f, voix réarmée=%s" % [_cr.craving, not _cr.get("_voice_said")])
+		get_tree().quit()
+
+
+# --- Zoo : chaque espèce posée à côté de la route, gros plans (modélisation) ------
+
+var _zoo: Array = []
+
+
+func _run_autotest_zoo(delta: float) -> void:
+	var road: RoadGenerator = $RoadGenerator
+	var am = road.get_node("Animals")
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	$Weather.random_events = false
+	$FallingTrees.enabled = false
+	am.enabled = false
+	am.crossings_enabled = false
+	car.external_input = true
+	car.throttle_input = 0.0
+	car.brake_input = 1.0
+	_inside = false
+	if at.call(0.05):
+		$Weather.hour = 14.0
+		$Weather.set_weather("degage", true)
+	if at.call(0.6):
+		for a in am.animals:
+			a.queue_free()
+		var sample: Dictionary = road.sample_ahead(car.global_position, 25.0)
+		var list := [["rabbit", false], ["boar", false], ["boar", true], ["deer", false], ["sheep", false], ["sheep", true]]
+		for i in list.size():
+			var p: Vector3 = road.ground_position(road.sample_ahead(car.global_position, 18.0 + i * 3.2), -6.5)
+			var a = am._make(list[i][0], p, list[i][1])
+			a.set("heading", PI * 0.5)
+			_zoo.append(a)
+	if _zoo.is_empty():
+		return
+	cam.fov = 40.0
+	var idx := int((_t - 1.5) / 1.2)
+	if _t < 1.5:
+		return
+	if idx < _zoo.size():
+		var a: Node3D = _zoo[idx]
+		if not is_instance_valid(a):
+			return
+		var h: float = float(a.get("size_scale")) * 1.0
+		var right: Vector3 = road.sample_road(a.global_position)["right"]
+		var dir: Vector3 = road.sample_road(a.global_position)["dir"]
+		var dist := 2.2 if idx == 0 else 4.0
+		cam.global_position = a.global_position + right * dist * 0.7 + dir * dist * 0.7 + Vector3.UP * (0.5 + dist * 0.2)
+		cam.look_at(a.global_position + Vector3.UP * (0.25 if idx == 0 else 0.6))
+		if fmod(_t - 1.5, 1.2) > 1.0 and not _zoo[idx].has_meta("shot"):
+			_zoo[idx].set_meta("shot", true)
+			_shot("zoo_%d_%s" % [idx, a.get("species")])
+	elif idx == _zoo.size():
+		var mid: Node3D = _zoo[2]
+		var right: Vector3 = road.sample_road(mid.global_position)["right"]
+		cam.fov = 55.0
+		cam.global_position = mid.global_position + right * 9.0 + Vector3.UP * 2.0
+		cam.look_at(mid.global_position + Vector3.UP * 0.5)
+		if fmod(_t - 1.5, 1.2) > 1.0 and not has_meta("zoo_all"):
+			set_meta("zoo_all", true)
+			_shot("zoo_tous")
+	else:
+		get_tree().quit()
+
+
+# --- Balade : réglages du jeu, on roule 3 min et on compte les animaux croisés ----
+
+var _bl := {"cross0": 0, "seen": {}, "close": {}, "near_road": 0}
+
+
+func _run_autotest_drive_animals(delta: float) -> void:
+	var road: RoadGenerator = $RoadGenerator
+	var am = road.get_node("Animals")
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	$Weather.random_events = false
+	$FallingTrees.enabled = false
+	car.external_input = true
+	_inside = false
+	var kmh: float = car.forward_speed * 3.6
+	if at.call(0.05):
+		$Weather.hour = 15.0
+		$Weather.set_weather("degage", true)
+		car.handbrake_lever.set_angle_deg(0.0, true)
+		car.gear_lever.set_notch(2, true)
+	var fwd: Vector3 = car.global_basis.z
+	var info := road.sample_road(car.global_position + fwd * (8.0 + absf(car.forward_speed) * 0.45))
+	if info["found"]:
+		var target: Vector3 = info["point"] + info["right"] * 1.75
+		var to_t := target - car.global_position
+		to_t.y = 0.0
+		_steer(clampf(fwd.cross(to_t.normalized()).y * 2.2, -1.0, 1.0))
+	car.throttle_input = clampf((105.0 - kmh) * 0.15, 0.0, 1.0)
+	car.brake_input = 0.0
+	_cabin_cam(Vector3(0.0, 2.6, -7.0), Vector3(0.0, 1.0, 14.0))
+	cam.fov = 70.0
+	# animaux vus : à moins de 60 m devant, dans le champ (±40°)
+	for a in am.animals:
+		if not is_instance_valid(a):
+			continue
+		var d: Vector3 = a.global_position - car.global_position
+		var dist := d.length()
+		var id: int = a.get_instance_id()
+		if dist < (110.0 if a.crossing else 60.0) and d.normalized().dot(fwd) > 0.75:
+			if not _bl["seen"].has(id):
+				_bl["seen"][id] = "%s%s" % [a.species, " (traversée)" if a.crossing else ""]
+				if a.crossing:
+					_log("AUTOTEST [%.0f s] %s qui traverse vu à %.0f m (latéral %.0f)" % [_t, a.species, dist, am.lateral_of(a.global_position)])
+		var lat: float = absf(am.lateral_of(a.global_position))
+		if a.crossing and dist < 25.0:
+			_bl["close"][id] = minf(_bl["close"].get(id, 999.0), car.to_local(a.global_position).x if absf(car.to_local(a.global_position).z) < 3.0 else 999.0)
+		if lat < 4.0 and dist < 80.0 and not _bl.has("nr%d" % id):
+			_bl["nr%d" % id] = true
+			_bl["near_road"] += 1
+			if _bl["near_road"] <= 4:
+				_pv["dummy"] = 0
+	if am.crossings > int(_bl["cross0"]):
+		_bl["cross0"] = am.crossings
+		var desc := PackedStringArray()
+		for a in am.animals:
+			if is_instance_valid(a) and a.crossing:
+				desc.append("%s à %.0f m (latéral %.0f)" % [a.species, a.global_position.distance_to(car.global_position), am.lateral_of(a.global_position)])
+		_log("AUTOTEST [%.0f s, %.0f m] traversée n°%d : %s" % [_t, am.travelled, am.crossings, ", ".join(desc)])
+		_bl["shot_t"] = _t + 2.0
+	if _bl.has("shot_t") and _t >= float(_bl["shot_t"]):
+		_bl.erase("shot_t")
+		_shot("balade_traversee_%d" % am.crossings)
+	if fmod(_t, 20.0) < delta:
+		var amb := 0
+		for a in am.animals:
+			if is_instance_valid(a) and not a.crossing:
+				amb += 1
+		_log("AUTOTEST [%.0f s] %.0f m parcourus, %d animaux promeneurs, %d traversées, %d chocs, %d vus de près, %d près de la route" % [_t, am.travelled, amb, am.crossings, am.animals_hit, _bl["seen"].size(), _bl["near_road"]])
+	if _t > 180.0:
+		var counts := {}
+		for id in _bl["seen"]:
+			counts[_bl["seen"][id]] = counts.get(_bl["seen"][id], 0) + 1
+		_log("AUTOTEST fin : vus à moins de 60 m devant : %s" % counts)
+		_log("AUTOTEST écart latéral des animaux qui traversaient au passage de la voiture : %s" % [_bl["close"].values()])
 		get_tree().quit()

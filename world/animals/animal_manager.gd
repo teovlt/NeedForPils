@@ -51,14 +51,18 @@ const SPECIES := {
 const IMPACT_SOUND := "res://audio/animals/impact.wav"
 
 @export var enabled := true
-## Promeneurs : nombre de groupes gardés autour de la voiture.
-@export var ambient_groups := 5
+## Promeneurs : nombre de groupes gardés autour de la voiture, et part des groupes
+## posés tout près, sur l'accotement (5 à 8 m de l'axe).
+@export var ambient_groups := 7
+@export_range(0.0, 1.0) var verge_chance := 0.35
 ## Traversées : pas avant cette distance parcourue (m) ; intervalle (s) au début /
 ## au plus difficile ; distance (m) pour atteindre la difficulté maximale.
 @export var crossings_enabled := true
-@export var safe_start_distance := 400.0
-@export var interval_start := Vector2(35.0, 70.0)
-@export var interval_hard := Vector2(15.0, 35.0)
+@export var safe_start_distance := 300.0
+@export var interval_start := Vector2(22.0, 40.0)
+@export var interval_hard := Vector2(10.0, 22.0)
+## Première traversée : délai (s) une fois `safe_start_distance` parcourue.
+@export var first_crossing := Vector2(8.0, 18.0)
 @export var hard_distance := 15000.0
 @export var reaction_time := Vector2(3.5, 5.5)
 
@@ -82,7 +86,7 @@ func _ready() -> void:
 	add_to_group(GROUP)
 	if road and road.has_signal("origin_shifted"):
 		road.origin_shifted.connect(_on_origin_shifted)
-	_next_cross = randf_range(interval_start.x, interval_start.y)
+	_next_cross = randf_range(first_crossing.x, first_crossing.y)
 
 
 func _on_origin_shifted(off: Vector3) -> void:
@@ -120,8 +124,10 @@ func _physics_process(delta: float) -> void:
 		if _next_cross <= 0.0:
 			var k := clampf(travelled / hard_distance, 0.0, 1.0)
 			var iv := interval_start.lerp(interval_hard, k)
-			_next_cross = randf_range(iv.x, iv.y)
-			spawn_crossing()
+			if spawn_crossing("", -1.0, 0, true).is_empty():
+				_next_cross = 1.5    # route cachée (virage, bosse) : on réessaie un peu plus loin
+			else:
+				_next_cross = randf_range(iv.x, iv.y)
 
 
 # --- Aide pour les animaux ----------------------------------------------------
@@ -213,12 +219,12 @@ func _keep_ambient() -> void:
 				n_groups += 1
 	if n_groups >= ambient_groups:
 		return
-	var d := randf_range(70.0, 220.0)
+	var d := randf_range(50.0, 200.0)
 	var sample: Dictionary = road.call("sample_ahead", car.global_position, d)
 	if not sample["found"]:
 		return
 	var side := 1.0 if randf() < 0.5 else -1.0
-	var lat := side * randf_range(12.0, 38.0)
+	var lat := side * (randf_range(5.0, 8.0) if randf() < verge_chance else randf_range(9.0, 30.0))
 	var centre: Vector3 = road.call("ground_position", sample, lat)
 	spawn_group(pick_species(centre), centre, lat, false)
 
@@ -254,13 +260,26 @@ func _despawn_far() -> void:
 # --- Traversées ---------------------------------------------------------------
 
 ## Fait traverser un animal (ou un groupe) devant la voiture. `sp` vide = selon le biome.
-func spawn_crossing(sp := "", distance := -1.0, side := 0) -> Array:
+## `need_sight` : seulement si le conducteur voit l'endroit de la route où il traversera
+## (sinon il surgirait de derrière une bosse ou un virage sans laisser le temps de réagir).
+func spawn_crossing(sp := "", distance := -1.0, side := 0, need_sight := false) -> Array:
 	var v := maxf(car.linear_velocity.length(), 8.0)
 	if distance <= 0.0:
 		distance = clampf(v * randf_range(reaction_time.x, reaction_time.y) + 15.0, 45.0, 200.0)
 	if side == 0:
 		side = 1 if randf() < 0.5 else -1
 	var sample: Dictionary = road.call("sample_ahead", car.global_position, distance)
+	if need_sight:
+		var found := false
+		for k in [1.0, 0.85, 1.15, 0.7]:
+			var sm: Dictionary = road.call("sample_ahead", car.global_position, distance * k)
+			if sm["found"] and _visible_from_car(road.call("ground_position", sm, 0.0) + Vector3.UP * 0.8):
+				sample = sm
+				distance *= k
+				found = true
+				break
+		if not found:
+			return []
 	if not sample["found"]:
 		return []
 	if sp == "":
@@ -297,6 +316,25 @@ func spawn_crossing(sp := "", distance := -1.0, side := 0) -> Array:
 	crossings += 1
 	_cross_groups.append({"animals": group, "hits0": animals_hit})
 	return group
+
+
+## Le point est-il visible depuis la place du conducteur (relief, gros rochers) ?
+func _visible_from_car(p: Vector3) -> bool:
+	var from := car.global_position + car.global_basis.y * 1.6
+	var space := car.get_world_3d().direct_space_state
+	var excl: Array[RID] = [car.get_rid()]
+	for i in 4:
+		var q := PhysicsRayQueryParameters3D.create(from, p, 1, excl)
+		var hit := space.intersect_ray(q)
+		if hit.is_empty():
+			return true
+		var col: Object = hit["collider"]
+		# arbres et petits objets : on voit entre eux
+		if col is Node and ("Nature" in (col as Node).name or (col as Node).get_parent() is RigidBody3D):
+			excl.append(hit["rid"])
+			continue
+		return false
+	return true
 
 
 func _check_crossings_done() -> void:

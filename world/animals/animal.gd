@@ -26,6 +26,7 @@ var speed := 0.0                  # vitesse actuelle (m/s)
 var heading := 0.0                # cap (rad, autour de Y ; 0 = +Z)
 var target := Vector3.ZERO        # point visé (MARCHE / TRAVERSE / FUIT)
 var crossing := false             # fait partie d'une traversée déclenchée
+var _cross_called := false
 var crossed := false              # a fini de traverser
 var was_hit := false
 var size_scale := 1.0
@@ -140,6 +141,10 @@ func _physics_process(delta: float) -> void:
 				want_speed = 0.0        # attend son tour (troupeau en file)
 			else:
 				want_speed = float(cfg["cross_speed"])
+				if not _cross_called:
+					_cross_called = true   # cri d'alerte en s'élançant : on l'entend arriver
+					if car_d < 140.0:
+						_play(cfg.get("alarm", []), true)
 				if _freeze == -1.0 and manager and absf(float(manager.call("lateral_of", global_position))) < 2.0:
 					_freeze = randf_range(0.8, 1.8)   # figé dans la voie, face aux phares
 					_play(cfg.get("alarm", []))
