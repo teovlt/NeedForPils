@@ -7,6 +7,11 @@ extends Node3D
 ## - Touche PWR (en bas à droite) : marche / arrêt (l'écran et sa lueur s'éteignent).
 ## - Touches ◀ ▶ : station précédente / suivante (petit grésillement entre deux).
 ##   Touches 1 à 4 : stations mémorisées. Saisir une touche ou A/X / F : l'enfoncer.
+## - Station « PILS MIX » (5e, avec ◀ ▶) : joue les musiques du dossier
+##   res://audio/radio/playlist/ (mp3, ogg ou wav), dans un ordre tiré au hasard à
+##   chaque partie, l'une après l'autre. Pour ajouter une musique : déposer le fichier
+##   dans ce dossier et ouvrir une fois l'éditeur Godot (il l'importe). Le titre affiché
+##   est le nom du fichier.
 ## - Écran : fréquence et nom de la station, volume quand on le règle.
 ## - Le son sort de 4 AudioStreamPlayer3D enfants des portières : porte ouverte,
 ##   son haut-parleur tourne avec elle et le son vient d'ailleurs.
@@ -24,7 +29,12 @@ const STATIONS := [
 	{"freq": "92.1", "name": "RADIO BITUME", "file": "res://audio/radio/radio_bitume.wav"},
 	{"freq": "97.3", "name": "LOUNGE 97", "file": "res://audio/radio/lounge_973.wav"},
 	{"freq": "103.7", "name": "DISCO PILULE", "file": "res://audio/radio/disco_pilule.wav"},
+	{"freq": "106.9", "name": "PILS MIX", "playlist": "res://audio/radio/playlist"},
 ]
+## Formats acceptés dans le dossier d'une station « playlist ».
+const PLAYLIST_EXT := ["mp3", "ogg", "wav"]
+## Largeur de l'écran pour le titre défilant (caractères).
+const TITLE_CHARS := 13
 const STATIC_FILE := "res://audio/radio/static.wav"
 ## Haut-parleurs : [porte, position dans le repère de la porte, côté (1 = gauche : face vers -X)]
 const SPEAKERS := [
@@ -44,6 +54,9 @@ const KNOB_SWEEP_DEG := 300.0
 ## Lueur de l'écran la nuit (énergie dans l'obscurité totale).
 @export var screen_glow_energy := 0.16
 @export var screen_glow_color := Color(0.55, 0.85, 1.0)
+## Gain des musiques de la playlist (dB) : des morceaux du commerce sont mixés plus
+## fort que les stations générées.
+@export var playlist_gain_db := -4.0
 
 var car: Node3D
 var speakers: Array[AudioStreamPlayer3D] = []
@@ -54,6 +67,9 @@ var _offsets: Array[float] = []
 var _clock := 0.0
 var _tuning := 0.0
 var _loaded := -2          # ce que jouent les haut-parleurs : -2 rien, -1 grésillement, i station
+var _playlist: Array[Dictionary] = []   # {title, stream, length}, dans l'ordre de passage
+var _playlist_total := 0.0
+var _track := -1           # morceau de la playlist en cours dans les haut-parleurs
 var _show_vol := 0.0
 var _knob: Node3D
 var _knob_grip: VRInteractable
@@ -159,6 +175,11 @@ func _ready() -> void:
 	add_child(_glow)
 	# sons
 	for s in STATIONS:
+		if s.has("playlist"):
+			_load_playlist(s["playlist"])
+			_streams.append(null)
+			_offsets.append(randf() * maxf(_playlist_total, 1.0))
+			continue
 		var w := load(s["file"]) as AudioStreamWAV
 		_prepare_loop(w)
 		_streams.append(w)
@@ -192,6 +213,59 @@ func _label(text: String, size: int, color: Color) -> Label3D:
 	l.shaded = false
 	l.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	return l
+
+
+## Charge les musiques d'un dossier (ordre aléatoire, sans boucle).
+func _load_playlist(dir: String) -> void:
+	var files := PackedStringArray()
+	if ResourceLoader.has_method("list_directory"):
+		files = ResourceLoader.list_directory(dir)   # marche aussi dans le jeu exporté
+	else:
+		for f in DirAccess.get_files_at(dir):
+			files.append(f.trim_suffix(".import").trim_suffix(".remap"))
+	var names: Array[String] = []
+	for f in files:
+		if f.get_extension().to_lower() in PLAYLIST_EXT and not names.has(f):
+			names.append(f)
+	names.shuffle()
+	for f in names:
+		var st := load(dir.path_join(f)) as AudioStream
+		if st == null:
+			continue
+		if st is AudioStreamWAV:
+			(st as AudioStreamWAV).loop_mode = AudioStreamWAV.LOOP_DISABLED
+		elif "loop" in st:
+			st.set("loop", false)
+		var length := st.get_length()
+		if length < 1.0:
+			continue
+		_playlist.append({"title": f.get_basename(), "stream": st, "length": length})
+		_playlist_total += length
+
+
+func _is_playlist(i: int) -> bool:
+	return i >= 0 and STATIONS[i].has("playlist")
+
+
+## Morceau et position dans la playlist à l'instant présent : la station « tourne »
+## même radio éteinte, comme les autres. Renvoie [index, secondes].
+func _playlist_now(st: int) -> Array:
+	if _playlist.is_empty():
+		return [-1, 0.0]
+	var x := fmod(_clock + _offsets[st], _playlist_total)
+	for i in _playlist.size():
+		var length: float = _playlist[i]["length"]
+		if x < length:
+			return [i, x]
+		x -= length
+	return [0, 0.0]
+
+
+## Titre du morceau en cours (vide si la station n'est pas une playlist).
+func get_track_title() -> String:
+	if not _is_playlist(station) or _playlist.is_empty():
+		return ""
+	return _playlist[_playlist_now(station)[0]]["title"]
 
 
 static func _prepare_loop(w: AudioStreamWAV) -> void:
@@ -317,7 +391,12 @@ func _process(delta: float) -> void:
 		want = -1 if _tuning > 0.0 else station
 	if want != _loaded:
 		_load(want)
+	elif _is_playlist(want) and (_playlist_now(want)[0] != _track \
+			or (not speakers.is_empty() and not speakers[0].playing)):
+		_load(want)   # morceau suivant (ou le même qui recommence s'il est seul)
 	var db := linear_to_db(maxf(pow(volume, 1.6), 0.0001)) + max_volume_db
+	if _is_playlist(want):
+		db += playlist_gain_db
 	for p in speakers:
 		p.volume_db = db if want != -1 else db - 6.0
 	# lueur la nuit (proportionnelle à l'obscurité), seulement radio allumée
@@ -340,6 +419,24 @@ func _process(delta: float) -> void:
 			_name_lbl.text = "VOL " + "|".repeat(n) + ".".repeat(10 - n)
 		else:
 			_name_lbl.text = s["name"] if _tuning <= 0.0 else "RECHERCHE"
+			if _tuning <= 0.0 and _is_playlist(station):
+				_name_lbl.text = _playlist_screen(s["name"])
+
+
+## Écran de la playlist : nom de la station 2,5 s, puis titre du morceau (défilant
+## s'il est trop long), en boucle.
+func _playlist_screen(station_name: String) -> String:
+	if _playlist.is_empty():
+		return "PLAYLIST VIDE"
+	var t := fmod(_clock, 9.0)
+	if t < 2.5:
+		return station_name
+	var title := get_track_title().to_upper()
+	if title.length() <= TITLE_CHARS:
+		return title
+	var loop := title + "   ·   "
+	var start := int((t - 2.5) * 3.0) % loop.length()
+	return (loop + loop).substr(start, TITLE_CHARS)
 
 
 func _load(what: int) -> void:
@@ -348,12 +445,21 @@ func _load(what: int) -> void:
 		p.stop()
 	if what == -2:
 		return
-	var stream: AudioStreamWAV = _static if what == -1 else _streams[what]
+	var stream: AudioStream = _static if what == -1 else _streams[what]
+	var pos := 0.0
+	_track = -1
+	if _is_playlist(what):
+		var now := _playlist_now(what)
+		_track = now[0]
+		if _track < 0:
+			stream = _static   # dossier vide : grésillement
+		else:
+			stream = _playlist[_track]["stream"]
+			pos = now[1]
+	elif what >= 0 and stream:
+		pos = fmod(_clock + _offsets[what], stream.get_length())   # la station continuait
 	if stream == null:
 		return
-	var pos := 0.0
-	if what >= 0:
-		pos = fmod(_clock + _offsets[what], stream.get_length())   # la station continuait
 	for p in speakers:
 		p.stream = stream
 		p.play(pos)

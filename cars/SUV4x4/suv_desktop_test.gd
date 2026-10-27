@@ -7,7 +7,7 @@ extends Node3D
 
 @export var autotest := false
 ## Scénario du test automatique : "objets" (rangements) ou "arbres".
-@export_enum("objets", "arbres", "aleatoire", "phares", "retros", "portes", "boite", "combine", "essuie", "plafonnier", "nature", "pluie", "balayage", "menu", "lunette", "moteur", "klaxon", "vitres", "ceinture", "cle", "depart", "pare_soleil", "cle_f", "physique", "eclairage", "radio", "radio_nuit", "radio_pwr", "ambiance", "rangements", "ceintures", "vitesses", "sapins", "balises") var autotest_scenario := "objets"
+@export_enum("objets", "arbres", "aleatoire", "phares", "retros", "portes", "boite", "combine", "essuie", "plafonnier", "nature", "pluie", "balayage", "menu", "lunette", "moteur", "klaxon", "vitres", "ceinture", "cle", "depart", "pare_soleil", "cle_f", "physique", "eclairage", "radio", "radio_nuit", "radio_pwr", "ambiance", "rangements", "ceintures", "vitesses", "sapins", "balises", "playlist") var autotest_scenario := "objets"
 
 @onready var car: SUV4x4 = $SUV4x4
 @onready var cam: Camera3D = $Camera3D
@@ -100,6 +100,8 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_tree_hits(delta)
 		elif autotest_scenario == "balises":
 			_run_autotest_posts(delta)
+		elif autotest_scenario == "playlist":
+			_run_autotest_playlist(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -2495,4 +2497,56 @@ func _run_autotest_posts(delta: float) -> void:
 	if _post_pass >= 3 and _post == null and not _post_log.has("end"):
 		_post_log["end"] = _t
 	if _post_log.has("end") and _t - _post_log["end"] > 5.0:
+		get_tree().quit()
+
+
+# Station playlist (PILS MIX) : chargement du dossier, écran, morceau joué, passage au
+# morceau suivant à la fin (ou reprise du même s'il est seul), radio éteinte/rallumée.
+func _run_autotest_playlist(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	$Weather.random_events = false
+	$FallingTrees.enabled = false
+	car.external_input = true
+	car.brake_input = 1.0
+	var r = car.radio
+	_inside = false
+	cam.fov = 40.0
+	_cabin_cam(Vector3(0.1, 1.35, 0.25), Vector3(0.0, 1.06, 0.66))
+	var st := func() -> String:
+		var p: AudioStreamPlayer3D = r.speakers[0]
+		var cls: String = p.stream.get_class() if p.stream else "aucun"
+		return "station=%d (%s) écran=« %s » flux=%s lecture=%s pos=%.1f s titre=« %s »" % [r.station, r.STATIONS[r.station]["name"], r._name_lbl.text, cls, p.playing, p.get_playback_position(), r.get_track_title()]
+	if at.call(0.5):
+		_log("AUTOTEST playlist : %d morceau(x), durée totale %.0f s : %s" % [r._playlist.size(), r._playlist_total, ", ".join(PackedStringArray(r._playlist.map(func(e): return "%s (%.0f s)" % [e["title"], e["length"]])))])
+		r.set_station(0)
+		r.next_station(); r.next_station(); r.next_station(); r.next_station()   # 4 x ▶ -> 5e station
+	if at.call(1.5):
+		_log("AUTOTEST ▶ x4 : " + st.call())
+		_shot("playlist_1_nom")
+	if at.call(4.5):
+		_log("AUTOTEST 3 s plus tard : " + st.call())
+		_shot("playlist_2_titre")
+	if at.call(5.0):
+		# saute à 1,5 s de la fin du morceau en cours
+		var now: Array = r._playlist_now(r.station)
+		var left: float = r._playlist[now[0]]["length"] - now[1]
+		r._clock += left - 1.5
+		r._load(r.station)   # les haut-parleurs repartent à la nouvelle position
+		_log("AUTOTEST saut à 1,5 s de la fin du morceau")
+	if at.call(5.2):
+		_log("AUTOTEST avant la fin : " + st.call())
+	if at.call(7.5):
+		_log("AUTOTEST après la fin : " + st.call())
+	if at.call(8.0):
+		r.toggle_power()
+	if at.call(8.5):
+		_log("AUTOTEST radio éteinte : lecture=%s" % r.speakers[0].playing)
+		r.toggle_power()
+	if at.call(9.0):
+		_log("AUTOTEST rallumée : " + st.call())
+		r.next_station()
+	if at.call(9.8):
+		_log("AUTOTEST ▶ encore (retour à la 1re) : station=%d (%s) flux=%s" % [r.station, r.STATIONS[r.station]["name"], r.speakers[0].stream.resource_path.get_file()])
 		get_tree().quit()

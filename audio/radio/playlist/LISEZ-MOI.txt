@@ -1,0 +1,12 @@
+Playlist de la station « PILS MIX » (106.9, la 5e station de l'autoradio, avec les touches ◀ ▶).
+
+Pour ajouter une musique :
+1. Déposer le fichier ici (formats : .mp3, .ogg ou .wav).
+2. Ouvrir une fois l'éditeur Godot : il importe le fichier.
+3. C'est tout : au prochain lancement, la musique fait partie de la playlist.
+
+- Le titre affiché sur l'écran de la radio est le nom du fichier (sans l'extension) :
+  nommer le fichier comme on veut voir le titre, par ex. « Saturday Night Kebab.mp3 ».
+- L'ordre de passage est tiré au hasard à chaque partie, et les morceaux s'enchaînent.
+- Les fichiers audio passent par Git LFS (voir .gitattributes) : rien de spécial à faire.
+- Le volume de toute la playlist se règle avec playlist_gain_db dans car_radio.gd.

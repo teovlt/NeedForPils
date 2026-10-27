@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://v4nr81wxcbvp"
+path="res://.godot/imported/Saturday Night Kebab.mp3-0762d425f6b302b34fbefe37b6c13775.mp3str"
+
+[deps]
+
+source_file="res://audio/radio/playlist/Saturday Night Kebab.mp3"
+dest_files=["res://.godot/imported/Saturday Night Kebab.mp3-0762d425f6b302b34fbefe37b6c13775.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4
