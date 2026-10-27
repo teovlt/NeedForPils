@@ -46,6 +46,11 @@ func _ready() -> void:
 	add_to_group(GROUP)
 
 
+## Priorité de sélection (main VR, souris) : pick_bonus, que les objets peuvent moduler.
+func get_pick_bonus() -> float:
+	return pick_bonus
+
+
 func is_grabbed() -> bool:
 	return not _grab_hands.is_empty()
 
@@ -101,6 +106,37 @@ func ray_hit_distance(origin: Vector3, dir: Vector3, max_t: float, margin: float
 					break
 		if hit:
 			best = minf(best, t0)
+	return best
+
+
+## Distance (le long du rayon) du premier triangle réellement touché, ou INF.
+## Affine la visée à la souris : les boîtes englobantes des pièces voisines (frein à main,
+## boucles de ceinture, couvercles) débordent et volaient la sélection.
+func ray_hit_precise(origin: Vector3, dir: Vector3, max_t: float) -> float:
+	_ensure_built()
+	var best := INF
+	for m in _meshes:
+		if not is_instance_valid(m) or m.mesh == null:
+			continue
+		var faces: PackedVector3Array
+		if m.has_meta("_ray_faces"):
+			faces = m.get_meta("_ray_faces")
+		else:
+			faces = m.mesh.get_faces()
+			m.set_meta("_ray_faces", faces)
+		var inv := m.global_transform.affine_inverse()
+		var o := inv * origin
+		var d := inv.basis * dir
+		var sc := d.length()
+		if sc < 1e-9:
+			continue
+		var dn := d / sc
+		for i in range(0, faces.size() - 2, 3):
+			var hit = Geometry3D.ray_intersects_triangle(o, dn, faces[i], faces[i + 1], faces[i + 2])
+			if hit != null:
+				var t: float = ((hit as Vector3) - o).length() / sc
+				if t < best and t <= max_t:
+					best = t
 	return best
 
 

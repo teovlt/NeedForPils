@@ -79,7 +79,7 @@ func _physics_process(_delta: float) -> void:
 		if it == null or not it.enabled or not it.is_visible_in_tree():
 			continue
 		var d := it.get_distance_to(global_position)
-		if d < it.highlight_distance and d - it.pick_bonus < best_d - (best.pick_bonus if best else 0.0):
+		if d < it.highlight_distance and d - it.get_pick_bonus() < best_d - (best.get_pick_bonus() if best else 0.0):
 			best = it
 			best_d = d
 	_set_hover(best, best_d)

@@ -136,6 +136,12 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_smoke_mouse(delta)
 		elif autotest_scenario == "fumer_effets":
 			_run_autotest_smoke_effects(delta)
+		elif autotest_scenario == "sortie_rangements":
+			_run_autotest_take_out(delta)
+		elif autotest_scenario == "visee_rangements":
+			_run_autotest_pick_in_zones(delta)
+		elif autotest_scenario == "vue_accoudoir":
+			_run_autotest_console_view(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -3847,4 +3853,236 @@ func _run_autotest_smoke_effects(delta: float) -> void:
 		_mouse_hand.hovered = gc
 		_mouse_hand._try_grab()
 		_log("AUTOTEST saisie défoncé : tout de suite tenu=%s, en attente=%s (%.2f s)" % [_mouse_hand.held != null, _mouse_hand._pending != null, _mouse_hand._pending_t])
+		get_tree().quit()
+
+
+# --- Sortir un objet de la boîte à gants et de l'accoudoir ouverts (souris réelle) ----
+
+var _to := {}
+
+
+func _run_autotest_take_out(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = true
+	var zones := ["Storage/Glovebox", "Storage/Console"]
+	if at.call(0.05):
+		$Weather.hour = 14.0
+		car.get_node("GloveboxLid").set_angle_deg(-80.0, true)
+		car.get_node("ConsoleLid").set_angle_deg(-100.0, true)
+	var i := int((_t - 0.5) / 3.0)
+	if _t < 0.5 or i >= zones.size():
+		if _t > 0.5 + 3.0 * zones.size():
+			get_tree().quit()
+		return
+	var zone := car.get_node(zones[i]) as StorageZone
+	var ph := fmod(_t - 0.5, 3.0)
+	var key := "z%d" % i
+	if not _to.has(key):
+		_to[key] = true
+		var it := car.find_child("Phone", true, false) as RigidBody3D
+		var z0 := it.get_parent() as StorageZone
+		if z0: z0.on_item_taken(it)
+		ItemPhysics.stop(it)
+		zone.try_random_place(it, RandomNumberGenerator.new(), [])
+		_to["item"] = it
+	var item: RigidBody3D = _to["item"]
+	# vise l'objet depuis la tête du conducteur (rayon souris au centre)
+	var head := car.driver_seat.global_position + car.global_basis.y * 0.62
+	if ph < 1.0:
+		_mouse_hand._yaw = 0.0
+		_mouse_hand._pitch = 0.0
+		var dirv := (item.global_position - car.driver_seat.global_position).normalized()
+		var lb := car.driver_seat.global_basis.inverse() * dirv
+		_mouse_hand._yaw = atan2(-lb.x, -lb.z)
+		_mouse_hand._pitch = asin(clampf(lb.y, -1.0, 1.0))
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	if at.call(0.5 + i * 3.0 + 0.7):
+		_shot("sortie_%d_vise" % i)
+	if at.call(0.5 + i * 3.0 + 0.8):
+		var hv = _mouse_hand.hovered
+		_log("AUTOTEST %s : visé = %s (objet %s, accessible=%s, attrapable=%s)" % [zone.zone_name, hv.item.name if hv and "item" in hv and hv.item else (hv.get_parent().name + "/" + hv.name if hv else "rien"), item.name, zone.is_accessible(), (item.get_node("Grab") as VRPickable).enabled])
+		_mouse_hand._try_grab()
+		_log("AUTOTEST   clic -> tenu = %s" % [_mouse_hand.held.get_parent().name if _mouse_hand.held else "rien"])
+	if ph > 1.0 and ph < 2.0 and _mouse_hand.held:
+		# on ramène l'objet vers soi (molette) et on regarde le siège passager
+		_mouse_hand._depth = maxf(_mouse_hand._depth - delta * 0.4, 0.3)
+		_mouse_hand._pitch = lerpf(_mouse_hand._pitch, -0.3, delta * 2.0)
+	if at.call(0.5 + i * 3.0 + 2.0):
+		_log("AUTOTEST   objet tenu à %.2f m de la zone" % item.global_position.distance_to(zone.global_position))
+		_mouse_hand._release()
+	if at.call(0.5 + i * 3.0 + 2.8):
+		_log("AUTOTEST   lâché -> parent %s, à %.2f m de la zone" % [item.get_parent().name, item.global_position.distance_to(zone.global_position)])
+
+
+## Pour chaque objet des rangements ouverts : ce que choisit une main VR posée dessus,
+## et ce que choisit le rayon de la souris depuis la tête du conducteur / du passager.
+func _run_autotest_pick_in_zones(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	car.external_input = true
+	car.brake_input = 1.0
+	if at.call(0.05):
+		car.get_node("GloveboxLid").set_angle_deg(-80.0, true)
+		car.get_node("ConsoleLid").set_angle_deg(-100.0, true)
+	_vp_drag(delta)
+	if at.call(0.5):
+		var rng := RandomNumberGenerator.new()
+		var plan := {"Phone": "Storage/Glovebox", "Lighter": "Storage/Glovebox", "Joint": "Storage/Console", "Cigarette": "Storage/Console"}
+		for n in plan:
+			var it := car.find_child(n, true, false) as RigidBody3D
+			var z0 := it.get_parent() as StorageZone
+			if z0: z0.on_item_taken(it)
+			ItemPhysics.stop(it)
+			(car.get_node(plan[n]) as StorageZone).try_random_place(it, rng, [])
+	if not at.call(1.0):
+		return
+	var heads := {"conducteur": car.to_global(Vector3(0.36, 1.25, -0.1)), "passager": car.to_global(Vector3(-0.36, 1.25, -0.1))}
+	for zp in ["Storage/Glovebox", "Storage/Console"]:
+		var zone := car.get_node(zp) as StorageZone
+		for c in zone.get_children():
+			if not c is RigidBody3D:
+				continue
+			var item := c as RigidBody3D
+			var p := item.global_position + car.global_basis.y * 0.01
+			# main VR (même calcul que VRHandInteractor)
+			var best: VRInteractable = null
+			var best_d := INF
+			for n in get_tree().get_nodes_in_group(VRInteractable.GROUP):
+				var it := n as VRInteractable
+				if it == null or not it.enabled or not it.is_visible_in_tree():
+					continue
+				var d := it.get_distance_to(p)
+				if d < it.highlight_distance and d - it.get_pick_bonus() < best_d - (best.get_pick_bonus() if best else 0.0):
+					best = it
+					best_d = d
+			var res := "main VR -> %s (%.3f)" % [_itname(best), best_d]
+			var aim_ok := 0
+			var aim_n := 0
+			var aim_bad := {}
+			for hk in 10:
+				var hn: String = heads.keys()[hk / 5]
+				var k := hk % 5
+				var o: Vector3 = heads[hn]
+				var gb := (item.get_node("Grab") as VRPickable).get_local_aabb()
+				var lp := gb.get_center() + gb.size * Vector3((k % 3 - 1) * 0.35, 0.3, (k / 3 - 0.5) * 0.5)
+				var dir := (item.global_transform * lp - o).normalized()
+				var b2: VRInteractable = null
+				var bt := INF
+				for n in get_tree().get_nodes_in_group(VRInteractable.GROUP):
+					var it := n as VRInteractable
+					if it == null or not it.enabled or not it.is_visible_in_tree():
+						continue
+					var tt := it.ray_hit_distance(o, dir, 1.6, it.grab_distance * 0.3)
+					if tt < INF:
+						var tp := it.ray_hit_precise(o, dir, 1.6)
+						tt = tp if tp < INF else tt + 1.0
+					if tt - it.get_pick_bonus() * 3.0 < bt - (b2.get_pick_bonus() * 3.0 if b2 else 0.0):
+						b2 = it
+						bt = tt
+				aim_n += 1
+				var nm := _itname(b2) if bt < INF else "rien"
+				if k == 0 and nm != item.name:
+					var ig := item.get_node("Grab") as VRInteractable
+					var it_box := ig.ray_hit_distance(o, dir, 1.6, ig.grab_distance * 0.3)
+					var it_pre := ig.ray_hit_precise(o, dir, 1.6)
+					var wb := b2.ray_hit_distance(o, dir, 1.6, b2.grab_distance * 0.3)
+					var wp := b2.ray_hit_precise(o, dir, 1.6)
+					_log("AUTOTEST   %s %s : objet boîte %.3f précis %.3f bonus %.3f ; %s boîte %.3f précis %.3f bonus %.3f" % [hn, item.name, it_box, it_pre, ig.get_pick_bonus(), nm, wb, wp, b2.get_pick_bonus()])
+				if nm == item.name:
+					aim_ok += 1
+				else:
+					aim_bad[nm] = aim_bad.get(nm, 0) + 1
+			res += " ; souris : %d/%d visées justes %s" % [aim_ok, aim_n, aim_bad]
+			_log("AUTOTEST %s / %s : %s" % [zone.zone_name, item.name, res])
+	_vp_items = []
+	for zp in ["Storage/Glovebox", "Storage/Console"]:
+		for c in car.get_node(zp).get_children():
+			if c is RigidBody3D:
+				_vp_items.append(c)
+	_vp_t = _t
+
+
+var _vp_items: Array = []
+var _vp_t := -1.0
+var _vp_hand: Node3D
+
+
+func _vp_drag(delta: float) -> void:
+	# chaque objet : main posée dessus, saisie, sortie de 40 cm vers le haut et l'arrière
+	# en 1 s, lâchée au-dessus du siège passager
+	if _vp_t < 0.0:
+		return
+	var i := int((_t - _vp_t) / 2.0)
+	if i >= _vp_items.size():
+		get_tree().quit()
+		return
+	var item: RigidBody3D = _vp_items[i]
+	var g := item.get_node("Grab") as VRPickable
+	var ph := fmod(_t - _vp_t, 2.0)
+	if _vp_hand == null:
+		_vp_hand = Node3D.new()
+		add_child(_vp_hand)
+	if not item.has_meta("vp0"):
+		item.set_meta("vp0", item.global_position)
+		_vp_hand.global_transform = item.global_transform
+		g.grab(_vp_hand)
+		_log("AUTOTEST [drag] %s saisi=%s (zone %s)" % [item.name, g.is_grabbed(), item.get_parent().name])
+	var p0: Vector3 = item.get_meta("vp0")
+	var target := car.to_global(Vector3(-0.42, 1.0, -0.05))
+	if ph < 1.2 and g.is_grabbed():
+		_vp_hand.global_position = p0.lerp(target, clampf(ph / 1.0, 0.0, 1.0))
+		g.grab_update(_vp_hand)
+	if ph >= 1.2 and g.is_grabbed():
+		_log("AUTOTEST [drag]   tenu à %.2f m du départ (main à %.2f m)" % [item.global_position.distance_to(p0), _vp_hand.global_position.distance_to(p0)])
+		g.release(_vp_hand)
+	if ph > 1.9 and not item.has_meta("vp1"):
+		item.set_meta("vp1", true)
+		_log("AUTOTEST [drag]   lâché -> parent %s, à %.2f m du départ" % [item.get_parent().name, item.global_position.distance_to(p0)])
+
+
+func _itname(it) -> String:
+	if it == null:
+		return "rien"
+	if "item" in it and it.item:
+		return it.item.name
+	return "%s/%s" % [it.get_parent().name, it.name]
+
+
+func _run_autotest_console_view(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = false
+	if at.call(0.05):
+		$Weather.hour = 13.0
+		car.get_node("GloveboxLid").set_angle_deg(-80.0, true)
+		car.get_node("ConsoleLid").set_angle_deg(-100.0, true)
+		var z := car.get_node("Storage/Console") as StorageZone
+		var it := car.find_child("Phone", true, false) as RigidBody3D
+		var z0 := it.get_parent() as StorageZone
+		if z0: z0.on_item_taken(it)
+		ItemPhysics.stop(it)
+		z.try_random_place(it, RandomNumberGenerator.new(), [])
+	cam.fov = 60.0
+	if _t < 1.5:
+		_cabin_cam(Vector3(0.0, 1.55, 0.05), Vector3(0.0, 0.6, 0.06))
+		if at.call(1.2):
+			_shot("accoudoir_dessus")
+	elif _t < 3.0:
+		_cabin_cam(Vector3(0.36, 1.25, -0.12), Vector3(0.0, 0.7, 0.1))
+		if at.call(2.7):
+			_shot("accoudoir_conducteur")
+	else:
+		for c in car.get_node("Storage/Console").get_children():
+			if c is RigidBody3D:
+				_log("AUTOTEST accoudoir : %s à %s (local voiture)" % [c.name, car.to_local(c.global_position)])
+		var hb := car.get_node("Handbrake")
+		_log("AUTOTEST frein à main : %s" % car.to_local(hb.global_position))
 		get_tree().quit()

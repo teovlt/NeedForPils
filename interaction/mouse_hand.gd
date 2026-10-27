@@ -125,7 +125,12 @@ func _physics_process(_delta: float) -> void:
 		if it == null or not it.enabled or not it.is_visible_in_tree():
 			continue
 		var tt := it.ray_hit_distance(origin, dir, max_reach, it.grab_distance * 0.3)
-		if tt - it.pick_bonus * 3.0 < best_t - (best.pick_bonus * 3.0 if best else 0.0):
+		if tt < INF:
+			# boîte touchée : on vérifie sur les vrais triangles ; frôler la boîte sans
+			# toucher l'objet reste possible (petits objets fins), mais passe derrière
+			var tp := it.ray_hit_precise(origin, dir, max_reach)
+			tt = tp if tp < INF else tt + 1.0
+		if tt - it.get_pick_bonus() * 3.0 < best_t - (best.get_pick_bonus() * 3.0 if best else 0.0):
 			best = it
 			best_t = tt
 	if best_t == INF:

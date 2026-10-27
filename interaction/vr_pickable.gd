@@ -43,6 +43,16 @@ func _ready() -> void:
 
 
 ## Boîte englobante des meshes de l'objet, dans le repère de l'objet.
+## Objet rangé dans un compartiment ouvert : nettement prioritaire sur les pièces de la
+## voiture autour (frein à main, boucles de ceinture, couvercle), dont les boîtes
+## englobantes débordent devant l'ouverture et volaient la sélection.
+func get_pick_bonus() -> float:
+	var zone := item.get_parent() as StorageZone if item else null
+	if zone and zone.is_accessible():
+		return pick_bonus + 0.05
+	return pick_bonus
+
+
 func get_local_aabb() -> AABB:
 	if not _aabb_ready:
 		_aabb_ready = true
