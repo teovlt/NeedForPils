@@ -29,6 +29,8 @@ var _local_aabb: AABB
 var _aabb_ready := false
 var _lag_local := Transform3D.IDENTITY
 var _lag_ready := false
+var _prev_local := Vector3.ZERO
+var _prev_ok := false
 
 
 func _ready() -> void:
@@ -92,6 +94,14 @@ func _on_grab_update(hand: Node3D) -> void:
 		xf = fx * _lag_local
 	else:
 		_lag_ready = false
+	# ne traverse pas l'intérieur de la voiture
+	var storage := _nearest_storage()
+	if storage:
+		if not _prev_ok:
+			_prev_local = storage.to_local(item.global_position)
+			_prev_ok = true
+		xf = storage.constrain_held(self, xf, _prev_local)
+		_prev_local = storage.to_local(xf.origin)
 	hand_velocity = hand_velocity.lerp((xf.origin - _last_pos) / maxf(dt, 0.001), 0.5)
 	_last_pos = xf.origin
 	item.global_transform = xf
@@ -132,6 +142,7 @@ func _take(hand: Node3D) -> void:
 	_offset = hand.global_transform.affine_inverse() * item.global_transform
 	_last_pos = item.global_position
 	_lag_ready = false
+	_prev_ok = false
 	hand_velocity = Vector3.ZERO
 
 

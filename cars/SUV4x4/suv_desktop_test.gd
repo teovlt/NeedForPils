@@ -144,6 +144,8 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_console_view(delta)
 		elif autotest_scenario == "paquet":
 			_run_autotest_cig_pack(delta)
+		elif autotest_scenario == "traverser":
+			_run_autotest_no_clip(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -1773,7 +1775,7 @@ func _run_autotest_physics(delta: float) -> void:
 	# deux lancers : un objet jeté vers l'arrière contre le dossier conducteur, un autre
 	# jeté en travers vers la console centrale depuis le plancher passager
 	if at.call(6.0) or at.call(14.0):
-		var cg := car.find_child("Cigarette", true, false) as RigidBody3D
+		var cg := _car_item("Cigarette") as RigidBody3D
 		var cs := ItemPhysics.get_state(cg)
 		var cpos: Vector3 = cs.get("pos", Vector3.ZERO)
 		var org: Vector3 = car.to_local(cg.global_position)
@@ -3638,7 +3640,7 @@ func _run_autotest_smoke(delta: float) -> void:
 	car.brake_input = 1.0
 	_inside = false
 	var lt := car.find_child("Lighter", true, false) as RigidBody3D
-	var cig := car.find_child("Cigarette", true, false) as RigidBody3D
+	var cig := _car_item("Cigarette") as RigidBody3D
 	var jt := car.find_child("Joint", true, false) as RigidBody3D
 	var gl := lt.get_node("Grab") as Lighter
 	var gc := cig.get_node("Grab") as Smokable
@@ -3693,8 +3695,9 @@ func _run_autotest_smoke(delta: float) -> void:
 		_shot("fumer_2_recrache")
 		_log("AUTOTEST bouffées=%d, fumée recrachée=%s" % [gc.puffs, gc._exhale.emitting if gc._exhale else null])
 	if at.call(8.5):
+		_log("AUTOTEST   (avant de lâcher : cigarette en %s, main en %s)" % [car.to_local(cig.global_position), car.to_local(hB.global_position)])
 		gc.release(hB)
-		_log("AUTOTEST cigarette posée, toujours allumée=%s" % gc.lit)
+		_log("AUTOTEST cigarette posée, toujours allumée=%s, parent %s" % [gc.lit, cig.get_parent().name])
 	# joint : sans casque, F l'allume avec le briquet de la voiture, F = une bouffée
 	if at.call(9.0):
 		hB.global_transform = jt.global_transform
@@ -3737,7 +3740,7 @@ func _run_autotest_smoke_debug(delta: float) -> void:
 	cam.look_at(car.to_global(Vector3(0, 1.5, 3)))
 	if at.call(0.05):
 		$Weather.hour = 13.0
-		var gc := car.find_child("Cigarette", true, false).get_node("Grab") as Smokable
+		var gc := _car_item("Cigarette").get_node("Grab") as Smokable
 		for i in 3:
 			var p: CPUParticles3D = gc._make_smoke(30, 3.0, 0.2, 0.8)
 			p.direction = Vector3.UP
@@ -3767,7 +3770,7 @@ func _run_autotest_smoke_mouse(delta: float) -> void:
 	car.brake_input = 1.0
 	_inside = true
 	var gl := car.find_child("Lighter", true, false).get_node("Grab") as Lighter
-	var gc := car.find_child("Cigarette", true, false).get_node("Grab") as Smokable
+	var gc := _car_item("Cigarette").get_node("Grab") as Smokable
 	if at.call(0.5):
 		_mouse_hand.held = gl
 		gl.grab(_mouse_hand)
@@ -3799,7 +3802,7 @@ func _run_autotest_smoke_effects(delta: float) -> void:
 	car.external_input = true
 	car.brake_input = 1.0
 	_inside = true
-	var gc := car.find_child("Cigarette", true, false).get_node("Grab") as Smokable
+	var gc := _car_item("Cigarette").get_node("Grab") as Smokable
 	var gj := car.find_child("Joint", true, false).get_node("Grab") as Smokable
 	if at.call(0.05):
 		$Weather.hour = 15.0
@@ -4175,3 +4178,82 @@ func _run_autotest_cig_pack(delta: float) -> void:
 		_log("AUTOTEST paquet refermé : ouvert=%s, zone cigarettes active=%s" % [pack.open, pack._taker.enabled])
 	if at.call(4.0):
 		get_tree().quit()
+
+
+# --- Objet tenu : la main passe à travers la voiture, pas l'objet ---------------
+
+var _nc := {}
+## [nom, départ, arrivée (repère voiture)] : la main va du départ à l'arrivée en 1 s.
+const NC_MOVES := [
+	["dossier conducteur", Vector3(0.45, 1.05, 0.25), Vector3(0.45, 1.05, -0.6)],
+	["assise passager (vers le bas)", Vector3(-0.45, 1.05, 0.05), Vector3(-0.45, 0.45, 0.05)],
+	["tableau de bord", Vector3(-0.3, 1.05, 0.35), Vector3(-0.3, 1.0, 1.3)],
+	["console (de côté)", Vector3(0.35, 0.95, 0.1), Vector3(-0.35, 0.95, 0.1)],
+	["portière gauche", Vector3(0.5, 1.2, 0.0), Vector3(1.4, 1.2, 0.0)],
+	["toit", Vector3(-0.3, 1.3, -0.3), Vector3(-0.3, 2.4, -0.3)],
+	["dans la boîte à gants (ouverte)", Vector3(-0.52, 1.15, 0.5), Vector3(-0.52, 0.88, 0.83)],
+	["dans l'accoudoir (ouvert)", Vector3(0.0, 1.15, 0.05), Vector3(0.0, 0.68, 0.05)],
+	["ressortir de l'accoudoir", Vector3(0.0, 0.68, 0.05), Vector3(0.0, 1.2, 0.05)],
+	["haut du pare-brise", Vector3(-0.3, 1.5, 0.2), Vector3(-0.3, 1.75, 1.4)],
+	["toit (vue)", Vector3(-0.3, 1.4, -0.2), Vector3(-0.3, 2.3, -0.2)],
+]
+
+
+func _run_autotest_no_clip(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = false
+	if at.call(0.05):
+		car.get_node("GloveboxLid").set_angle_deg(-80.0, true)
+		car.get_node("ConsoleLid").set_angle_deg(-100.0, true)
+		_nc["hand"] = Node3D.new()
+		add_child(_nc["hand"])
+	if _t < 0.5:
+		return
+	var i := int((_t - 0.5) / 1.6)
+	if i >= NC_MOVES.size():
+		get_tree().quit()
+		return
+	var mv: Array = NC_MOVES[i]
+	var hand: Node3D = _nc["hand"]
+	var ph := fmod(_t - 0.5, 1.6)
+	var it := car.find_child("Phone", true, false) as RigidBody3D
+	var g := it.get_node("Grab") as VRPickable
+	if not _nc.has("m%d" % i):
+		_nc["m%d" % i] = true
+		if g.is_grabbed():
+			g.release(hand)
+		hand.global_transform = Transform3D(car.global_basis, car.to_global(mv[1]))
+		# l'objet part de la main (comme s'il venait d'être attrapé là)
+		var z := it.get_parent() as StorageZone
+		if z and i != 8: z.on_item_taken(it)
+		ItemPhysics.stop(it)
+		if i != 8:
+			it.global_transform = hand.global_transform
+		g.grab(hand)
+	if ph <= 1.1:
+		hand.global_position = car.to_global((mv[1] as Vector3).lerp(mv[2], clampf(ph / 1.0, 0.0, 1.0)))
+		g.grab_update(hand)
+	if ph > 1.1 and not _nc.has("r%d" % i):
+		_nc["r%d" % i] = true
+		var ip := car.to_local(it.global_position)
+		var hp := car.to_local(hand.global_position)
+		_log("AUTOTEST %-32s : main %s, objet arrêté en %s (écart %.2f m)" % [mv[0], hp.snapped(Vector3.ONE * 0.01), ip.snapped(Vector3.ONE * 0.01), ip.distance_to(hp)])
+		if i >= 9:
+			cam.global_position = car.to_global(Vector3(0.45, 1.3, -0.6))
+			cam.look_at(it.global_position)
+			_shot("traverser_%d" % i)
+		if i == 6 or i == 7:
+			g.release(hand)
+			_log("AUTOTEST   lâché -> rangé dans %s" % it.get_parent().name)
+
+
+## Objet de la voiture (RigidBody3D) par son nom (le modèle du paquet de cigarettes
+## contient aussi des nœuds « Cigarette »).
+func _car_item(n: String) -> RigidBody3D:
+	for c in car.find_children(n, "RigidBody3D", true, false):
+		return c
+	return null
