@@ -7,6 +7,10 @@ extends VRPickable
 ## - A/X (VR) ou F (bureau) en le visant (ou en le tenant) : ouvre / ferme le couvercle.
 ## - Ouvert : main sur les cigarettes (VR) ou clic gauche en les visant (bureau) ->
 ##   une cigarette sort dans la main (Smokable : à allumer au briquet et à fumer).
+##   La cigarette visée (la plus proche de la main) est la seule surlignée ; c'est elle
+##   qui sort. En VR, grip ou gâchette (bout de l'index).
+## - Tenu dans une main (VR) : cette main l'ouvre / le ferme avec A/X ; l'autre main ne
+##   peut plus attraper le paquet lui-même, seulement les cigarettes.
 ## - Les cigarettes visibles dans le paquet diminuent à mesure qu'on les prend.
 ## Repère : paquet debout, X largeur, Y hauteur (couvercle en haut), Z épaisseur
 ## (face avant vers +Z, charnière du couvercle à l'arrière).
@@ -36,12 +40,35 @@ class Taker:
 	var pack
 	var _held := {}
 
+	var _target: Node3D           # cigarette visée (seule surlignée)
+
 	func _ready() -> void:
-		highlight_distance = 0.1
-		grab_distance = 0.04
+		highlight_distance = 0.12
+		grab_distance = 0.06          # large : on attrape facilement en approchant la main
 		outline_width = 0.0012
 		pick_bonus = 0.03
+		grab_with_trigger = true
 		super._ready()
+
+	## Distance à la cigarette visible la plus proche (partie qui dépasse du paquet).
+	func get_distance_to(global_point: Vector3) -> float:
+		return pack.distance_to_cigarettes(global_point)
+
+	func set_hand_distance(hand: Node3D, distance: float) -> void:
+		if distance >= 0.0:
+			_retarget(pack.nearest_cigarette(hand.global_position))
+		super.set_hand_distance(hand, distance)
+
+	## Le surlignage suit la cigarette visée.
+	func _retarget(c: Node3D) -> void:
+		if c == _target or c == null:
+			return
+		for m in _meshes:
+			if is_instance_valid(m):
+				m.material_overlay = null
+		_target = c
+		mesh_root = c
+		refresh_meshes()
 
 	func _on_grab_begin(hand: Node3D) -> void:
 		var g = pack.take_cigarette_into(hand)
@@ -91,6 +118,11 @@ func _build() -> void:
 		model = Node3D.new()
 		model.name = "Model"
 		item.add_child(model)
+	# coque du paquet (surlignée quand on vise / tient le paquet) ; les cigarettes sont
+	# à part : seule celle qu'on vise est surlignée (CigaretteTaker)
+	var shell := Node3D.new()
+	shell.name = "Shell"
+	model.add_child(shell)
 	var white := _mat(Color(0.95, 0.94, 0.9))
 	var red := _mat(Color(0.72, 0.1, 0.12))
 	var gold := _mat(Color(0.85, 0.68, 0.3))
@@ -102,26 +134,26 @@ func _build() -> void:
 	var body_h := SIZE.y - LID_H
 	# corps : parois fines (le dessus est ouvert), fond
 	var t := 0.0012
-	model.add_child(_box(Vector3(w, body_h, t), Vector3(0, body_h * 0.5, d * 0.5 - t * 0.5), white))      # avant
-	model.add_child(_box(Vector3(w, body_h, t), Vector3(0, body_h * 0.5, -d * 0.5 + t * 0.5), white))     # arrière
+	shell.add_child(_box(Vector3(w, body_h, t), Vector3(0, body_h * 0.5, d * 0.5 - t * 0.5), white))      # avant
+	shell.add_child(_box(Vector3(w, body_h, t), Vector3(0, body_h * 0.5, -d * 0.5 + t * 0.5), white))     # arrière
 	for sx in [-1.0, 1.0]:
-		model.add_child(_box(Vector3(t, body_h, d - 2 * t), Vector3(sx * (w * 0.5 - t * 0.5), body_h * 0.5, 0), white))
-	model.add_child(_box(Vector3(w, t, d), Vector3(0, t * 0.5, 0), white))
+		shell.add_child(_box(Vector3(t, body_h, d - 2 * t), Vector3(sx * (w * 0.5 - t * 0.5), body_h * 0.5, 0), white))
+	shell.add_child(_box(Vector3(w, t, d), Vector3(0, t * 0.5, 0), white))
 	# languette intérieure (collerette en carton) qui dépasse du corps à l'avant
-	model.add_child(_box(Vector3(w - 0.004, 0.012, 0.0008), Vector3(0, body_h + 0.004, d * 0.5 - 0.0025), inner))
+	shell.add_child(_box(Vector3(w - 0.004, 0.012, 0.0008), Vector3(0, body_h + 0.004, d * 0.5 - 0.0025), inner))
 	# décor de la face avant : bandeau rouge en chevron, nom de marque, avertissement
-	model.add_child(_box(Vector3(w + 0.0002, 0.016, 0.0004), Vector3(0, body_h - 0.012, d * 0.5 + 0.0002), red))
-	model.add_child(_box(Vector3(w + 0.0002, 0.0015, 0.0004), Vector3(0, body_h - 0.0205, d * 0.5 + 0.0003), gold))
-	model.add_child(_label("ROUTE LIBRE", Vector3(0, body_h - 0.012, d * 0.5 + 0.0006), 0.00011, Color(1, 0.95, 0.85), 0.0))
-	model.add_child(_box(Vector3(w - 0.004, 0.02, 0.0004), Vector3(0, 0.015, d * 0.5 + 0.0002), black))
-	model.add_child(_label("FUMER TUE", Vector3(0, 0.015, d * 0.5 + 0.0006), 0.00014, Color.WHITE, 0.0))
-	model.add_child(_box(Vector3(w - 0.004, 0.02, 0.0004), Vector3(0, 0.015, -d * 0.5 - 0.0002), black))
-	model.add_child(_label("FUMER TUE", Vector3(0, 0.015, -d * 0.5 - 0.0006), 0.00014, Color.WHITE, PI))
+	shell.add_child(_box(Vector3(w + 0.0002, 0.016, 0.0004), Vector3(0, body_h - 0.012, d * 0.5 + 0.0002), red))
+	shell.add_child(_box(Vector3(w + 0.0002, 0.0015, 0.0004), Vector3(0, body_h - 0.0205, d * 0.5 + 0.0003), gold))
+	shell.add_child(_label("ROUTE LIBRE", Vector3(0, body_h - 0.012, d * 0.5 + 0.0006), 0.00011, Color(1, 0.95, 0.85), 0.0))
+	shell.add_child(_box(Vector3(w - 0.004, 0.02, 0.0004), Vector3(0, 0.015, d * 0.5 + 0.0002), black))
+	shell.add_child(_label("FUMER TUE", Vector3(0, 0.015, d * 0.5 + 0.0006), 0.00014, Color.WHITE, 0.0))
+	shell.add_child(_box(Vector3(w - 0.004, 0.02, 0.0004), Vector3(0, 0.015, -d * 0.5 - 0.0002), black))
+	shell.add_child(_label("FUMER TUE", Vector3(0, 0.015, -d * 0.5 - 0.0006), 0.00014, Color.WHITE, PI))
 	# couvercle rabattable (charnière en haut à l'arrière du corps)
 	_lid = Node3D.new()
 	_lid.name = "Lid"
 	_lid.position = Vector3(0, body_h, -d * 0.5)
-	model.add_child(_lid)
+	shell.add_child(_lid)
 	_lid.add_child(_box(Vector3(w, LID_H, t), Vector3(0, LID_H * 0.5, d - t * 0.5), white))
 	_lid.add_child(_box(Vector3(w, LID_H, t), Vector3(0, LID_H * 0.5, t * 0.5), white))
 	for sx in [-1.0, 1.0]:
@@ -130,7 +162,7 @@ func _build() -> void:
 	_lid.add_child(_box(Vector3(w + 0.0002, 0.009, 0.0004), Vector3(0, LID_H * 0.45, d + 0.0002), red))
 	_lid.add_child(_box(Vector3(0.012, 0.0004, 0.012), Vector3(0, LID_H + 0.0002, d * 0.5), gold))   # écusson
 	# papier alu au-dessus des cigarettes
-	model.add_child(_box(Vector3(w - 0.006, 0.0006, 0.004), Vector3(0, body_h + 0.016, -d * 0.5 + 0.004), foil))
+	shell.add_child(_box(Vector3(w - 0.006, 0.0006, 0.004), Vector3(0, body_h + 0.016, -d * 0.5 + 0.004), foil))
 	# cigarettes debout, filtre en haut
 	_cigs_root = Node3D.new()
 	_cigs_root.name = "Cigarettes"
@@ -171,6 +203,7 @@ func _build() -> void:
 	item.add_child(_snap)
 	for mi in model.find_children("*", "Label3D", true, false):
 		mi.set_meta("_vr_outline", true)
+	mesh_root = shell
 	refresh_meshes()
 	_apply_open(true)
 	print("Paquet de cigarettes : %d cigarettes" % cigarette_count)
@@ -232,6 +265,46 @@ func ray_hit_precise(origin: Vector3, dir: Vector3, max_t: float) -> float:
 	return super.ray_hit_precise(origin, dir, max_t)
 
 
+## Paquet tenu : seule la main qui le tient y a accès ; l'autre ne prend que les
+## cigarettes (zone CigaretteTaker).
+func accepts_hand(hand: Node3D) -> bool:
+	if not is_grabbed():
+		return true
+	if hand in _grab_hands:
+		return true
+	var owner_hand = hand.get("owner_hand")   # bout de l'index de la main qui tient
+	return owner_hand != null and owner_hand in _grab_hands
+
+
+## Haut d'une cigarette (bout du filtre) et point d'entrée dans le paquet (monde).
+func _cig_segment(c: Node3D) -> Array:
+	# le support dresse le modèle : son X local pointe vers le bas, filtre en haut
+	return [c.global_transform * Vector3(-0.05, 0, 0), c.global_transform * Vector3(-0.084, 0, 0)]
+
+
+func distance_to_cigarettes(global_point: Vector3) -> float:
+	var best := INF
+	for c in _cig_nodes:
+		if c.visible:
+			var sg := _cig_segment(c)
+			var q := Geometry3D.get_closest_point_to_segment(global_point, sg[0], sg[1])
+			best = minf(best, q.distance_to(global_point) - 0.004)
+	return maxf(best, 0.0)
+
+
+func nearest_cigarette(global_point: Vector3) -> Node3D:
+	var node: Node3D = null
+	var best := INF
+	for c in _cig_nodes:
+		if c.visible:
+			var sg := _cig_segment(c)
+			var d := Geometry3D.get_closest_point_to_segment(global_point, sg[0], sg[1]).distance_to(global_point)
+			if d < best:
+				best = d
+				node = c
+	return node
+
+
 func cigarettes_left() -> int:
 	var n := 0
 	for c in _cig_nodes:
@@ -265,15 +338,13 @@ func refresh_state() -> void:
 
 ## Sort une cigarette du paquet dans la main ; renvoie son Grab.
 func take_cigarette_into(hand: Node3D) -> VRPickable:
-	var node: Node3D = null
-	# la plus en avant et la plus près du milieu en premier
-	var best := INF
-	for c in _cig_nodes:
-		if c.visible:
-			var score := -c.position.z * 10.0 + absf(c.position.x)
-			if score < best:
-				best = score
-				node = c
+	# la cigarette surlignée (visée) en priorité, sinon la plus proche de la main
+	var node := nearest_cigarette(hand.global_position)
+	var tg: Node3D = _taker._target if _taker else null
+	if tg and tg.visible and distance_to_cigarettes(hand.global_position) > -1.0:
+		var sg := _cig_segment(tg)
+		if Geometry3D.get_closest_point_to_segment(hand.global_position, sg[0], sg[1]).distance_to(hand.global_position) < 0.1:
+			node = tg
 	if node == null:
 		return null
 	node.visible = false

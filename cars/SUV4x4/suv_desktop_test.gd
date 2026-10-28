@@ -158,6 +158,8 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_touch(delta)
 		elif autotest_scenario == "pochette_index":
 			_run_autotest_bag_index(delta)
+		elif autotest_scenario == "paquet_deux_mains":
+			_run_autotest_pack_two_hands(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -4826,4 +4828,83 @@ func _run_autotest_bag_index(delta: float) -> void:
 		_log("AUTOTEST à la bouche -> pilule avalée=%s, prises=%d" % [pill == null or not is_instance_valid(pill) or pill._eaten, get_tree().root.get_meta("pills_eaten", 0)])
 		h.debug_trigger = 0.0
 		h._update_trigger_grab()
+		get_tree().quit()
+
+
+# --- Paquet tenu dans une main : l'autre main n'attrape que les cigarettes, la visée
+# est surlignée seule ------------------------------------------------------------------
+
+var _p2 := {}
+
+
+func _run_autotest_pack_two_hands(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = false
+	var body := _car_item("CigarettePack")
+	var pack := body.get_node("Grab") as CigarettePack
+	var P := car.to_global(Vector3(-0.15, 1.1, 0.3))
+	if at.call(0.05):
+		$Weather.hour = 13.0
+		car.get_node("GloveboxLid").set_angle_deg(-80.0, true)
+		car.get_node("ConsoleLid").set_angle_deg(-100.0, true)
+		car.get_node("Storage")._place_loose(body, RandomNumberGenerator.new(), [])
+		for k in ["a", "b"]:
+			var holder := Node3D.new()
+			add_child(holder)
+			var h := VRHandInteractor.new()
+			holder.add_child(h)
+			h.debug_points = [Vector3(0, -100, 0), Vector3(0, -100, 0)]
+			holder.global_position = Vector3(0, -100, 0)
+			_p2[k] = h
+	var ha: VRHandInteractor = _p2.get("a")
+	var hb: VRHandInteractor = _p2.get("b")
+	if ha == null:
+		return
+	if at.call(0.3):
+		ha.global_transform = body.global_transform
+		pack.grab(ha)
+	if pack.is_grabbed() and _t < 6.0:
+		ha.global_transform = Transform3D(car.global_basis, P) * pack._offset.affine_inverse() if false else Transform3D(car.global_basis, P)
+		pack._offset = Transform3D.IDENTITY
+		pack.grab_update(ha)
+	cam.fov = 40.0
+	cam.global_position = P + car.global_basis * Vector3(0.0, 0.2, -0.22)
+	cam.look_at(P + car.global_basis.y * 0.07)
+	if at.call(0.8):
+		pack.toggle()   # A/X de la main qui tient
+		_log("AUTOTEST main A tient le paquet, A/X -> ouvert=%s ; main B accepte : paquet=%s, cigarettes=%s ; main A accepte le paquet=%s" % [pack.open, pack.accepts_hand(hb), pack._taker.accepts_hand(hb), pack.accepts_hand(ha)])
+	# main B : approche des cigarettes, à gauche puis à droite du paquet
+	if _t > 1.2 and _t < 3.4:
+		var side := -1.0 if _t < 2.3 else 1.0
+		var tip := body.global_transform * Vector3(side * 0.02, CigarettePack.SIZE.y + 0.02, 0.0)
+		hb.get_parent().global_position = tip
+		var d := pack._taker.get_distance_to(tip)
+		pack._taker.set_hand_distance(hb, d)
+		if not _p2.has("d%d" % int(side)):
+			_p2["d%d" % int(side)] = true
+			_p2["side_target%d" % int(side)] = pack._taker._target
+	if at.call(2.1):
+		_shot("paquet2_vise_gauche")
+		_log("AUTOTEST main B à gauche : distance %.3f, cigarette visée %s (x=%.4f), surlignés %d mesh(es)" % [pack._taker.get_distance_to(hb.global_position), pack._taker._target.name, pack._taker._target.position.x, pack._taker._meshes.size()])
+	if at.call(3.2):
+		_shot("paquet2_vise_droite")
+		var tg: Node3D = pack._taker._target
+		_p2["tg"] = tg
+		_log("AUTOTEST main B à droite : cigarette visée %s (x=%.4f), surlignés %d mesh(es)" % [tg.name, tg.position.x, pack._taker._meshes.size()])
+	if at.call(3.4):
+		var n0 := pack.cigarettes_left()
+		pack._taker.grab(hb)
+		var tg: Node3D = _p2["tg"]
+		_log("AUTOTEST main B saisit -> cigarettes %d (avant %d), la visée est sortie=%s" % [pack.cigarettes_left(), n0, not tg.visible])
+	if _t > 3.4 and _t < 4.5 and pack._taker.is_grabbed():
+		hb.get_parent().global_position = body.global_transform * Vector3(0.02, CigarettePack.SIZE.y + 0.02 + 0.12 * smoothstep(3.4, 4.2, _t), 0.0)
+		pack._taker.grab_update(hb)
+	if at.call(4.3):
+		_shot("paquet2_sortie")
+		pack._taker.release(hb)
+	if at.call(4.6):
 		get_tree().quit()

@@ -164,7 +164,7 @@ func _physics_process(_delta: float) -> void:
 	var best_d := INF
 	for n in get_tree().get_nodes_in_group(VRInteractable.GROUP):
 		var it := n as VRInteractable
-		if it == null or not it.enabled or not it.is_visible_in_tree():
+		if it == null or not it.enabled or not it.is_visible_in_tree() or not it.accepts_hand(self):
 			continue
 		var d := it.get_distance_to(global_position)
 		if d < it.highlight_distance and d - it.get_pick_bonus() < best_d - (best.get_pick_bonus() if best else 0.0):
@@ -222,7 +222,7 @@ func _update_trigger_grab() -> void:
 		var tip := tip_hand.global_position
 		for n in get_tree().get_nodes_in_group(VRInteractable.GROUP):
 			var it := n as VRInteractable
-			if it == null or not it.grab_with_trigger or not it.enabled or not it.is_visible_in_tree():
+			if it == null or not it.grab_with_trigger or not it.enabled or not it.is_visible_in_tree() or not it.accepts_hand(tip_hand):
 				continue
 			var d := it.get_distance_to(tip)
 			if d < it.highlight_distance and d < best_d:

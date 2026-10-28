@@ -54,6 +54,12 @@ func get_pick_bonus() -> float:
 	return pick_bonus
 
 
+## Cette main peut-elle viser / saisir l'objet ? (ex. paquet de cigarettes tenu :
+## l'autre main n'a accès qu'aux cigarettes.)
+func accepts_hand(_hand: Node3D) -> bool:
+	return true
+
+
 func is_grabbed() -> bool:
 	return not _grab_hands.is_empty()
 
