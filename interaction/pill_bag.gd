@@ -14,6 +14,9 @@ extends VRPickable
 ##   Bureau : viser les pilules dans la pochette et appuyer sur F -> une pilule avalée.
 ##   On peut aussi en sortir une au clic gauche et la poser ailleurs.
 ## - Les pilules visibles dans la pochette diminuent à mesure qu'on les prend.
+## - Seule la pilule visée (la plus proche de la main) est surlignée ; c'est elle qui sort.
+## - Tenue dans une main (VR) : cette main l'ouvre / la ferme avec A/X ; l'autre main ne
+##   peut plus attraper la pochette elle-même, seulement les pilules.
 ## Repère : pochette posée à plat (épaisseur selon Y), zip vers +Z.
 
 const SIZE := Vector2(0.10, 0.14)          # largeur (X), longueur (Z)
@@ -57,9 +60,27 @@ class Taker:
 		grab_with_trigger = true # VR : du bout de l'index, à la gâchette
 		super._ready()
 
+	var _target: Node3D           # pilule visée (seule surlignée)
+
 	## Distance à la pilule visible la plus proche (pas aux pilules déjà prises).
 	func get_distance_to(global_point: Vector3) -> float:
 		return bag.distance_to_pills(global_point)
+
+	func set_hand_distance(hand: Node3D, distance: float) -> void:
+		if distance >= 0.0:
+			_retarget(bag._nearest_visible(hand.global_position))
+		super.set_hand_distance(hand, distance)
+
+	## Le surlignage suit la pilule visée.
+	func _retarget(p: Node3D) -> void:
+		if p == _target or p == null:
+			return
+		for m in _meshes:
+			if is_instance_valid(m):
+				m.material_overlay = null
+		_target = p
+		mesh_root = p
+		refresh_meshes()
 
 	func _on_grab_begin(hand: Node3D) -> void:
 		var g = bag.take_pill_into(hand)
@@ -110,6 +131,11 @@ func _build() -> void:
 		model = Node3D.new()
 		model.name = "Model"
 		item.add_child(model)
+	# film + zip (surlignés quand on vise / tient la pochette) ; les pilules sont à part :
+	# seule celle qu'on vise est surlignée (PillTaker)
+	var shell := Node3D.new()
+	shell.name = "Shell"
+	model.add_child(shell)
 	_bag_mi = MeshInstance3D.new()
 	_bag_mi.name = "Bag"
 	var m := StandardMaterial3D.new()
@@ -122,7 +148,7 @@ func _build() -> void:
 	m.rim = 0.4
 	_bag_mi.material_override = m
 	_bag_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	model.add_child(_bag_mi)
+	shell.add_child(_bag_mi)
 	# zip : bandes blanches sur les deux films, trait rouge sur celle du dessus
 	_zip_mi = MeshInstance3D.new()
 	_zip_mi.name = "Zip"
@@ -131,7 +157,8 @@ func _build() -> void:
 	zm.cull_mode = BaseMaterial3D.CULL_DISABLED
 	zm.roughness = 0.5
 	_zip_mi.material_override = zm
-	model.add_child(_zip_mi)
+	shell.add_child(_zip_mi)
+	mesh_root = shell
 	_rebuild_shape()
 	# pilules
 	_pills_root = Node3D.new()
@@ -346,7 +373,11 @@ func refresh_state() -> void:
 
 ## Sort une pilule de la pochette dans la main (VR, clic gauche) ; renvoie son Grab.
 func take_pill_into(hand: Node3D) -> VRPickable:
+	# la pilule surlignée (visée) en priorité, sinon la plus proche de la main
 	var node := _nearest_visible(hand.global_position)
+	var tg: Node3D = _taker._target if _taker else null
+	if tg and tg.visible and tg.global_position.distance_to(hand.global_position) < 0.1:
+		node = tg
 	if node == null:
 		return null
 	node.visible = false
@@ -372,6 +403,15 @@ func eat_from_bag() -> void:
 	node.visible = false
 	EdiblePickable.swallow(get_tree())
 	refresh_state()
+
+
+## Pochette tenue : seule la main qui la tient y a accès ; l'autre ne prend que les
+## pilules (zone PillTaker).
+func accepts_hand(hand: Node3D) -> bool:
+	if not is_grabbed() or hand in _grab_hands:
+		return true
+	var owner_hand = hand.get("owner_hand")   # bout de l'index de la main qui tient
+	return owner_hand != null and owner_hand in _grab_hands
 
 
 ## Distance (m) entre un point et la pilule visible la plus proche.

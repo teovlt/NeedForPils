@@ -160,6 +160,8 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_bag_index(delta)
 		elif autotest_scenario == "paquet_deux_mains":
 			_run_autotest_pack_two_hands(delta)
+		elif autotest_scenario == "pochette_deux_mains":
+			_run_autotest_bag_two_hands(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -4906,5 +4908,78 @@ func _run_autotest_pack_two_hands(delta: float) -> void:
 	if at.call(4.3):
 		_shot("paquet2_sortie")
 		pack._taker.release(hb)
+	if at.call(4.6):
+		get_tree().quit()
+
+
+# --- Pochette tenue dans une main : l'autre main n'attrape que les pilules, la visée est
+# surlignée seule ------------------------------------------------------------------------
+
+var _b2 := {}
+
+
+func _run_autotest_bag_two_hands(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = false
+	var body := _car_item("PillBag")
+	var bag := body.get_node("Grab") as PillBag
+	var P := car.to_global(Vector3(-0.15, 1.05, 0.3))
+	if at.call(0.05):
+		$Weather.hour = 13.0
+		car.get_node("GloveboxLid").set_angle_deg(-80.0, true)
+		car.get_node("ConsoleLid").set_angle_deg(-100.0, true)
+		car.get_node("Storage")._place_loose(body, RandomNumberGenerator.new(), [])
+		for k in ["a", "b"]:
+			var holder := Node3D.new()
+			add_child(holder)
+			var h := VRHandInteractor.new()
+			holder.add_child(h)
+			h.debug_points = [Vector3(0, -100, 0), Vector3(0, -100, 0)]
+			holder.global_position = Vector3(0, -100, 0)
+			_b2[k] = h
+	var ha: VRHandInteractor = _b2.get("a")
+	var hb: VRHandInteractor = _b2.get("b")
+	if ha == null:
+		return
+	if at.call(0.3):
+		ha.global_transform = body.global_transform
+		bag.grab(ha)
+	if bag.is_grabbed() and _t < 6.0:
+		ha.global_transform = Transform3D(car.global_basis, P)
+		bag._offset = Transform3D.IDENTITY
+		bag.grab_update(ha)
+	cam.fov = 40.0
+	cam.global_position = P + car.global_basis * Vector3(0.0, 0.22, -0.2)
+	cam.look_at(P)
+	if at.call(0.8):
+		bag.toggle()   # A/X de la main qui tient
+		_log("AUTOTEST main A tient la pochette, A/X -> ouverte=%s ; main B accepte : pochette=%s, pilules=%s ; main A accepte la pochette=%s" % [bag.open, bag.accepts_hand(hb), bag._taker.accepts_hand(hb), bag.accepts_hand(ha)])
+	if _t > 1.3 and _t < 3.4:
+		var side := -1.0 if _t < 2.3 else 1.0
+		var tip := body.global_transform * Vector3(side * 0.03, 0.012, -0.02)
+		hb.get_parent().global_position = tip
+		bag._taker.set_hand_distance(hb, bag._taker.get_distance_to(tip))
+	if at.call(2.1):
+		_shot("pochette2_vise_gauche")
+		_log("AUTOTEST main B à gauche : pilule visée x=%.3f, surlignés %d mesh(es)" % [bag._taker._target.position.x, bag._taker._meshes.size()])
+	if at.call(3.2):
+		_shot("pochette2_vise_droite")
+		_b2["tg"] = bag._taker._target
+		_log("AUTOTEST main B à droite : pilule visée x=%.3f, surlignés %d mesh(es)" % [bag._taker._target.position.x, bag._taker._meshes.size()])
+	if at.call(3.4):
+		var n0 := bag.pills_left()
+		bag._taker.grab(hb)
+		var tg: Node3D = _b2["tg"]
+		_log("AUTOTEST main B saisit -> pilules %d (avant %d), la visée est sortie=%s" % [bag.pills_left(), n0, not tg.visible])
+	if _t > 3.4 and _t < 4.5 and bag._taker.is_grabbed():
+		hb.get_parent().global_position = body.global_transform * Vector3(0.03, 0.012 + 0.1 * smoothstep(3.4, 4.2, _t), 0.0)
+		bag._taker.grab_update(hb)
+	if at.call(4.3):
+		_shot("pochette2_sortie")
+		bag._taker.release(hb)
 	if at.call(4.6):
 		get_tree().quit()
