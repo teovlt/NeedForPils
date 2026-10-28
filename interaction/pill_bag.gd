@@ -167,23 +167,8 @@ func _build() -> void:
 	model.add_child(_pills_root)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 4242
-	var cap := load(CAPSULE_MODEL) as PackedScene
-	var smi := load(SMILEY_MODEL) as PackedScene
-	for i in pill_count:
-		var is_cap := i % 5 < 3        # 12 gélules, 8 smileys
-		var p := (cap if is_cap else smi).instantiate() as Node3D
-		p.set_meta("kind", "capsule" if is_cap else "smiley")
-		var holder := Node3D.new()
-		holder.add_child(p)
-		if is_cap:
-			p.scale = Vector3.ONE * 1.5
-			p.position = Vector3(-0.0075, 0, 0)          # modèle de 1 cm, origine au bout
-		else:
-			p.scale = Vector3.ONE * 1.3
-		var layer := float(i / 9)
-		holder.position = Vector3(rng.randf_range(-0.038, 0.038), -0.0005 + layer * 0.0045 + rng.randf() * 0.0015,
-				rng.randf_range(-0.055, ZIP_Z - 0.024))   # laisse libre la bande du zip
-		holder.rotation = Vector3(rng.randf_range(-0.3, 0.3), rng.randf() * TAU, rng.randf_range(-0.3, 0.3))
+	for i in _content_count():
+		var holder := _make_content(i, rng)
 		_pills_root.add_child(holder)
 		_pill_nodes.append(holder)
 	# zone de saisie des pilules
@@ -198,6 +183,37 @@ func _build() -> void:
 	item.add_child(_zip_player)
 	refresh_meshes()
 	_apply_open(true)
+
+
+# --- Contenu (surchargé par WeedBag : têtes de weed) ------------------------------
+
+func _content_count() -> int:
+	return pill_count
+
+
+## Une pilule posée dans la pochette (support positionné, modèle dedans).
+func _make_content(i: int, rng: RandomNumberGenerator) -> Node3D:
+	var is_cap := i % 5 < 3        # 12 gélules, 8 smileys
+	var p := (load(CAPSULE_MODEL if is_cap else SMILEY_MODEL) as PackedScene).instantiate() as Node3D
+	p.set_meta("kind", "capsule" if is_cap else "smiley")
+	var holder := Node3D.new()
+	holder.add_child(p)
+	if is_cap:
+		p.scale = Vector3.ONE * 1.5
+		p.position = Vector3(-0.0075, 0, 0)          # modèle de 1 cm, origine au bout
+	else:
+		p.scale = Vector3.ONE * 1.3
+	var layer := float(i / 9)
+	holder.position = Vector3(rng.randf_range(-0.038, 0.038), -0.0005 + layer * 0.0045 + rng.randf() * 0.0015,
+			rng.randf_range(-0.055, ZIP_Z - 0.024))   # laisse libre la bande du zip
+	holder.rotation = Vector3(rng.randf_range(-0.3, 0.3), rng.randf() * TAU, rng.randf_range(-0.3, 0.3))
+	return holder
+
+
+## Scène de l'objet qu'on sort de la pochette pour ce contenu.
+func _content_scene(node: Node3D) -> String:
+	var kind: String = (node.get_child(0) as Node3D).get_meta("kind")
+	return CAPSULE_SCENE if kind == "capsule" else SMILEY_SCENE
 
 
 ## Hauteur du film du dessus (side = 1) ou du dessous (side = -1) en (x, z).
@@ -382,8 +398,7 @@ func take_pill_into(hand: Node3D) -> VRPickable:
 	if node == null:
 		return null
 	node.visible = false
-	var kind: String = (node.get_child(0) as Node3D).get_meta("kind")
-	var pill := (load(CAPSULE_SCENE if kind == "capsule" else SMILEY_SCENE) as PackedScene).instantiate() as RigidBody3D
+	var pill := (load(_content_scene(node)) as PackedScene).instantiate() as RigidBody3D
 	_taken += 1
 	pill.name = "%s_Pill%d" % [item.name, _taken]
 	var storage := _nearest_storage()

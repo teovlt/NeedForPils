@@ -1,0 +1,27 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://props/rolling/grinder.glb" id="1_model"]
+[ext_resource type="Script" path="res://interaction/rolling/grinder.gd" id="2_grab"]
+
+[sub_resource type="CylinderShape3D" id="Shape_item"]
+height = 0.046
+radius = 0.031
+
+[node name="Grinder" type="RigidBody3D"]
+collision_layer = 0
+collision_mask = 0
+mass = 0.09
+continuous_cd = true
+freeze = true
+freeze_mode = 1
+
+[node name="Model" parent="." instance=ExtResource("1_model")]
+
+[node name="Shape" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.023, 0)
+shape = SubResource("Shape_item")
+
+[node name="Grab" type="Node3D" parent="."]
+script = ExtResource("2_grab")
+item_name = "Grinder"
+rest_up_axis = 1

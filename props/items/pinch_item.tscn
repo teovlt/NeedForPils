@@ -1,0 +1,27 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://props/rolling/pinch.glb" id="1_model"]
+[ext_resource type="Script" path="res://interaction/rolling/roll_item.gd" id="2_grab"]
+
+[sub_resource type="BoxShape3D" id="Shape_item"]
+size = Vector3(0.018, 0.006, 0.018)
+
+[node name="Pinch" type="RigidBody3D"]
+collision_layer = 0
+collision_mask = 0
+mass = 0.002
+continuous_cd = true
+freeze = true
+freeze_mode = 1
+
+[node name="Model" parent="." instance=ExtResource("1_model")]
+
+[node name="Shape" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.003, 0)
+shape = SubResource("Shape_item")
+
+[node name="Grab" type="Node3D" parent="."]
+script = ExtResource("2_grab")
+item_name = "Pincée d'herbe"
+rest_up_axis = 1
+kind = "weed"

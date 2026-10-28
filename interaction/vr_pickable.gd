@@ -19,6 +19,9 @@ extends VRInteractable
 ## freine, accélère ou tourne). Multiplié par celui de la surface.
 @export_range(0.05, 1.5) var friction := 0.45
 
+## Objets qui acceptent qu'on leur lâche un autre objet dessus : try_receive(grab) -> bool.
+const RECEIVERS := "item_receivers"
+
 var item: RigidBody3D
 var hand_velocity := Vector3.ZERO
 
@@ -115,6 +118,11 @@ func _on_grab_end(hand: Node3D) -> void:
 		return
 	_active_hand = null
 	item.top_level = false
+	# lâché sur un objet qui le prend (tête dans le grinder, pincée / filtre sur une
+	# feuille à rouler...) : c'est lui qui s'en occupe
+	for r in get_tree().get_nodes_in_group(RECEIVERS):
+		if r != self and is_instance_valid(r) and r.call("try_receive", self):
+			return
 	var storage := _nearest_storage()
 	if storage:
 		storage.receive(item, hand_velocity)
@@ -144,6 +152,23 @@ func _take(hand: Node3D) -> void:
 	_lag_ready = false
 	_prev_ok = false
 	hand_velocity = Vector3.ZERO
+
+
+## L'objet tenu `old` est remplacé par `new` (feuille roulée -> joint) : les mains et
+## les zones qui transmettaient les mouvements à `old` les transmettent à `new`.
+static func replace_held(tree: SceneTree, old: VRInteractable, new: VRInteractable) -> void:
+	for n in tree.get_nodes_in_group(VRInteractable.GROUP):
+		var d = n.get("_held")
+		if d is Dictionary:
+			for k in d:
+				if d[k] == old:
+					d[k] = new
+	for grp in [VRHandInteractor.GROUP, MouseHand.GROUP]:
+		for h in tree.get_nodes_in_group(grp):
+			if h.get("held") == old:
+				h.set("held", new)
+			if h.get("tip_held") == old:
+				h.set("tip_held", new)
 
 
 ## Pose de la main qui tient l'objet : la main affichée en VR (elle bute sur la

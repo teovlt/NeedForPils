@@ -16,6 +16,11 @@
 [ext_resource type="PackedScene" path="res://props/items/phone_item.tscn" id="13_phone"]
 [ext_resource type="PackedScene" path="res://props/items/gps_item.tscn" id="14_gps"]
 [ext_resource type="PackedScene" path="res://props/items/thermos_item.tscn" id="15_thermos"]
+[ext_resource type="PackedScene" path="res://props/items/weed_bag_item.tscn" id="30_weedbag"]
+[ext_resource type="PackedScene" path="res://props/items/grinder_item.tscn" id="31_grinder"]
+[ext_resource type="PackedScene" path="res://props/items/papers_item.tscn" id="32_papers"]
+[ext_resource type="PackedScene" path="res://props/items/filter_box_item.tscn" id="33_filters"]
+[ext_resource type="PackedScene" path="res://props/items/tobacco_pouch_item.tscn" id="34_tobacco"]
 [ext_resource type="Script" path="res://interaction/vr_mirror.gd" id="16_mirror"]
 [ext_resource type="Script" path="res://interaction/vr_door_handle.gd" id="17_handle"]
 [ext_resource type="Script" path="res://cars/SUV4x4/instrument_cluster.gd" id="18_cluster"]
@@ -368,6 +373,16 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.01, -0.15)
 
 [node name="CigarettePack" parent="Storage/Glovebox" instance=ExtResource("11_cigpack")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.12, 0, 0)
+
+[node name="WeedBag" parent="Storage/Glovebox" instance=ExtResource("30_weedbag")]
+
+[node name="Grinder" parent="Storage/Console" instance=ExtResource("31_grinder")]
+
+[node name="RollingPapers" parent="Storage/Glovebox" instance=ExtResource("32_papers")]
+
+[node name="FilterBox" parent="Storage/Console" instance=ExtResource("33_filters")]
+
+[node name="TobaccoPouch" parent="Storage/Glovebox" instance=ExtResource("34_tobacco")]
 
 [node name="GPSMount" type="Node3D" parent="Storage"]
 transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0.12, 1.261, 0.782)
