@@ -6,10 +6,10 @@
 [ext_resource type="PackedScene" path="res://weather/weather_system.tscn" id="21_weather"]
 [ext_resource type="PackedScene" path="res://world/road/road_generator.tscn" id="22_road"]
 [ext_resource type="Script" uid="uid://dl8ukpveof3aw" path="res://world/hazards/falling_tree_manager.gd" id="23_trees"]
-[ext_resource type="Script" path="res://world/pills/pill_addiction.gd" id="24_addiction"]
-[ext_resource type="Script" path="res://world/pills/pill_spawner.gd" id="25_pills"]
-[ext_resource type="Script" path="res://world/chase/pursuer.gd" id="26_pursuer"]
-[ext_resource type="Script" path="res://world/chase/chase_director.gd" id="27_director"]
+[ext_resource type="Script" uid="uid://depdd16t7tr0y" path="res://world/pills/pill_addiction.gd" id="24_addiction"]
+[ext_resource type="Script" uid="uid://bgm2p4nmmedy2" path="res://world/pills/pill_spawner.gd" id="25_pills"]
+[ext_resource type="Script" uid="uid://cng836wpo4c6d" path="res://world/chase/pursuer.gd" id="26_pursuer"]
+[ext_resource type="Script" uid="uid://ctxqnuc1tseat" path="res://world/chase/chase_director.gd" id="27_director"]
 
 [node name="Main" type="Node3D" unique_id=1577214552]
 script = ExtResource("1_fsva1")
@@ -25,31 +25,33 @@ player_path = NodePath("../Player")
 
 [node name="RoadGenerator" parent="." unique_id=851092570 instance=ExtResource("22_road")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -320)
-straight_start = 410.0
-keep_behind = 320.0
 target_path = NodePath("../SUV4x4")
+keep_behind = 320.0
+straight_start = 410.0
 
 [node name="FallingTrees" type="Node" parent="." unique_id=278444276]
 script = ExtResource("23_trees")
 road_path = NodePath("../RoadGenerator")
 car_path = NodePath("../SUV4x4")
 
-[node name="PillAddiction" type="Node" parent="."]
+[node name="PillAddiction" type="Node" parent="." unique_id=932306882]
 script = ExtResource("24_addiction")
 car_path = NodePath("../SUV4x4")
 
-[node name="Pills" type="Node" parent="."]
+[node name="Pills" type="Node" parent="." unique_id=192404412]
 script = ExtResource("25_pills")
 road_path = NodePath("../RoadGenerator")
 car_path = NodePath("../SUV4x4")
 addiction_path = NodePath("../PillAddiction")
 
-[node name="Pursuer" type="Node3D" parent="."]
+[node name="Pursuer" type="Node3D" parent="." unique_id=1635590344]
 script = ExtResource("26_pursuer")
 road_path = NodePath("../RoadGenerator")
 car_path = NodePath("../SUV4x4")
+far_gap = null
+catch_up_bonus = null
 
-[node name="ChaseDirector" type="Node" parent="."]
+[node name="ChaseDirector" type="Node" parent="." unique_id=610801487]
 script = ExtResource("27_director")
 car_path = NodePath("../SUV4x4")
 pursuer_path = NodePath("../Pursuer")

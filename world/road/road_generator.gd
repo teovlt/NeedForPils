@@ -154,6 +154,8 @@ func _ready() -> void:
 	add_to_group("road_generator")
 	if random_seed != 0:
 		_rng.seed = random_seed
+	elif Net.world_seed("road") != 0:
+		_rng.seed = Net.world_seed("road")   # partie à deux : la même route chez les deux
 	else:
 		_rng.randomize()
 	_noise.seed = _rng.randi()
@@ -308,6 +310,23 @@ func sample_road(world_pos: Vector3) -> Dictionary:
 		"lateral": (local - rp[bi]).dot(right),
 		"s": rs[bi],
 	}
+
+
+## Tronçon (noeud) le plus proche d'un point du monde, ou null. Partie à deux : le
+## copilote y accroche ce que le conducteur a posé sur la route (arbres, barrages).
+func chunk_at(world_pos: Vector3) -> Node3D:
+	var best: Node3D = null
+	var best_d := INF
+	for ch in _chunks:
+		var node: Node3D = ch["node"]
+		var local := node.to_local(world_pos)
+		var rows: PackedVector3Array = ch["rows_p"]
+		for i in range(0, rows.size(), 8):
+			var d := rows[i].distance_squared_to(local)
+			if d < best_d:
+				best_d = d
+				best = node
+	return best
 
 
 ## Point de route situé `distance` m plus loin (le long de la route) que world_pos

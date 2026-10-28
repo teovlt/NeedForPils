@@ -508,8 +508,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if not event.is_pressed() or event.is_echo():
 		return
 	match (event as InputEventKey).keycode:
-		KEY_F2: _press("prev")
-		KEY_F3: _press("next")
-		KEY_F4: toggle_power()
-		KEY_F9: set_volume(volume - 0.1)
-		KEY_F10: set_volume(volume + 0.1)
+		KEY_F2: Net.perform(self, &"_press", ["prev"])
+		KEY_F3: Net.perform(self, &"_press", ["next"])
+		KEY_F4: Net.perform(self, &"toggle_power")
+		KEY_F9: Net.perform(self, &"set_volume", [volume - 0.1])
+		KEY_F10: Net.perform(self, &"set_volume", [volume + 0.1])

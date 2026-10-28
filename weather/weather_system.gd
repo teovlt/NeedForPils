@@ -117,7 +117,10 @@ var _rumble_lp := 0.0
 
 func _ready() -> void:
 	add_to_group(GROUP)
-	_rng.randomize()
+	if Net.world_seed("weather") != 0:
+		_rng.seed = Net.world_seed("weather")
+	else:
+		_rng.randomize()
 	_rain_fx.top_level = true
 	# Gouttes : shader qui les coupe dans le volume de la voiture (toit, capot).
 	_rain_mat = ShaderMaterial.new()

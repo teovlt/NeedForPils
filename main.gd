@@ -1,6 +1,14 @@
 extends StartXR
 ## Démarre la VR si un casque est disponible, sinon passe en mode bureau :
 ## clavier pour conduire (voir suv_4x4.gd) et souris pour regarder / attraper.
+## Partie à deux : ajoute la NetSession (synchronisation avec l'autre joueur).
+
+
+func _enter_tree() -> void:
+	# partie à deux : mêmes tirages au hasard chez les deux joueurs pendant le chargement
+	# (nombre de cigarettes, place des objets...), avant le _ready des enfants
+	if Net.world_seed("global") != 0:
+		seed(Net.world_seed("global"))
 
 func _ready():
 	var xr := XRServer.find_interface("OpenXR")
@@ -11,6 +19,10 @@ func _ready():
 			xr_interface.session_begun.connect(_on_openxr_session_begun)
 	else:
 		_start_desktop_mode()
+	if Net.is_online():
+		var session := NetSession.new()
+		session.name = "NetSession"
+		add_child(session)
 
 
 func _on_openxr_session_begun() -> void:

@@ -16,6 +16,10 @@ extends Node3D
 
 const GROUP := "vr_hands"
 
+## Saisie (0), lâcher (1) ou action A/X (2) sur un objet : la partie à deux (NetSession)
+## rejoue le geste chez l'autre joueur.
+signal interacted(kind: int, target: VRInteractable)
+
 @export var grip_action := "grip"
 @export var toggle_action := "ax_button"
 @export var grab_threshold := 0.6
@@ -336,6 +340,7 @@ func _physics_process(_delta: float) -> void:
 			var toggle_held := controller.is_button_pressed(toggle_action)
 			if toggle_held and not _toggle_down and held.has_method("toggle"):
 				held.toggle()
+				interacted.emit(2, held)
 				pulse(0.4, 0.05)
 			_toggle_down = toggle_held
 		return
@@ -375,6 +380,7 @@ func _physics_process(_delta: float) -> void:
 		var toggle_now := controller.is_button_pressed(toggle_action)
 		if toggle_now and not _toggle_down and best.has_method("toggle"):
 			best.toggle()
+			interacted.emit(2, best)
 			pulse(0.4, 0.05)
 		_toggle_down = toggle_now
 	else:
@@ -433,6 +439,7 @@ func _grab_now(it: VRInteractable) -> void:
 	held = it
 	_set_hover(null, -1.0)
 	held.grab(self)
+	interacted.emit(0, held)
 	if it.hand_snap != 0:
 		_snap_to(it)
 	pulse(0.5, 0.06)
@@ -455,6 +462,7 @@ func _release() -> void:
 	_unsnap()
 	if held and is_instance_valid(held):
 		held.release(self)
+		interacted.emit(1, held)
 	held = null
 
 

@@ -42,6 +42,7 @@ var _shape_tween: Tween
 var _taker: Taker
 var _zip_player: AudioStreamPlayer3D
 var _bag_built := false
+var _taken := 0   # pilules sorties (nom stable, le même chez les deux joueurs)
 
 
 ## Zone de saisie « les pilules dans la pochette » (active seulement pochette ouverte).
@@ -383,6 +384,8 @@ func take_pill_into(hand: Node3D) -> VRPickable:
 	node.visible = false
 	var kind: String = (node.get_child(0) as Node3D).get_meta("kind")
 	var pill := (load(CAPSULE_SCENE if kind == "capsule" else SMILEY_SCENE) as PackedScene).instantiate() as RigidBody3D
+	_taken += 1
+	pill.name = "%s_Pill%d" % [item.name, _taken]
 	var storage := _nearest_storage()
 	(storage if storage else item.get_parent()).add_child(pill)
 	pill.global_transform = node.global_transform

@@ -10,6 +10,10 @@ extends Node3D
 
 const GROUP := "mouse_hands"
 
+## Saisie (0), lâcher (1) ou action F (2) sur un objet : la partie à deux (NetSession)
+## rejoue le geste chez l'autre joueur.
+signal interacted(kind: int, target: VRInteractable)
+
 @export var camera: Camera3D
 ## Si défini, la caméra est replacée sur ce noeud à chaque image (ex. siège conducteur).
 @export var anchor: Node3D
@@ -169,12 +173,14 @@ func _grab_now() -> void:
 		hovered.set_hand_distance(self, -1.0)
 		hovered = null
 		held.grab(self)
+		interacted.emit(0, held)
 
 
 func _release() -> void:
 	_pending = null
 	if held and is_instance_valid(held):
 		held.release(self)
+		interacted.emit(1, held)
 	held = null
 
 
@@ -182,5 +188,7 @@ func _toggle() -> void:
 	# objet tenu d'abord (briquet, cigarette...), sinon celui qu'on vise
 	if held and is_instance_valid(held) and held.has_method("toggle"):
 		held.toggle()
+		interacted.emit(2, held)
 	elif hovered and hovered.has_method("toggle"):
 		hovered.toggle()
+		interacted.emit(2, hovered)

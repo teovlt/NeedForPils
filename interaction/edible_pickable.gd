@@ -15,9 +15,10 @@ signal eaten
 var _eaten := false
 
 
-## Position de la bouche du joueur (monde), ou null sans caméra.
-static func mouth_position(tree: SceneTree) -> Variant:
-	var cam := tree.root.get_viewport().get_camera_3d()
+## Position de la bouche du joueur (monde), ou null sans caméra. Partie à deux : celle
+## de l'autre joueur si c'est lui qui tient l'objet.
+static func mouth_position(tree: SceneTree, held: VRInteractable = null) -> Variant:
+	var cam: Node3D = Net.camera_for(held) if Net.is_online() else tree.root.get_viewport().get_camera_3d()
 	if cam == null:
 		return null
 	return cam.global_transform * MOUTH_OFFSET
@@ -27,7 +28,7 @@ func _on_grab_update(hand: Node3D) -> void:
 	super._on_grab_update(hand)
 	if _eaten or not is_inside_tree():
 		return
-	var mouth = mouth_position(get_tree())
+	var mouth = mouth_position(get_tree(), self)
 	if mouth != null and item.global_position.distance_to(mouth) < MOUTH_RADIUS:
 		eat()
 
@@ -56,6 +57,8 @@ func eat() -> void:
 
 ## Effet d'une pilule avalée (sert aussi à la pochette, F sans sortir la pilule).
 static func swallow(tree: SceneTree) -> void:
+	if Net.applying_remote:
+		return   # c'est l'autre joueur qui l'a avalée
 	var addiction := tree.get_first_node_in_group(GROUP_ADDICTION)
 	if addiction and addiction.has_method("take_pill"):
 		addiction.take_pill()

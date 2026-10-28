@@ -35,7 +35,10 @@ const LINE := Color(0.78, 0.76, 0.66)
 
 
 func build() -> void:
-	_rng.randomize()
+	if Net.world_seed("site") != 0:
+		_rng.seed = Net.world_seed("site")   # partie à deux : le même lieu chez les deux
+	else:
+		_rng.randomize()
 	_body = StaticBody3D.new()
 	_body.name = "SiteCollision"
 	add_child(_body)

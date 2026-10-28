@@ -11,6 +11,9 @@ enum State { SHAKING, FALLING, FALLEN }
 
 ## Hauteur totale de l'arbre (m) : décide jusqu'où il barre la route.
 var height := 6.0
+## Rotation du modèle autour de son tronc (NAN = au hasard). Partie à deux : la même
+## que chez le conducteur.
+var visual_yaw := NAN
 ## Durée du tremblement avant la chute (s).
 var shake_time := 1.3
 var tree_scene: PackedScene
@@ -66,7 +69,9 @@ func _ready() -> void:
 	_crown_y = BASE_HEIGHT * 0.7
 	sc = height / BASE_HEIGHT
 	_visual.scale = Vector3.ONE * sc
-	_visual.rotation.y = randf() * TAU
+	if is_nan(visual_yaw):
+		visual_yaw = randf() * TAU
+	_visual.rotation.y = visual_yaw
 	_pivot.add_child(_visual)
 
 	# Corps physique animé (tronc + couronne).

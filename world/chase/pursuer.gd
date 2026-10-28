@@ -116,6 +116,9 @@ var _shape: CollisionShape3D
 var _lights_on := true
 var _siren: AudioStreamPlayer3D
 var _lateral := 1.75
+## Partie à deux, chez le copilote : la police ne décide rien, elle recopie celle du
+## conducteur (position, sirène, gyrophares, barrage : voir NetSession).
+var net_puppet := false
 
 
 func _ready() -> void:
@@ -430,6 +433,12 @@ func _physics_process(delta: float) -> void:
 	if _road == null or _car == null:
 		return
 	_t += delta
+	if net_puppet:
+		var spin := _speed / 3.6 / WHEEL_RADIUS * delta
+		for w in _wheels:
+			w.rotate_object_local(Vector3.RIGHT, spin)
+		_flash()
+		return
 	var car_s := _car_s()
 	match state:
 		State.IDLE:
@@ -508,6 +517,57 @@ func _place(delta: float) -> void:
 	var spin := _speed / 3.6 / WHEEL_RADIUS * delta
 	for w in _wheels:
 		w.rotate_object_local(Vector3.RIGHT, spin)
+
+
+# --- Partie à deux -------------------------------------------------------------------
+
+## État visible à recopier chez le copilote : [visible, transformation, sirène, gyrophares, km/h].
+func net_state() -> Array:
+	return [_visual.visible, _visual.global_transform, _siren.playing, _lights_on, _speed]
+
+
+func net_apply(st: Array, xf: Transform3D) -> void:
+	_visual.visible = st[0]
+	if st[0]:
+		_visual.global_transform = xf
+	if st[2] != _siren.playing:
+		if st[2]:
+			_siren.play()
+		else:
+			_siren.stop()
+	if st[3] != _lights_on:
+		_set_lights(st[3])
+	_speed = st[4]
+
+
+## Barrage (2e voiture, plots) : [[« car » ou « cone », transformation], ...].
+func net_props() -> Array:
+	var out := []
+	for p in _props:
+		if is_instance_valid(p):
+			out.append(["car" if p.name.begins_with("Roadblock") else "cone", p.global_transform])
+	return out
+
+
+## Recrée le barrage du conducteur ; `place` donne pour une transformation le tronçon
+## qui la porte et la transformation convertie chez soi.
+func net_set_props(list: Array, place: Callable) -> void:
+	_clear_encounter()
+	for e in list:
+		var at: Array = place.call(e[1])
+		if at[0] == null:
+			continue
+		if e[0] != "car":
+			_props.append(_cone(at[0], (at[1] as Transform3D).origin))
+			continue
+		var n := Node3D.new()
+		n.name = "Roadblock2"
+		(at[0] as Node3D).add_child(n)
+		n.global_transform = at[1]
+		var parts := _make_car(n, false, true)
+		_prop_mats = parts["mats"]
+		_prop_lights = parts["lights"]
+		_props.append(n)
 
 
 ## Gyrophares bleus alternés (voiture de police et 2e voiture du barrage).

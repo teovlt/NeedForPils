@@ -1,0 +1,405 @@
+extends Node
+## Réseau (autoload « Net ») : partie à deux sur le réseau local.
+##
+## - JOUER À DEUX : on cherche une partie sur le réseau local (~1,5 s). Trouvée : on la
+##   rejoint (copilote). Sinon on en crée une (conducteur) et on attend l'autre joueur.
+##   Dès que les deux ont cliqué, le conducteur lance la partie chez les deux.
+## - Le conducteur fait tourner la partie (physique de la voiture, route, police...) ;
+##   le copilote reçoit la position de la voiture (voir NetSession).
+## - Les messages de jeu passent tous par ce noeud (même chemin chez les deux joueurs,
+##   même pendant le chargement de la scène) puis sont confiés à la NetSession.
+##
+## Tests sur une seule machine : lancer deux fois le jeu ; ou en ligne de commande,
+## `-- --host` (conducteur) et `-- --join=127.0.0.1` (copilote) lancent directement,
+## `-- --lan` fait comme le bouton JOUER À DEUX.
+
+signal status_changed(text: String)
+## Les deux joueurs sont connectés : la partie va démarrer.
+signal lobby_complete
+## La connexion a échoué ou l'autre joueur est parti (message à afficher).
+signal connection_lost(reason: String)
+
+enum Role { SOLO, DRIVER, COPILOT }
+enum State { IDLE, SEARCHING, HOSTING, JOINING, IN_LOBBY, IN_GAME }
+
+const GAME_PORT := 7777
+## Les copilotes écoutent ici les annonces des parties ; les parties écoutent ici les
+## recherches (deux ports : deux instances sur la même machine ne se gênent pas).
+const DISCOVERY_PORT := 7778
+const PROBE_PORT := 7779
+const PROTOCOL := "NFP1"
+const SEARCH_TIME := 1.5
+const GAME_SCENE := "res://main.tscn"
+const MENU_SCENE := "res://menu/main_menu.tscn"
+
+var role := Role.SOLO
+var state := State.IDLE
+## Graine commune du monde (route, rangements, météo...) ; 0 en solo.
+var game_seed := 0
+## Vrai pendant qu'on rejoue chez soi un geste de l'autre joueur (sa main a saisi,
+## lâché, actionné un objet) : les effets personnels (pilule avalée, bouffée...) ne
+## s'appliquent pas au joueur local.
+var applying_remote := false
+## Caméra (tête) de l'autre joueur pendant `applying_remote` : sert de bouche.
+var remote_camera: Node3D
+
+## NetSession de la partie en cours (créée par main.gd).
+var session: Node
+## Raison de la dernière déconnexion (affichée par le menu à son retour).
+var last_message := ""
+
+var _udp: PacketPeerUDP          # écoute (annonces ou recherches)
+var _udp_send: PacketPeerUDP
+var _timer := 0.0
+var _announce_timer := 0.0
+var _token := 0
+
+
+func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	multiplayer.peer_connected.connect(_on_peer_connected)
+	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
+	multiplayer.connected_to_server.connect(_on_connected_to_server)
+	multiplayer.connection_failed.connect(_on_connection_failed)
+	multiplayer.server_disconnected.connect(_on_server_disconnected)
+	_check_command_line.call_deferred()
+
+
+# --- État ------------------------------------------------------------------------
+
+func is_online() -> bool:
+	return role != Role.SOLO and multiplayer.multiplayer_peer != null \
+		and not multiplayer.multiplayer_peer is OfflineMultiplayerPeer
+
+
+func is_driver() -> bool:
+	return role != Role.COPILOT
+
+
+func is_copilot() -> bool:
+	return role == Role.COPILOT
+
+
+## Graine dérivée de la graine commune (0 en solo : chaque système tire au hasard).
+func world_seed(salt: String) -> int:
+	if game_seed == 0:
+		return 0
+	var s := hash(str(game_seed) + ":" + salt)
+	return s if s != 0 else 1
+
+
+## L'objet est-il tenu par une main de l'autre joueur ?
+func held_by_remote(it: VRInteractable) -> bool:
+	for h in it._grab_hands:
+		if is_instance_valid(h) and h.is_in_group(NetRemoteHand.GROUP):
+			return true
+	return false
+
+
+## Tête du joueur qui tient l'objet : l'autre joueur (s'il le tient) ou le joueur local.
+func camera_for(it: VRInteractable) -> Node3D:
+	if applying_remote and remote_camera:
+		return remote_camera
+	if it:
+		for h in it._grab_hands:
+			if is_instance_valid(h) and h.is_in_group(NetRemoteHand.GROUP):
+				return h.get("camera")
+	return get_viewport().get_camera_3d()
+
+
+## Action clavier (raccourci) : faite chez soi et rejouée chez l'autre joueur.
+func perform(node: Node, method: StringName, args: Array = []) -> void:
+	node.callv(method, args)
+	if is_online() and session and is_instance_valid(session) and not applying_remote:
+		rx_call.rpc(String(session.get_parent().get_path_to(node)), String(method), args)
+
+
+# --- Lobby -----------------------------------------------------------------------
+
+## JOUER À DEUX : cherche une partie sur le réseau local, sinon en crée une.
+func find_or_host() -> void:
+	cancel()
+	_token = randi() % 1000000000 + 1
+	_udp = PacketPeerUDP.new()
+	if _udp.bind(DISCOVERY_PORT) != OK:
+		# port déjà pris (une autre recherche sur cette machine) : on crée la partie
+		_udp = null
+		_start_host()
+		return
+	_udp.set_broadcast_enabled(true)
+	state = State.SEARCHING
+	_timer = SEARCH_TIME + randf() * 0.5   # deux clics simultanés : l'un finit avant
+	_announce_timer = 0.0
+	_status("Recherche d'une partie sur le réseau...")
+
+
+func cancel() -> void:
+	_close_udp()
+	if multiplayer.multiplayer_peer and not multiplayer.multiplayer_peer is OfflineMultiplayerPeer:
+		multiplayer.multiplayer_peer.close()
+	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
+	role = Role.SOLO
+	state = State.IDLE
+	game_seed = 0
+
+
+func _start_host() -> void:
+	_close_udp()
+	var peer := ENetMultiplayerPeer.new()
+	if peer.create_server(GAME_PORT, 1) != OK:
+		# une partie existe déjà sur cette machine : on la rejoint
+		_start_join("127.0.0.1")
+		return
+	multiplayer.multiplayer_peer = peer
+	role = Role.DRIVER
+	state = State.HOSTING
+	_udp = PacketPeerUDP.new()
+	if _udp.bind(PROBE_PORT) != OK:
+		_udp = null
+	_udp_send = PacketPeerUDP.new()
+	_udp_send.set_broadcast_enabled(true)
+	_announce_timer = 0.0
+	_status("En attente de l'autre joueur...\n(il doit cliquer sur JOUER À DEUX)")
+
+
+func _start_join(ip: String) -> void:
+	_close_udp()
+	var peer := ENetMultiplayerPeer.new()
+	if peer.create_client(ip, GAME_PORT) != OK:
+		_fail("Impossible de rejoindre %s" % ip)
+		return
+	multiplayer.multiplayer_peer = peer
+	role = Role.COPILOT
+	state = State.JOINING
+	_status("Partie trouvée (%s), connexion..." % ip)
+
+
+func _process(delta: float) -> void:
+	match state:
+		State.SEARCHING:
+			_search(delta)
+		State.HOSTING:
+			_announce(delta)
+
+
+func _search(delta: float) -> void:
+	_timer -= delta
+	_announce_timer -= delta
+	if _announce_timer <= 0.0:
+		_announce_timer = 0.3
+		# demande aux parties de se signaler (réponse directe : marche même si
+		# l'appareil filtre les annonces en diffusion)
+		var probe := ("%s|LOOK|%d" % [PROTOCOL, _token]).to_utf8_buffer()
+		for ip in ["255.255.255.255", "127.0.0.1"]:
+			_udp.set_dest_address(ip, PROBE_PORT)
+			_udp.put_packet(probe)
+	while _udp and _udp.get_available_packet_count() > 0:
+		var msg := _udp.get_packet().get_string_from_utf8().split("|")
+		var ip := _udp.get_packet_ip()
+		if msg.size() >= 3 and msg[0] == PROTOCOL and msg[1] == "HOST" and int(msg[2]) != _token:
+			_start_join(ip)
+			return
+	if _timer <= 0.0:
+		_start_host()
+
+
+func _announce(delta: float) -> void:
+	_announce_timer -= delta
+	if _announce_timer <= 0.0:
+		_announce_timer = 0.5
+		var pkt := ("%s|HOST|%d" % [PROTOCOL, _token]).to_utf8_buffer()
+		for ip in ["255.255.255.255", "127.0.0.1"]:
+			for port in [DISCOVERY_PORT, PROBE_PORT]:
+				_udp_send.set_dest_address(ip, port)
+				_udp_send.put_packet(pkt)
+	while _udp and _udp.get_available_packet_count() > 0:
+		var msg := _udp.get_packet().get_string_from_utf8().split("|")
+		var ip := _udp.get_packet_ip()
+		var port := _udp.get_packet_port()
+		if msg.size() < 3 or msg[0] != PROTOCOL or int(msg[2]) == _token:
+			continue
+		if msg[1] == "LOOK":
+			_udp.set_dest_address(ip, port)
+			_udp.put_packet(("%s|HOST|%d" % [PROTOCOL, _token]).to_utf8_buffer())
+		elif msg[1] == "HOST" and int(msg[2]) < _token:
+			# deux parties créées en même temps : la plus « petite » garde la sienne
+			multiplayer.multiplayer_peer.close()
+			_start_join(ip)
+			return
+
+
+func _close_udp() -> void:
+	if _udp:
+		_udp.close()
+	_udp = null
+	if _udp_send:
+		_udp_send.close()
+	_udp_send = null
+
+
+func _status(text: String) -> void:
+	print("Réseau : ", text.replace("\n", " "))
+	status_changed.emit(text)
+
+
+func _fail(reason: String) -> void:
+	var was_in_game := state == State.IN_GAME
+	cancel()
+	_status(reason)
+	last_message = reason
+	connection_lost.emit(reason)
+	if was_in_game:
+		get_tree().change_scene_to_file(MENU_SCENE)
+
+
+func _on_peer_connected(id: int) -> void:
+	if not multiplayer.is_server():
+		return
+	if state != State.HOSTING:
+		# déjà deux joueurs : on refuse le troisième
+		(multiplayer.multiplayer_peer as ENetMultiplayerPeer).disconnect_peer(id)
+		return
+	_close_udp()
+	state = State.IN_LOBBY
+	_status("Joueur trouvé ! Tu conduis.")
+	lobby_complete.emit()
+	game_seed = randi() % 2000000000 + 1
+	get_tree().create_timer(1.0).timeout.connect(func():
+		if state == State.IN_LOBBY:
+			_rpc_start_game.rpc(game_seed))
+
+
+func _on_connected_to_server() -> void:
+	state = State.IN_LOBBY
+	_status("Connecté ! Tu es copilote.")
+	lobby_complete.emit()
+
+
+func _on_connection_failed() -> void:
+	_fail("Connexion impossible.")
+
+
+func _on_peer_disconnected(_id: int) -> void:
+	if multiplayer.is_server() and state == State.IN_GAME:
+		# le conducteur continue seul
+		print("Réseau : le copilote est parti")
+		role = Role.SOLO
+		if session:
+			session.call("on_remote_left")
+		return
+	if state != State.IDLE:
+		_fail("L'autre joueur est parti.")
+
+
+func _on_server_disconnected() -> void:
+	_fail("Le conducteur a quitté la partie.")
+
+
+func _check_command_line() -> void:
+	for arg in OS.get_cmdline_user_args():
+		if arg == "--host":
+			_token = 1
+			_start_host()
+		elif arg == "--lan":
+			find_or_host()   # comme le bouton JOUER À DEUX
+		elif arg.begins_with("--join="):
+			_start_join(arg.trim_prefix("--join="))
+
+
+# --- Démarrage de la partie --------------------------------------------------------
+
+@rpc("authority", "call_local", "reliable")
+func _rpc_start_game(seed_value: int) -> void:
+	game_seed = seed_value
+	state = State.IN_GAME
+	get_tree().change_scene_to_file(GAME_SCENE)
+
+
+## Le conducteur relance la partie (rejouer) : le copilote recharge aussi.
+func restart_game() -> void:
+	if is_online() and multiplayer.is_server():
+		_rpc_start_game.rpc(game_seed)
+	else:
+		get_tree().reload_current_scene()
+
+
+## Le copilote demande à rejouer (fin de partie) : c'est le conducteur qui relance.
+func request_restart() -> void:
+	if is_online() and not multiplayer.is_server():
+		rx_restart_request.rpc_id(1)
+
+
+## Retour au menu : on quitte la partie à deux.
+func leave_to_menu() -> void:
+	cancel()
+	get_tree().change_scene_to_file(MENU_SCENE)
+
+
+# --- Messages de jeu (relayés à la NetSession) ---------------------------------------
+
+func _to_session(method: StringName, args: Array) -> void:
+	if session and is_instance_valid(session) and session.is_inside_tree():
+		session.callv(method, args)
+
+
+@rpc("authority", "unreliable_ordered", "call_remote", 1)
+func rx_car(data: Array) -> void:
+	_to_session(&"on_car", [data])
+
+
+@rpc("authority", "reliable", "call_remote", 2)
+func rx_world(data: Dictionary) -> void:
+	_to_session(&"on_world", [data])
+
+
+@rpc("any_peer", "unreliable_ordered", "call_remote", 3)
+func rx_pose(data: Array) -> void:
+	_to_session(&"on_pose", [data])
+
+
+@rpc("any_peer", "reliable", "call_remote", 2)
+func rx_hand(hand: int, kind: int, path: String, local_xf: Transform3D) -> void:
+	_to_session(&"on_hand", [hand, kind, path, local_xf])
+
+
+@rpc("any_peer", "reliable", "call_remote", 2)
+func rx_call(path: String, method: String, args: Array) -> void:
+	_to_session(&"on_call", [path, method, args])
+
+
+@rpc("any_peer", "reliable", "call_remote", 2)
+func rx_item(item_name: String, parent_path: String, local_xf: Transform3D) -> void:
+	_to_session(&"on_item", [item_name, parent_path, local_xf])
+
+
+@rpc("authority", "reliable", "call_remote", 2)
+func rx_tree(params: Dictionary) -> void:
+	_to_session(&"on_tree", [params])
+
+
+@rpc("authority", "reliable", "call_remote", 2)
+func rx_props(list: Array) -> void:
+	_to_session(&"on_props", [list])
+
+
+@rpc("authority", "reliable", "call_remote", 2)
+func rx_text(t: Array) -> void:
+	_to_session(&"on_text", [t])
+
+
+@rpc("authority", "unreliable_ordered", "call_remote", 4)
+func rx_animals(list: Array) -> void:
+	_to_session(&"on_animals", [list])
+
+
+@rpc("any_peer", "unreliable_ordered", "call_remote", 5)
+func rx_controls(steer: float, rear_brake: bool) -> void:
+	_to_session(&"on_controls", [steer, rear_brake])
+
+
+@rpc("any_peer", "reliable", "call_remote", 2)
+func rx_restart_request() -> void:
+	if multiplayer.is_server() and session and is_instance_valid(session):
+		var director := session.get_parent().get_node_or_null("ChaseDirector")
+		if director and director.get("game_over"):
+			restart_game()

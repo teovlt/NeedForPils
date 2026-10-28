@@ -66,6 +66,8 @@ func randomize_items() -> void:
 	var rng := RandomNumberGenerator.new()
 	if random_seed != 0:
 		rng.seed = random_seed
+	elif Net.world_seed("storage") != 0:
+		rng.seed = Net.world_seed("storage")   # partie à deux : mêmes rangements chez les deux
 	else:
 		rng.randomize()
 	var items: Array[RigidBody3D] = []

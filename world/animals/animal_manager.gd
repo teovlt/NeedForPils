@@ -83,6 +83,9 @@ var _ambient_t := 0.0
 var _last_pos := Vector3.ZERO
 var _impact: AudioStreamPlayer3D
 var _cross_groups: Array = []    # [{animals, done}]
+## Partie à deux, chez le copilote : pas d'animaux à soi, ceux du conducteur recopiés.
+var net_puppet := false
+var _net_animals := {}           # identifiant chez le conducteur -> animal
 
 
 func _ready() -> void:
@@ -98,6 +101,7 @@ func _on_origin_shifted(off: Vector3) -> void:
 		if is_instance_valid(a):
 			a.global_position -= off
 			a.target -= off
+			a.net_pos -= off
 
 
 func sound(path: String) -> AudioStream:
@@ -108,6 +112,9 @@ func sound(path: String) -> AudioStream:
 
 func _physics_process(delta: float) -> void:
 	if road == null or car == null:
+		return
+	if net_puppet:
+		animals = animals.filter(func(a): return is_instance_valid(a))
 		return
 	var pos := car.global_position
 	if _last_pos != Vector3.ZERO:
@@ -214,6 +221,48 @@ func _make(sp: String, p: Vector3, young := false) -> Node3D:
 	a.connect("hit_car", _on_animal_hit)
 	animals.append(a)
 	return a
+
+
+# --- Partie à deux ------------------------------------------------------------
+
+## État des animaux à recopier chez le copilote :
+## [id, espèce, échelle, position, cap, vitesse, état, broute, rotation du modèle].
+func net_state() -> Array:
+	var out := []
+	for a in animals:
+		if is_instance_valid(a):
+			out.append([a.get_instance_id(), a.species, a.size_scale, a.global_position, a.heading,
+				a.speed, a.state, a.get("_graze"), (a.get("_model") as Node3D).rotation])
+	return out
+
+
+## Recopie les animaux du conducteur ; `to_local_pos` convertit ses positions chez soi.
+func net_sync(list: Array, to_local_pos: Callable) -> void:
+	var seen := {}
+	for e in list:
+		var id: int = e[0]
+		seen[id] = true
+		var pos: Vector3 = to_local_pos.call(e[3])
+		var a = _net_animals.get(id)
+		if a == null or not is_instance_valid(a):
+			if not SPECIES.has(e[1]):
+				continue
+			a = ANIMAL.new()
+			a.call("setup", e[1], SPECIES[e[1]], car, self, e[2])
+			a.name = String(e[1]).capitalize()
+			a.position = pos
+			a.net_puppet = true
+			add_child(a)
+			a.rotation.y = e[4]
+			animals.append(a)
+			_net_animals[id] = a
+		a.net_update(pos, e[4], e[5], e[6], e[7], e[8])
+	for id in _net_animals.keys():
+		if not seen.has(id):
+			var a = _net_animals[id]
+			if is_instance_valid(a):
+				a.queue_free()
+			_net_animals.erase(id)
 
 
 func _on_animal_hit(a: Node3D, strength: float) -> void:

@@ -60,6 +60,9 @@ var _drone_fwd := Vector3.ZERO
 var _origin: Node3D
 var _trees: FallingTreeManager
 var _rivals: Rivals
+## Partie à deux, chez le copilote : rien ne se décide ici, on affiche les textes du
+## conducteur (et Espace / A demande au conducteur de rejouer à la fin).
+var net_puppet := false
 
 
 func _ready() -> void:
@@ -96,6 +99,10 @@ func _ready() -> void:
 func _run_intro() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame   # le joueur est installé au volant, la caméra existe
+	if net_puppet:
+		if _car and not _car.is_engine_running():
+			_play_start_voice()
+		return
 	if not play_intro:
 		_set_paused(true)
 		await _wait_engine_start()
@@ -298,21 +305,47 @@ func _process(delta: float) -> void:
 		_sub.modulate.a = _text_alpha
 		_sub.outline_modulate.a = _text_alpha
 	var pressed := _skip_pressed()
+	if net_puppet:
+		if pressed and not _skip_down and game_over:
+			Net.request_restart()
+		_skip_down = pressed
+		return
 	if pressed and not _skip_down:
 		if game_over:
-			get_tree().reload_current_scene()
+			Net.restart_game()   # partie à deux : le copilote recharge aussi
 			return
 		_skip = true
 	_skip_down = pressed
 	if game_over:
 		_end_time += delta
 		if _end_time > 20.0:
-			get_tree().change_scene_to_file(menu_scene)
+			if Net.is_online():
+				Net.leave_to_menu()
+			else:
+				get_tree().change_scene_to_file(menu_scene)
 		return
 	if _pursuer and _addiction:
 		var close := clampf((70.0 - _pursuer.gap) / 60.0, 0.0, 1.0) if _pursuer.state == Pursuer.State.CHASE else 0.0
 		_addiction.chase = close
 	_hints()
+
+
+# --- Partie à deux ------------------------------------------------------------------
+
+## Texte affiché chez le conducteur : [titre, sous-titre, visible, fin de partie, rideau].
+func net_text() -> Array:
+	return [_title.text if _title else "", _sub.text if _sub else "", _text_target,
+		game_over, _addiction.curtain if _addiction else 0.0]
+
+
+func net_apply_text(t: Array) -> void:
+	_ensure_labels()
+	if _title and (_title.text != t[0] or _sub.text != t[1]):
+		_show(t[0], t[1])
+	_text_target = t[2]
+	game_over = t[3]
+	if _addiction:
+		_addiction.curtain = t[4]
 
 
 ## Conseils affichés une seule fois, au bon moment.
@@ -337,6 +370,8 @@ func _hint_once(key: String, title: String, sub: String) -> void:
 
 
 func _on_pill_taken(count: int) -> void:
+	if net_puppet:
+		return   # c'est le conducteur qui décide
 	if count == 1 and not game_over:
 		_hint_done["premiere"] = true
 		_say("BOOST !", "Mais tu leur ressembles un peu plus...", 3.0)
@@ -390,12 +425,16 @@ func _on_rivals_killed() -> void:
 # --- Fins ---------------------------------------------------------------------------------
 
 func _on_caught() -> void:
+	if net_puppet:
+		return   # c'est le conducteur qui décide
 	if _rivals:
 		_rivals.stop()
 	_end("ILS T'ONT RATTRAPÉ.", "La police t'a eu.")
 
 
 func _on_assimilated() -> void:
+	if net_puppet:
+		return   # c'est le conducteur qui décide
 	if _pursuer:
 		_pursuer.stop()
 	_end("PERDU DANS LA PILS.", "Tu souris. Tu ne sais plus pourquoi tu roulais.")

@@ -94,19 +94,55 @@ text = "Visez avec la manette et appuyez sur la gâchette"
 horizontal_alignment = 1
 
 [node name="Spacer" type="Control" parent="Panel/Margin/VBox"]
-custom_minimum_size = Vector2(0, 20)
+custom_minimum_size = Vector2(0, 0)
 layout_mode = 2
 
-[node name="PlayButton" type="Button" parent="Panel/Margin/VBox"]
+[node name="MainButtons" type="VBoxContainer" parent="Panel/Margin/VBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 150)
+layout_mode = 2
+theme_override_constants/separation = 30
+
+[node name="PlayButton" type="Button" parent="Panel/Margin/VBox/MainButtons"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 130)
 layout_mode = 2
 focus_mode = 0
-text = "JOUER"
+text = "JOUER À DEUX"
 
-[node name="QuitButton" type="Button" parent="Panel/Margin/VBox"]
+[node name="SoloButton" type="Button" parent="Panel/Margin/VBox/MainButtons"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 150)
+custom_minimum_size = Vector2(0, 130)
+layout_mode = 2
+focus_mode = 0
+text = "JOUER SEUL"
+
+[node name="QuitButton" type="Button" parent="Panel/Margin/VBox/MainButtons"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 130)
 layout_mode = 2
 focus_mode = 0
 text = "QUITTER"
+
+[node name="Waiting" type="VBoxContainer" parent="Panel/Margin/VBox"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 40
+
+[node name="StatusLabel" type="Label" parent="Panel/Margin/VBox/Waiting"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 250)
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 56
+text = "En attente de l'autre joueur..."
+horizontal_alignment = 1
+vertical_alignment = 1
+autowrap_mode = 3
+
+[node name="CancelButton" type="Button" parent="Panel/Margin/VBox/Waiting"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 130)
+layout_mode = 2
+focus_mode = 0
+text = "ANNULER"

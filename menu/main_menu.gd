@@ -3,6 +3,8 @@ extends StartXR
 # Menu d'accueil : un panneau 3D flottant au milieu d'une forêt.
 # - Avec casque : on clique avec le laser des manettes (gâchette).
 # - Sans casque : caméra classique, on clique à la souris.
+# - JOUER À DEUX : attend l'autre joueur sur le réseau local (voir network/net.gd) ;
+#   le premier arrivé conduit, le second est copilote. JOUER SEUL : partie solo.
 
 ## Scène lancée par JOUER avec le casque
 @export_file("*.tscn") var game_scene: String = "res://main.tscn"
@@ -37,6 +39,7 @@ var _panel_base_y: float
 var _time: float = 0.0
 var _height_calibrated := false
 var _leaving := false
+var _ui: Node
 
 
 func _ready():
@@ -60,8 +63,17 @@ func _ready():
 	_panel_base_y = menu_panel.position.y
 
 	var ui = menu_panel.get_scene_instance()
+	_ui = ui
 	ui.play_pressed.connect(_on_play_pressed)
+	ui.solo_pressed.connect(_on_solo_pressed)
 	ui.quit_pressed.connect(_on_quit_pressed)
+	ui.cancel_pressed.connect(_on_cancel_pressed)
+	Net.status_changed.connect(_on_net_status)
+	Net.connection_lost.connect(_on_net_lost)
+	# de retour d'une partie à deux interrompue : on dit pourquoi
+	if Net.last_message != "":
+		ui.show_main(Net.last_message)
+		Net.last_message = ""
 
 	_start_audio()
 
@@ -160,8 +172,31 @@ func _fade_out_then(action: Callable) -> void:
 
 
 func _on_play_pressed() -> void:
+	if _leaving:
+		return
+	_ui.show_waiting("Recherche d'une partie sur le réseau...")
+	Net.find_or_host()
+
+
+func _on_solo_pressed() -> void:
+	Net.cancel()
 	var scene := game_scene if vr_enabled else desktop_game_scene
 	_fade_out_then(func(): get_tree().change_scene_to_file(scene))
+
+
+func _on_cancel_pressed() -> void:
+	Net.cancel()
+	_ui.show_main()
+
+
+func _on_net_status(text: String) -> void:
+	if Net.state != Net.State.IDLE:
+		_ui.show_waiting(text)
+
+
+func _on_net_lost(reason: String) -> void:
+	Net.last_message = ""
+	_ui.show_main(reason)
 
 
 func _on_quit_pressed() -> void:

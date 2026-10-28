@@ -14,6 +14,10 @@ extends VehicleBody3D
 ##      F2 / F3 radio station - / +, F4 radio marche / arrêt, F9 / F10 volume.
 
 enum Gear { R, N, D, G2, G1 }
+
+const GROUP := "suv4x4"
+## Siège du copilote (partie à deux) : symétrique du siège conducteur.
+const PASSENGER_SEAT_POS := Vector3(-0.45, 1.45, -0.05)
 const GEAR_LABELS := ["R", "N", "D", "2", "1"]
 const WIPER_MODES := ["OFF", "INT", "LENT", "RAPIDE"]
 enum LightMode { OFF, AUTO, LOW, HIGH, HIGH_BAR }
@@ -97,6 +101,13 @@ const LIGHT_MODES := ["OFF", "AUTO", "CODES", "PHARES", "PHARES + BARRE"]
 @export var external_input := false
 ## Direction (-1 à 1, + = gauche) quand external_input est vrai.
 var external_steer := 0.0
+## Partie à deux, chez le copilote : la voiture ne simule rien, elle recopie celle du
+## conducteur (position, vitesse, régime... posés par NetSession).
+var net_puppet := false
+## Partie à deux, chez le conducteur : direction et frein arrière au clavier du copilote
+## (il peut tout faire sauf accélérer et freiner).
+var remote_steer := 0.0
+var remote_rear_brake := false
 
 ## Ceintures des places autres que le conducteur (repère de la voiture). Passager : symétrique
 ## du conducteur (boucle contre la console) ; arrière gauche / droite : 3 points, renvoi
@@ -244,6 +255,7 @@ var debug_max_suspension_speed := 0.0
 
 
 func _ready() -> void:
+	add_to_group(GROUP)
 	_attach_parts()
 	_setup_windows()
 	_make_glass_clearer()
@@ -531,7 +543,7 @@ func _seat_player() -> void:
 			if "enabled" in n:
 				n.enabled = false
 			n.process_mode = Node.PROCESS_MODE_DISABLED
-	origin.reparent(driver_seat, false)
+	origin.reparent(_player_seat(), false)
 	origin.transform = Transform3D.IDENTITY
 	_xr_origin = origin
 	_xr_camera = origin.find_child("XRCamera3D", false, false) as XRCamera3D
@@ -547,6 +559,19 @@ func _ensure_fatigue() -> void:
 	get_parent().add_child(f)
 	f.car_path = f.get_path_to(self)
 	f._car = self
+
+
+## Siège du joueur local : conducteur, ou passager pour le copilote d'une partie à deux.
+func _player_seat() -> Node3D:
+	if not Net.is_copilot():
+		return driver_seat
+	var seat := get_node_or_null("PassengerSeat") as Node3D
+	if seat == null:
+		seat = Marker3D.new()
+		seat.name = "PassengerSeat"
+		seat.transform = Transform3D(driver_seat.transform.basis, PASSENGER_SEAT_POS)
+		add_child(seat)
+	return seat
 
 
 ## Place la tête du joueur (réelle) sur le siège conducteur (virtuel).
@@ -587,13 +612,18 @@ func _calibrate_seated() -> bool:
 
 
 func _physics_process(delta: float) -> void:
-	forward_speed = linear_velocity.dot(global_basis.z)
-	if not external_input:
-		_read_inputs(delta)
-	_update_steering()
-	_update_gearbox(delta)
-	_update_drive()
-	_apply_aero_drag()
+	if net_puppet:
+		# copilote : vitesse, régime et direction viennent du conducteur
+		_read_recenter()
+		_update_steering()
+	else:
+		forward_speed = linear_velocity.dot(global_basis.z)
+		if not external_input:
+			_read_inputs(delta)
+		_update_steering()
+		_update_gearbox(delta)
+		_update_drive()
+		_apply_aero_drag()
 	_update_wipers(delta)
 	_update_dome_lights(delta)
 	_update_weather_effects(delta)
@@ -603,7 +633,7 @@ func _physics_process(delta: float) -> void:
 
 func _update_steering() -> void:
 	if not steering_wheel.is_grabbed():
-		steering_wheel.set_steer_input(external_steer if external_input else _kb_steer)
+		steering_wheel.set_steer_input(external_steer if external_input or net_puppet else _kb_steer)
 	var speed_ratio := clampf(absf(forward_speed) * 3.6 / steer_ref_speed_kmh, 0.0, 1.0)
 	var steer_limit := deg_to_rad(max_steer_angle_deg) * (1.0 - high_speed_steer_reduction * speed_ratio)
 	var target := steering_wheel.get_steer() * steer_limit + drug_steer_offset
@@ -952,17 +982,13 @@ func _update_gear_labels() -> void:
 func _read_inputs(delta: float) -> void:
 	throttle_input = 0.0
 	brake_input = 0.0
-	var recenter := false
 	for h in get_tree().get_nodes_in_group(VRHandInteractor.GROUP):
 		var hand := h as VRHandInteractor
 		if hand.is_left():
 			brake_input = maxf(brake_input, hand.get_trigger())
 		else:
 			throttle_input = maxf(throttle_input, hand.get_trigger())
-		recenter = recenter or hand.is_button_pressed(&"by_button")
-	if recenter and not _recenter_down:
-		recenter_view()
-	_recenter_down = recenter
+	_read_recenter()
 
 	var kb_target := 0.0
 	_kb_rear_brake = false
@@ -971,21 +997,37 @@ func _read_inputs(delta: float) -> void:
 			throttle_input = 1.0
 		if Input.is_key_pressed(KEY_DOWN) or Input.is_key_pressed(KEY_S):
 			brake_input = 1.0
-		if Input.is_key_pressed(KEY_LEFT) or Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_Q):
-			kb_target += 1.0
-		if Input.is_key_pressed(KEY_RIGHT) or Input.is_key_pressed(KEY_D):
-			kb_target -= 1.0
+		kb_target = keyboard_steer_target()
 		_kb_rear_brake = Input.is_key_pressed(KEY_SPACE)
+	kb_target = clampf(kb_target + remote_steer, -1.0, 1.0)
+	_kb_rear_brake = _kb_rear_brake or remote_rear_brake
 	_kb_steer = move_toward(_kb_steer, kb_target, keyboard_steer_speed * delta)
+
+
+## Direction demandée au clavier (Q/A/← à gauche = +1, D/→ à droite = -1).
+func keyboard_steer_target() -> float:
+	var t := 0.0
+	if Input.is_key_pressed(KEY_LEFT) or Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_Q):
+		t += 1.0
+	if Input.is_key_pressed(KEY_RIGHT) or Input.is_key_pressed(KEY_D):
+		t -= 1.0
+	return t
+
+
+## B / Y : recentrer la vue sur le siège.
+func _read_recenter() -> void:
+	var recenter := false
+	for h in get_tree().get_nodes_in_group(VRHandInteractor.GROUP):
+		recenter = recenter or (h as VRHandInteractor).is_button_pressed(&"by_button")
+	if recenter and not _recenter_down:
+		recenter_view()
+	_recenter_down = recenter
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	# J : klaxon tant que la touche est enfoncée
 	if keyboard_controls and horn and (event as InputEventKey).keycode == KEY_J and not event.is_echo():
-		if event.is_pressed():
-			horn.press("clavier")
-		else:
-			horn.unpress("clavier")
+		Net.perform(horn, &"press" if event.is_pressed() else &"unpress", ["clavier"])
 		return
 	if not keyboard_controls or not event.is_pressed() or event.is_echo():
 		return
@@ -998,7 +1040,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		KEY_4: target = $Doors/DoorRR
 	match (event as InputEventKey).keycode:
 		KEY_B: target = seatbelt
-		KEY_M: _key_shortcut()
+		KEY_M: Net.perform(self, &"_key_shortcut")
 		KEY_G: target = $GloveboxLid
 		KEY_C: target = $ConsoleLid
 		KEY_T: target = handbrake_lever
@@ -1006,13 +1048,14 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		KEY_L: target = light_stalk
 		KEY_I: target = dome_lenses[0]
 		KEY_O: target = dome_lenses[1]
-		KEY_R: gear_lever.set_notch(Gear.R)
-		KEY_N: gear_lever.set_notch(Gear.N)
-		KEY_E: gear_lever.set_notch(Gear.D)
-		KEY_PAGEUP: gear_lever.step(-1)
-		KEY_PAGEDOWN: gear_lever.step(1)
+	match (event as InputEventKey).keycode:
+		KEY_R: Net.perform(gear_lever, &"set_notch", [Gear.R])
+		KEY_N: Net.perform(gear_lever, &"set_notch", [Gear.N])
+		KEY_E: Net.perform(gear_lever, &"set_notch", [Gear.D])
+		KEY_PAGEUP: Net.perform(gear_lever, &"step", [-1])
+		KEY_PAGEDOWN: Net.perform(gear_lever, &"step", [1])
 	if target:
-		target.toggle()
+		Net.perform(target, &"toggle")
 
 
 ## Le bouton (enfant du levier) s'enfonce de `press` (repère du levier) quand on saisit

@@ -57,6 +57,11 @@ var _player: AudioStreamPlayer3D
 var _ray_t := 0.0
 var _ground_y := 0.0
 var _zig := 0.0
+## Partie à deux, chez le copilote : l'animal ne décide rien, il recopie celui du
+## conducteur (NetSession -> AnimalManager.net_sync).
+var net_puppet := false
+var net_pos := Vector3.ZERO
+var _net_model_rot := Vector3.ZERO
 
 
 func setup(sp: String, c: Dictionary, the_car: RigidBody3D, mgr: Node, scale_mult := 1.0) -> void:
@@ -113,6 +118,9 @@ func start_crossing(to: Vector3, delay := 0.0) -> void:
 
 func _physics_process(delta: float) -> void:
 	_state_t += delta
+	if net_puppet:
+		_net_follow(delta)
+		return
 	if state == State.HIT:
 		_update_hit(delta)
 		_animate(delta)
@@ -395,6 +403,40 @@ func _update_hit(delta: float) -> void:
 			# il boite un peu : moins vite
 			cfg = cfg.duplicate()
 			cfg["run"] = float(cfg["run"]) * 0.6
+
+
+# --- Partie à deux -------------------------------------------------------------
+
+## État de l'animal du conducteur (positions déjà converties chez soi).
+func net_update(pos: Vector3, h: float, spd: float, st: int, graze: float, model_rot: Vector3) -> void:
+	if st != state:
+		if st == State.CROSS or st == State.FLEE:
+			_play(cfg.get("alarm", []), true)
+		elif st == State.HIT and manager:
+			manager.call("play_impact", pos, 0.7)
+		set_state(st)
+	net_pos = pos
+	heading = h
+	speed = spd
+	_graze = graze
+	_net_model_rot = model_rot
+
+
+func _net_follow(delta: float) -> void:
+	if global_position.distance_to(net_pos) > 6.0:
+		global_position = net_pos
+	else:
+		global_position = global_position.lerp(net_pos, 1.0 - exp(-12.0 * delta))
+	rotation = Vector3(0.0, lerp_angle(rotation.y, heading, 1.0 - exp(-12.0 * delta)), 0.0)
+	_model.rotation = _model.rotation.lerp(_net_model_rot, 1.0 - exp(-12.0 * delta))
+	if state != State.HIT:
+		_next_sound -= delta
+		if _next_sound <= 0.0:
+			var gap: Vector2 = cfg.get("idle_gap", Vector2(8, 20))
+			_next_sound = randf_range(gap.x, gap.y)
+			if car and global_position.distance_to(car.global_position) < 90.0:
+				_play(cfg.get("idle", []))
+	_animate(delta)
 
 
 # --- Animation ----------------------------------------------------------------

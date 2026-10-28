@@ -52,6 +52,7 @@ var _sizzle: AudioStreamPlayer3D
 var _flame_t := 0.0
 var _mouth_t := 0.0        # temps passé à la bouche (bouffée en cours)
 var _auto_puff := 0.0      # bouffée simulée (F sans casque)
+var _auto_puff_remote := false   # ... demandée par l'autre joueur (partie à deux)
 var _t := 0.0
 
 
@@ -85,6 +86,7 @@ func toggle() -> void:
 			light()
 		return
 	_auto_puff = 1.4
+	_auto_puff_remote = Net.applying_remote
 
 
 func light() -> void:
@@ -114,13 +116,15 @@ func _process(delta: float) -> void:
 		return
 	# bouffée : le filtre à la bouche, en le tenant (ou F sans casque)
 	var at_mouth := false
+	var remote := Net.is_online() and Net.held_by_remote(self)   # l'autre joueur fume
 	if is_grabbed():
-		var mouth = EdiblePickable.mouth_position(get_tree())
+		var mouth = EdiblePickable.mouth_position(get_tree(), self)
 		if mouth != null and butt_position().distance_to(mouth) < MOUTH_RADIUS:
 			at_mouth = true
 	if _auto_puff > 0.0:
 		_auto_puff -= delta
 		at_mouth = true
+		remote = remote or _auto_puff_remote
 		if _auto_puff <= 0.0:
 			_auto_puff = 0.0
 	var burn_len := paper_length() - stub
@@ -129,7 +133,7 @@ func _process(delta: float) -> void:
 	if at_mouth:
 		_mouth_t += delta
 		var add := get_tree().get_first_node_in_group(PillAddiction.GROUP)
-		if add:
+		if add and not remote:
 			add.call("smoke", kind, delta / puff_time)
 		if _sizzle and not _sizzle.playing:
 			_sizzle.play()
@@ -167,8 +171,8 @@ func _check_flame(delta: float) -> void:
 
 func _exhale_puff(strength: float) -> void:
 	puffs += 1
-	var mouth = EdiblePickable.mouth_position(get_tree())
-	var cam := get_viewport().get_camera_3d()
+	var mouth = EdiblePickable.mouth_position(get_tree(), self)
+	var cam: Node3D = Net.camera_for(self) if Net.is_online() else get_viewport().get_camera_3d()
 	if mouth == null or cam == null or _exhale == null:
 		return
 	# un peu devant la bouche : le nuage ne bouche pas toute la vue

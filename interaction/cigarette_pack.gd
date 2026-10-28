@@ -31,6 +31,7 @@ var _lid: Node3D
 var _taker: Taker
 var _snap: AudioStreamPlayer3D
 var _pack_built := false
+var _taken := 0   # cigarettes sorties (nom stable, le même chez les deux joueurs)
 
 
 ## Zone « les cigarettes dans le paquet » (active seulement paquet ouvert) : crée une
@@ -349,6 +350,8 @@ func take_cigarette_into(hand: Node3D) -> VRPickable:
 		return null
 	node.visible = false
 	var cig := (load(CIG_SCENE) as PackedScene).instantiate() as RigidBody3D
+	_taken += 1
+	cig.name = "%s_Cig%d" % [item.name, _taken]
 	var storage := _nearest_storage()
 	(storage if storage else item.get_parent()).add_child(cig)
 	# position de la cigarette qu'on vient de sortir (un peu plus haut, déjà à moitié dehors)

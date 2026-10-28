@@ -115,6 +115,7 @@ func _spawn(distance: float, side: int) -> FallingTree:
 	var species := _road.pick_tree_species(base) if _road.has_method("pick_tree_species") else "tree"
 	tree.tree_scene = _species_scene(species)
 	tree.leaf_color = LEAF_COLORS.get(species, Color(0.3, 0.55, 0.18))
+	tree.set_meta("species", species)
 	tree.height = height
 	tree.creak_sound = _creak
 	tree.crash_sound = _crash
@@ -127,6 +128,34 @@ func _spawn(distance: float, side: int) -> FallingTree:
 	var x_axis := Vector3.UP.cross(toward).normalized()
 	chunk.add_child(tree)
 	tree.global_transform = Transform3D(Basis(x_axis, Vector3.UP, toward), base)
+	tree.hit_car.connect(_on_hit)
+	tree.landed.connect(func(t: FallingTree): _on_landed(t))
+	_active.append(tree)
+	tree_falling.emit(tree)
+	return tree
+
+
+## Partie à deux, chez le copilote : arbre tombé chez le conducteur (voir
+## NetSession._tree_params), posé au même endroit et qui tombe de la même façon.
+func spawn_remote(p: Dictionary) -> FallingTree:
+	var base: Vector3 = p["base"]
+	var chunk := _road.chunk_at(base) if _road else null
+	if chunk == null:
+		return null
+	var tree := FallingTree.new()
+	var species: String = p["species"]
+	tree.tree_scene = _species_scene(species)
+	tree.leaf_color = LEAF_COLORS.get(species, Color(0.3, 0.55, 0.18))
+	tree.height = p["height"]
+	tree.visual_yaw = p["yaw"]
+	tree.creak_sound = _creak
+	tree.crash_sound = _crash
+	tree.road_point = p["road_point"]
+	tree.road_dir = p["road_dir"]
+	tree.blocked_lateral = p["blocked"]
+	tree.set_meta("species", species)
+	chunk.add_child(tree)
+	tree.global_transform = Transform3D(p["basis"], base)
 	tree.hit_car.connect(_on_hit)
 	tree.landed.connect(func(t: FallingTree): _on_landed(t))
 	_active.append(tree)
