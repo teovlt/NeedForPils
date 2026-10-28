@@ -4,9 +4,9 @@ extends VRPickable
 ##
 ## On lui lâche dessus (à moins de 7 cm de son centre) :
 ## - une pincée d'herbe moulue (RollItem « weed », sortie du grinder) ;
-## - une cigarette pas encore allumée : elle est émiettée, son tabac va sur la feuille ;
+## - une pincée de tabac (RollItem « tobacco », sortie du sachet de tabac à rouler) ;
 ## - un filtre (RollItem « filter », un seul), qui se place au bout.
-## Garnie (au moins une pincée d'herbe ou le tabac d'une cigarette) et avec son filtre :
+## Garnie (au moins une pincée d'herbe et / ou de tabac) et avec son filtre :
 ## A/X (en la tenant) ou F -> elle se roule : joint s'il y a de l'herbe, sinon cigarette
 ## (Smokable, à allumer au briquet et à fumer). Plus elle est chargée, plus il dure.
 ## Repère : feuille à plat, longueur selon X (filtre au bout +X), colle vers +Z.
@@ -73,20 +73,19 @@ func try_receive(g: VRPickable) -> bool:
 	if Vector3(l.x, l.y * 0.5, l.z).length() > RECEIVE_RADIUS:
 		return false
 	if g is RollItem:
-		if g.kind == "weed":
+		if g.kind == "weed" or g.kind == "tobacco":
 			if filling() >= MAX_FILL:
 				return false
-			weed += g.amount
+			if g.kind == "weed":
+				weed += g.amount
+			else:
+				tobacco += g.amount
 		elif g.kind == "filter":
 			if has_filter:
 				return false
 			has_filter = true
 		else:
 			return false
-	elif g is Smokable and g.kind == "cigarette" and not g.lit and g.burnt <= 0.0:
-		if filling() >= MAX_FILL:
-			return false
-		tobacco += 0.6      # cigarette émiettée sur la feuille
 	else:
 		return false
 	g.item.queue_free()

@@ -166,6 +166,8 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_hands(delta)
 		elif autotest_scenario == "rouler":
 			_run_autotest_roll(delta)
+		elif autotest_scenario == "sachet_tabac":
+			_run_autotest_pouch_view(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -5091,7 +5093,7 @@ func _dist_to_axis(p: Vector3, c: Vector3, ax: Vector3) -> float:
 
 
 # --- Rouler : pochon -> tête -> grinder -> moudre -> pincées sur une feuille + filtre ->
-# joint ; puis cigarette émiettée + filtre -> cigarette roulée ----------------------------
+# joint ; puis deux pincées de tabac + filtre -> cigarette roulée -------------------------
 
 var _rl := {}
 
@@ -5126,15 +5128,17 @@ func _run_autotest_roll(delta: float) -> void:
 	var gr_b := _car_item("Grinder")
 	var pap_b := _car_item("RollingPapers")
 	var fil_b := _car_item("FilterBox")
-	if bag_b == null or gr_b == null or pap_b == null or fil_b == null:
+	var tob_b := _car_item("TobaccoPouch")
+	if tob_b == null or bag_b == null or gr_b == null or pap_b == null or fil_b == null:
 		if at.call(0.1):
-			_log("AUTOTEST objets manquants : pochon %s grinder %s feuilles %s filtres %s" % [bag_b, gr_b, pap_b, fil_b])
+			_log("AUTOTEST objets manquants : pochon %s grinder %s feuilles %s filtres %s tabac %s" % [bag_b, gr_b, pap_b, fil_b, tob_b])
 			get_tree().quit()
 		return
 	var bag := bag_b.get_node("Grab") as WeedBag
 	var gr := gr_b.get_node("Grab") as Grinder
 	var pap := pap_b.get_node("Grab") as RollDispenser
 	var fil := fil_b.get_node("Grab") as RollDispenser
+	var tob := tob_b.get_node("Grab") as TobaccoPouch
 	var ha := _rl_hand("a")
 	var hb := _rl_hand("b")
 	var S := car.to_global(Vector3(-0.2, 1.0, 0.35))        # où la main A tient la feuille
@@ -5145,7 +5149,7 @@ func _run_autotest_roll(delta: float) -> void:
 		car.get_node("GloveboxLid").set_angle_deg(-80.0, true)
 		car.get_node("ConsoleLid").set_angle_deg(-100.0, true)
 		var rng := RandomNumberGenerator.new()
-		for b in [bag_b, pap_b, fil_b, gr_b]:
+		for b in [bag_b, pap_b, fil_b, gr_b, tob_b]:
 			car.get_node("Storage")._place_loose(b, rng, [])
 	cam.fov = 55.0
 	cam.global_position = car.to_global(Vector3(0.1, 1.3, 0.05))
@@ -5248,7 +5252,11 @@ func _run_autotest_roll(delta: float) -> void:
 		cam.look_at(S)
 	if at.call(9.3):
 		_shot("rouler_4_joint")
-	# 4) cigarette : cigarette émiettée + filtre sur une nouvelle feuille -> cigarette roulée
+	# 4) cigarette : deux pincées de tabac + filtre sur une nouvelle feuille -> cigarette roulée
+	if at.call(9.4):
+		cam.global_position = tob_b.global_transform * Vector3(0, 0.2, -0.13)
+		cam.look_at(tob_b.global_position)
+		_shot("rouler_5_sachet_tabac")
 	if at.call(9.6):
 		pap._taker.release(ha)   # lâcher le grip : la zone transmet au joint
 		_log("AUTOTEST joint lâché : tenu=%s" % [joint.is_grabbed() if joint and is_instance_valid(joint) else "?"])
@@ -5266,18 +5274,25 @@ func _run_autotest_roll(delta: float) -> void:
 	if _t > 9.6 and _t < 12.0 and sheet2 and is_instance_valid(sheet2) and sheet2.is_grabbed():
 		pap._taker.grab_update(ha)
 		_rl_move(ha, ha.global_position.lerp(S, 0.2))
-	if at.call(10.2):
-		var cig := (load("res://props/items/cigarette_item.tscn") as PackedScene).instantiate() as RigidBody3D
-		car.get_node("Storage").add_child(cig)
-		cig.global_position = S + car.global_basis.y * 0.03
-		var cg := cig.get_node("Grab") as Smokable
-		_rl_move(hb, cig.global_position)
-		cg.grab(hb)
-		_rl["cg"] = cg
-	if at.call(10.5):
-		var cg: Smokable = _rl["cg"]
-		cg.release(hb)
-		_log("AUTOTEST cigarette lâchée sur la feuille -> tabac %.2f" % sheet2.tobacco)
+	for k in 2:
+		var tk := 10.0 + k * 0.4
+		if at.call(tk):
+			if k == 0:
+				tob.toggle()
+				_log("AUTOTEST sachet de tabac : %d pincées, ouvert=%s" % [tob.pills_left(), tob.open])
+			var p: Node3D = tob._nearest_visible(tob_b.global_position)
+			_rl_move(hb, p.global_position)
+			tob._taker.set_hand_distance(hb, 0.0)
+			tob._taker.grab(hb)
+		if _t > tk and _t < tk + 0.3:
+			_rl_move(hb, hb.global_position.lerp(S + car.global_basis.y * 0.02, 0.3))
+		if at.call(tk + 0.3):
+			tob._taker.release(hb)
+			if k == 0:
+				cam.global_position = tob_b.global_transform * Vector3(0, 0.16, 0.2)
+				cam.look_at(tob_b.global_position)
+				_shot("rouler_6_sachet_ouvert")
+			_log("AUTOTEST pincée de tabac %d lâchée sur la feuille -> tabac %.2f, herbe %.2f (sachet : %d)" % [k + 1, sheet2.tobacco, sheet2.weed, tob.pills_left()])
 	if at.call(10.8):
 		var u: Node3D = fil.nearest_unit(fil_b.global_position)
 		_rl_move(hb, u.global_transform * Vector3(0, 0.014, 0))
@@ -5294,4 +5309,29 @@ func _run_autotest_roll(delta: float) -> void:
 			if n.is_grabbed() and ha in n._grab_hands:
 				c2 = n
 		_log("AUTOTEST A/X -> roulé : %s (%s)" % [c2.item.name if c2 else "rien", c2.kind if c2 else "-"])
+		get_tree().quit()
+
+
+func _run_autotest_pouch_view(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = false
+	var b := _car_item("TobaccoPouch")
+	if at.call(0.05):
+		$Weather.hour = 13.0
+		car.get_node("Storage")._place_loose(b, RandomNumberGenerator.new(), [])
+	cam.fov = 45.0
+	if _t < 1.5:
+		cam.global_position = b.global_transform * Vector3(0, 0.22, -0.12)
+	else:
+		cam.global_position = b.global_transform * Vector3(0, 0.12, 0.22)
+	cam.look_at(b.global_position)
+	if at.call(1.2):
+		_shot("sachet_tabac_ferme")
+		(b.get_node("Grab") as TobaccoPouch).toggle()
+	if at.call(2.4):
+		_shot("sachet_tabac_ouvert")
 		get_tree().quit()

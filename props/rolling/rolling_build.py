@@ -1,8 +1,9 @@
 """Matériel pour rouler de Need for Pils : grinder, tête de weed, pincée d'herbe moulue,
+pincée de tabac à rouler,
 carnet de feuilles, boîte de filtres, feuille seule, filtre seul.
 
 Usage : python3 rolling_build.py <dossier de sortie>
-   -> grinder.glb, bud.glb, pinch.glb, papers.glb, filter_box.glb, sheet.glb, filter.glb
+   -> grinder.glb, bud.glb, pinch.glb, tobacco.glb, papers.glb, filter_box.glb, sheet.glb, filter.glb
 
 Réutilise Model / loft / box de props/animals/animals_build.py et le tour (lathe) de
 props/thermos_build.py. Facettes plates (low poly). Repère Godot : +Y en haut, objets
@@ -111,6 +112,22 @@ def pinch():
     return m
 
 
+def tobacco():
+    """Pincée de tabac à rouler : petit tas brun, fibres plus sombres et plus claires."""
+    m = Model("Tobacco")
+    brown = m.mat("Tobacco_Brown", (0.46, 0.29, 0.13), 0.9)
+    dark = m.mat("Tobacco_Dark", (0.30, 0.17, 0.07), 0.9)
+    gold = m.mat("Tobacco_Gold", (0.66, 0.46, 0.22), 0.9)
+    heap = lathe([(0.0, 0.0), (0.010, 0.0), (0.0075, 0.0024), (0.0035, 0.0045), (0.0, 0.005)], n=10)
+    fibres, light = [], []
+    for k in range(12):
+        a = RNG.uniform(0, 2 * math.pi)
+        f = rot_y(box((RNG.uniform(0.001, 0.008), 0.0022 + RNG.uniform(0, 0.0022), 0), (0.006, 0.0006, 0.0008)), a)
+        (fibres if k % 2 else light).extend(f)
+    m.part("Tobacco", (0, 0, 0), {brown: heap, dark: fibres, gold: light})
+    return m
+
+
 def sheet():
     m = Model("Sheet")
     paper = m.mat("Paper", (0.97, 0.96, 0.92), 0.9)
@@ -165,7 +182,7 @@ def filter_box():
     return m
 
 
-ALL = (("grinder", grinder), ("bud", bud), ("pinch", pinch), ("sheet", sheet), ("filter", filt),
+ALL = (("grinder", grinder), ("bud", bud), ("pinch", pinch), ("tobacco", tobacco), ("sheet", sheet), ("filter", filt),
        ("papers", papers), ("filter_box", filter_box))
 
 if __name__ == "__main__":
