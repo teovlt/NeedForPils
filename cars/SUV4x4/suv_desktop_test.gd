@@ -164,6 +164,8 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_bag_two_hands(delta)
 		elif autotest_scenario == "mains":
 			_run_autotest_hands(delta)
+		elif autotest_scenario == "rouler":
+			_run_autotest_roll(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -5086,3 +5088,210 @@ func _run_autotest_hands(delta: float) -> void:
 func _dist_to_axis(p: Vector3, c: Vector3, ax: Vector3) -> float:
 	var v := p - c
 	return (v - ax * v.dot(ax)).length()
+
+
+# --- Rouler : pochon -> tête -> grinder -> moudre -> pincées sur une feuille + filtre ->
+# joint ; puis cigarette émiettée + filtre -> cigarette roulée ----------------------------
+
+var _rl := {}
+
+
+func _rl_hand(k: String) -> VRHandInteractor:
+	if not _rl.has(k):
+		var holder := Node3D.new()
+		add_child(holder)
+		var h := VRHandInteractor.new()
+		holder.add_child(h)
+		h.debug_points = [Vector3(0, -100, 0), Vector3(0, -100, 0)]
+		_rl[k] = h
+	return _rl[k]
+
+
+func _rl_move(h: VRHandInteractor, p: Vector3, basis := Basis.IDENTITY) -> void:
+	h.get_parent().global_transform = Transform3D(car.global_basis * basis, p)
+	for n in get_tree().get_nodes_in_group(VRInteractable.GROUP):
+		var it := n as VRInteractable
+		if it and h in it._grab_hands:
+			it.grab_update(h)
+
+
+func _run_autotest_roll(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = false
+	var bag_b := _car_item("WeedBag")
+	var gr_b := _car_item("Grinder")
+	var pap_b := _car_item("RollingPapers")
+	var fil_b := _car_item("FilterBox")
+	if bag_b == null or gr_b == null or pap_b == null or fil_b == null:
+		if at.call(0.1):
+			_log("AUTOTEST objets manquants : pochon %s grinder %s feuilles %s filtres %s" % [bag_b, gr_b, pap_b, fil_b])
+			get_tree().quit()
+		return
+	var bag := bag_b.get_node("Grab") as WeedBag
+	var gr := gr_b.get_node("Grab") as Grinder
+	var pap := pap_b.get_node("Grab") as RollDispenser
+	var fil := fil_b.get_node("Grab") as RollDispenser
+	var ha := _rl_hand("a")
+	var hb := _rl_hand("b")
+	var S := car.to_global(Vector3(-0.2, 1.0, 0.35))        # où la main A tient la feuille
+	var G := car.to_global(Vector3(-0.05, 0.98, 0.3))       # où la main A tient le grinder
+	if at.call(0.05):
+		$Weather.hour = 13.0
+		_log("AUTOTEST dans la voiture : pochon (%d têtes) dans %s, grinder dans %s, feuilles (%d) dans %s, filtres (%d) dans %s" % [bag.pill_count, bag_b.get_parent().name, gr_b.get_parent().name, pap.count, pap_b.get_parent().name, fil.left(), fil_b.get_parent().name])
+		car.get_node("GloveboxLid").set_angle_deg(-80.0, true)
+		car.get_node("ConsoleLid").set_angle_deg(-100.0, true)
+		var rng := RandomNumberGenerator.new()
+		for b in [bag_b, pap_b, fil_b, gr_b]:
+			car.get_node("Storage")._place_loose(b, rng, [])
+	cam.fov = 55.0
+	cam.global_position = car.to_global(Vector3(0.1, 1.3, 0.05))
+	cam.look_at(car.to_global(Vector3(-0.12, 0.98, 0.33)))
+	# 1) grinder en main A, ouvert ; deux têtes sorties du pochon et lâchées dedans
+	if at.call(0.3):
+		var hc := _rl_hand("c")      # troisième main : tient le grinder tout du long
+		hc.get_parent().global_transform = gr_b.global_transform
+		gr.grab(hc)
+		gr._offset = Transform3D.IDENTITY
+		_rl_move(hc, G)
+		gr.toggle()
+		bag.toggle()
+		_log("AUTOTEST grinder tenu, A/X -> ouvert=%s ; pochon ouvert=%s ; main B accepte le grinder=%s" % [gr.open, bag.open, gr.accepts_hand(hb)])
+	if _t > 0.3 and gr.is_grabbed():
+		_rl_move(_rl_hand("c"), G)
+	for k in 2:
+		var tk := 0.6 + k * 1.0
+		if at.call(tk):
+			var bud: Node3D = bag._nearest_visible(bag_b.global_position)
+			_rl_move(hb, bud.global_position)
+			bag._taker.set_hand_distance(hb, 0.0)
+			bag._taker.grab(hb)
+		if _t > tk and _t < tk + 0.6:
+			_rl_move(hb, hb.global_position.lerp(gr.chamber_center() + car.global_basis.y * 0.03, 0.2))
+		if at.call(tk + 0.6):
+			var held_bud = bag._taker._held.get(hb)
+			if held_bud:
+				_log("   tête à %s du centre de la chambre (repère grinder)" % [gr_b.global_transform.affine_inverse() * held_bud.item.global_position])
+			bag._taker.release(hb)
+			_log("AUTOTEST tête %d lâchée au-dessus du grinder -> têtes dedans %d (pochon : %d restantes)" % [k + 1, gr.buds, bag.pills_left()])
+	if at.call(2.7):
+		_shot("rouler_1_grinder_tetes")
+		gr.toggle()   # ferme (il y a des têtes : A/X ferme d'abord, puisqu'il est ouvert)
+		_log("AUTOTEST grinder fermé=%s, couvercle à tourner actif=%s" % [not gr.open, gr._lid_grip.enabled])
+	# 2) main B tourne le couvercle
+	if at.call(2.9):
+		_rl_move(hb, gr._lid.global_position)
+		gr._lid_grip.grab(hb)
+	if _t > 2.9 and _t < 4.6 and gr._lid_grip.is_grabbed():
+		var ang := (_t - 2.9) * TAU * 1.1
+		_rl_move(hb, gr._lid.global_position, Basis(Vector3.UP, ang))
+	if at.call(4.7):
+		gr._lid_grip.release(hb)
+		_log("AUTOTEST couvercle tourné -> moutures %d, herbe moulue %.2f, têtes %d" % [gr.grinds, gr.ground, gr.buds])
+		gr.toggle()   # ouvre
+	if at.call(5.0):
+		_shot("rouler_2_herbe_moulue")
+	# 3) feuille sortie du carnet par la main A (le grinder est posé), tenue en S
+	if at.call(5.2):
+		pap.toggle()
+		_rl_move(ha, pap_b.global_position + pap_b.global_basis.y * 0.006)
+		pap._taker.grab(ha)
+		_rl["sheet"] = null
+		for sh in get_tree().get_nodes_in_group("rolling_sheets"):
+			if sh.is_grabbed():
+				_rl["sheet"] = sh
+		_log("AUTOTEST carnet ouvert, feuille sortie=%s (reste %d)" % [_rl["sheet"] != null, pap.count])
+	var sheet_v = _rl.get("sheet")
+	var sheet: RollingSheet = sheet_v if is_instance_valid(sheet_v) else null
+	if _t > 5.2 and _t < 9.6 and sheet and is_instance_valid(sheet) and sheet.is_grabbed():
+		_rl_move(ha, ha.global_position.lerp(S, 0.15))
+	# deux pincées puis un filtre lâchés sur la feuille par la main B
+	var gives := [[gr, 6.0], [gr, 6.8], [fil, 7.6]]
+	for e in gives:
+		var src = e[0]
+		var tg: float = e[1]
+		if at.call(tg):
+			if src == fil:
+				fil.toggle()
+				var u: Node3D = fil.nearest_unit(fil_b.global_position)
+				_rl_move(hb, u.global_transform * Vector3(0, 0.014, 0))
+				fil._taker.set_hand_distance(hb, 0.0)
+				fil._taker.grab(hb)
+			else:
+				_rl_move(hb, gr.chamber_center())
+				gr._taker.grab(hb)
+		if _t > tg and _t < tg + 0.5:
+			_rl_move(hb, hb.global_position.lerp(S + car.global_basis.y * 0.02, 0.25))
+		if at.call(tg + 0.5):
+			src._taker.release(hb)
+			_log("AUTOTEST lâché sur la feuille -> herbe %.2f, tabac %.2f, filtre %s, prête %s (grinder : %.2f)" % [sheet.weed, sheet.tobacco, sheet.has_filter, sheet.is_ready_to_roll(), gr.ground])
+	if at.call(8.4):
+		cam.global_position = S + car.global_basis * Vector3(0.0, 0.14, -0.12)
+		cam.look_at(S)
+		_shot("rouler_3_feuille_garnie")
+	if at.call(8.8):
+		sheet.toggle()   # A/X de la main qui tient la feuille
+		var j: Smokable = null
+		for n in get_tree().get_nodes_in_group("smokables"):
+			if n.is_grabbed() and ha in n._grab_hands:
+				j = n
+		_rl["joint"] = j
+		_log("AUTOTEST A/X -> roulé : %s (%s), tenu par la main A=%s" % [j.item.name if j else "rien", j.kind if j else "-", j != null])
+	var joint_v = _rl.get("joint")
+	var joint: Smokable = joint_v if is_instance_valid(joint_v) else null
+	if _t > 8.8 and _t < 9.6 and joint and is_instance_valid(joint):
+		_rl_move(ha, S)
+		cam.global_position = S + car.global_basis * Vector3(0.0, 0.12, -0.12)
+		cam.look_at(S)
+	if at.call(9.3):
+		_shot("rouler_4_joint")
+	# 4) cigarette : cigarette émiettée + filtre sur une nouvelle feuille -> cigarette roulée
+	if at.call(9.6):
+		pap._taker.release(ha)   # lâcher le grip : la zone transmet au joint
+		_log("AUTOTEST joint lâché : tenu=%s" % [joint.is_grabbed() if joint and is_instance_valid(joint) else "?"])
+		_rl_move(ha, pap_b.global_position + pap_b.global_basis.y * 0.006)
+		var n0 := pap.count
+		pap._taker.grab(ha)
+		for sh in get_tree().get_nodes_in_group("rolling_sheets"):
+			if sh.is_grabbed():
+				_rl["sheet2"] = sh
+		_log("AUTOTEST deuxième feuille : carnet %d -> %d, trouvée=%s, carnet ouvert=%s" % [n0, pap.count, _rl.has("sheet2"), pap.open])
+		if not _rl.has("sheet2"):
+			get_tree().quit()
+	var sheet2_v = _rl.get("sheet2")
+	var sheet2: RollingSheet = sheet2_v if is_instance_valid(sheet2_v) else null
+	if _t > 9.6 and _t < 12.0 and sheet2 and is_instance_valid(sheet2) and sheet2.is_grabbed():
+		pap._taker.grab_update(ha)
+		_rl_move(ha, ha.global_position.lerp(S, 0.2))
+	if at.call(10.2):
+		var cig := (load("res://props/items/cigarette_item.tscn") as PackedScene).instantiate() as RigidBody3D
+		car.get_node("Storage").add_child(cig)
+		cig.global_position = S + car.global_basis.y * 0.03
+		var cg := cig.get_node("Grab") as Smokable
+		_rl_move(hb, cig.global_position)
+		cg.grab(hb)
+		_rl["cg"] = cg
+	if at.call(10.5):
+		var cg: Smokable = _rl["cg"]
+		cg.release(hb)
+		_log("AUTOTEST cigarette lâchée sur la feuille -> tabac %.2f" % sheet2.tobacco)
+	if at.call(10.8):
+		var u: Node3D = fil.nearest_unit(fil_b.global_position)
+		_rl_move(hb, u.global_transform * Vector3(0, 0.014, 0))
+		fil._taker.set_hand_distance(hb, 0.0)
+		fil._taker.grab(hb)
+	if _t > 10.8 and _t < 11.3:
+		_rl_move(hb, hb.global_position.lerp(S + car.global_basis.y * 0.02, 0.25))
+	if at.call(11.3):
+		fil._taker.release(hb)
+	if at.call(11.6):
+		sheet2.toggle()
+		var c2: Smokable = null
+		for n in get_tree().get_nodes_in_group("smokables"):
+			if n.is_grabbed() and ha in n._grab_hands:
+				c2 = n
+		_log("AUTOTEST A/X -> roulé : %s (%s)" % [c2.item.name if c2 else "rien", c2.kind if c2 else "-"])
+		get_tree().quit()

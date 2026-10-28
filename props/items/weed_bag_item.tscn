@@ -1,0 +1,25 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://interaction/rolling/weed_bag.gd" id="1_bag"]
+
+[sub_resource type="BoxShape3D" id="Box_item"]
+size = Vector3(0.1, 0.028, 0.14)
+
+[node name="WeedBag" type="RigidBody3D"]
+collision_layer = 0
+collision_mask = 0
+mass = 0.06
+continuous_cd = true
+freeze = true
+freeze_mode = 1
+
+[node name="Model" type="Node3D" parent="."]
+
+[node name="Shape" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
+shape = SubResource("Box_item")
+
+[node name="Grab" type="Node3D" parent="."]
+script = ExtResource("1_bag")
+item_name = "Pochon de weed"
+rest_up_axis = 1
