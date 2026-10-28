@@ -388,10 +388,9 @@ var _finger_on := {}            # [main, touche] -> vrai tant que le doigt appui
 
 
 func _update_finger_presses() -> void:
-	for n in get_tree().get_nodes_in_group(VRHandInteractor.GROUP):
-		var hand := n as VRHandInteractor
-		var ok := hand.can_touch()
-		var tip := to_local(hand.fingertip_position()) if ok else Vector3.ZERO
+	for hand in get_tree().get_nodes_in_group(VRHandInteractor.TOUCH_GROUP):
+		var ok: bool = hand.can_touch()
+		var tip: Vector3 = to_local(hand.fingertip_position()) if ok else Vector3.ZERO
 		for kind in _buttons:
 			var key := [hand, kind]
 			if not ok:

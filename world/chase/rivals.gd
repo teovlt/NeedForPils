@@ -19,6 +19,9 @@ signal started
 signal lost
 signal hit(count: int)
 signal killed
+## Partie à deux : coup de feu (« shot »), balle reçue (« hit », [position, rotation]
+## de l'impact sur la vitre) ou coup de flanc (« ram »), à rejouer chez le copilote.
+signal net_event(kind: String, data: Array)
 
 const RATE := 22050
 const BEIGE := Color(0.86, 0.8, 0.64)
@@ -238,6 +241,7 @@ func _attack(delta: float) -> void:
 		_impact.pitch_scale = 0.6
 		_impact.play()
 		_rumble(0.9, 0.35)
+		net_event.emit("ram", [])
 		print("Concurrents : coup de flanc")
 
 
@@ -245,6 +249,7 @@ func _fire() -> void:
 	_flash_t = 0.07
 	_gun.pitch_scale = randf_range(0.92, 1.08)
 	_gun.play()
+	net_event.emit("shot", [])
 	# de près, on vise mieux
 	var chance := hit_chance * (1.6 if gap < 10.0 else 1.0)
 	if randf() < chance:
@@ -252,7 +257,8 @@ func _fire() -> void:
 		_impact.pitch_scale = randf_range(0.9, 1.2)
 		_impact.play()
 		_rumble(0.7, 0.15)
-		_add_crack()
+		var star := _add_crack()
+		net_event.emit("hit", [star.position, star.rotation.z])
 		print("Concurrents : touché (%d/%d)" % [hits, max_hits])
 		hit.emit(hits)
 		if hits >= max_hits:
@@ -266,7 +272,7 @@ func _rumble(strength: float, duration: float) -> void:
 
 
 ## Impact de balle : étoile blanche sur une vitre du 4x4 (pare-brise ou lunette).
-func _add_crack() -> void:
+func _add_crack() -> Node3D:
 	var star := Node3D.new()
 	var m := StandardMaterial3D.new()
 	m.albedo_color = Color(0.95, 0.95, 0.95, 0.85)
@@ -297,6 +303,47 @@ func _add_crack() -> void:
 		star.position = Vector3(randf_range(-0.6, 0.6), randf_range(1.25, 1.6), 1.02)
 	star.rotation.z = randf() * TAU
 	_cracks.append(star)
+	return star
+
+
+# --- Partie à deux (chez le copilote, les concurrents recopient ceux du conducteur) ---
+
+## [visible, transformation, km/h, moteur audible]
+func net_state() -> Array:
+	return [_visual.visible, _visual.global_transform, _speed, _engine.playing]
+
+
+func net_apply(st: Array, xf: Transform3D) -> void:
+	_visual.visible = st[0]
+	if st[0]:
+		_visual.global_transform = xf
+	_speed = st[2]
+	var spin := _speed / 3.6 / 0.48 * get_physics_process_delta_time()
+	for w in _wheels:
+		w.rotate_object_local(Vector3.RIGHT, spin)
+	if st[3] != _engine.playing:
+		if st[3]:
+			_engine.play()
+		else:
+			_engine.stop()
+
+
+func net_fx(kind: String, data: Array) -> void:
+	match kind:
+		"shot":
+			_flash_t = 0.07
+			_gun.play()
+		"hit":
+			_impact.pitch_scale = 1.0
+			_impact.play()
+			_rumble(0.7, 0.15)
+			var star := _add_crack()
+			star.position = data[0]
+			star.rotation.z = data[1]
+		"ram":
+			_impact.pitch_scale = 0.6
+			_impact.play()
+			_rumble(0.9, 0.35)
 
 
 func _on_lost() -> void:

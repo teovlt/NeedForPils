@@ -16,8 +16,6 @@ extends VehicleBody3D
 enum Gear { R, N, D, G2, G1 }
 
 const GROUP := "suv4x4"
-## Siège du copilote (partie à deux) : symétrique du siège conducteur.
-const PASSENGER_SEAT_POS := Vector3(-0.45, 1.45, -0.05)
 const GEAR_LABELS := ["R", "N", "D", "2", "1"]
 const WIPER_MODES := ["OFF", "INT", "LENT", "RAPIDE"]
 enum LightMode { OFF, AUTO, LOW, HIGH, HIGH_BAR }
@@ -569,7 +567,9 @@ func _player_seat() -> Node3D:
 	if seat == null:
 		seat = Marker3D.new()
 		seat.name = "PassengerSeat"
-		seat.transform = Transform3D(driver_seat.transform.basis, PASSENGER_SEAT_POS)
+		# symétrique du siège conducteur (même œil, de l'autre côté)
+		var p := driver_seat.position
+		seat.transform = Transform3D(driver_seat.transform.basis, Vector3(-p.x, p.y, p.z))
 		add_child(seat)
 	return seat
 

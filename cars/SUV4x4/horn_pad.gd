@@ -123,8 +123,7 @@ func _on_grab_end(hand: Node3D) -> void:
 func _update_touch() -> void:
 	var pad_xf := global_transform * Transform3D(_pad.basis, _rest_pos)
 	var inv := pad_xf.affine_inverse()
-	for n in get_tree().get_nodes_in_group(VRHandInteractor.GROUP):
-		var h := n as VRHandInteractor
+	for h in get_tree().get_nodes_in_group(VRHandInteractor.TOUCH_GROUP):
 		var was: bool = _touching.has(h)
 		var on := false
 		if h.can_touch():

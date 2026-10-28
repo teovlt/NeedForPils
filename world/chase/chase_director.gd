@@ -59,6 +59,7 @@ var _drone_t := 0.0
 var _drone_fwd := Vector3.ZERO
 var _origin: Node3D
 var _trees: FallingTreeManager
+## Concurrents (créés ici) ; NetSession les recopie chez le copilote.
 var _rivals: Rivals
 ## Partie à deux, chez le copilote : rien ne se décide ici, on affiche les textes du
 ## conducteur (et Espace / A demande au conducteur de rejouer à la fin).

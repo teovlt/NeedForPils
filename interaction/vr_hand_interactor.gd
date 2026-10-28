@@ -15,10 +15,15 @@ extends Node3D
 ##   vitesse, comodos), elle s'y accroche, poing refermé autour, et suit la commande.
 
 const GROUP := "vr_hands"
+## Mains qui appuient au toucher (klaxon, touches de la radio, comodos poussés du doigt) :
+## les mains VR locales et celles de l'autre joueur en partie à deux (NetRemoteHand).
+const TOUCH_GROUP := "touch_hands"
 
 ## Saisie (0), lâcher (1) ou action A/X (2) sur un objet : la partie à deux (NetSession)
 ## rejoue le geste chez l'autre joueur.
 signal interacted(kind: int, target: VRInteractable)
+## Pareil pour une prise du bout de l'index (gâchette).
+signal tip_interacted(kind: int, target: VRInteractable)
 
 @export var grip_action := "grip"
 @export var toggle_action := "ax_button"
@@ -81,6 +86,7 @@ class TipHand:
 
 func _ready() -> void:
 	add_to_group(GROUP)
+	add_to_group(TOUCH_GROUP)
 	controller = get_parent() as XRController3D
 	tip_hand = TipHand.new()
 	tip_hand.name = "IndexTip"
@@ -426,12 +432,14 @@ func _update_trigger_grab() -> void:
 		tip_held = best
 		_tip_hover = null
 		tip_held.grab(tip_hand)
+		tip_interacted.emit(0, tip_held)
 		pulse(0.4, 0.04)
 
 
 func _release_tip() -> void:
 	if tip_held and is_instance_valid(tip_held):
 		tip_held.release(tip_hand)
+		tip_interacted.emit(1, tip_held)
 	tip_held = null
 
 

@@ -35,6 +35,11 @@ func _physics_process(delta: float) -> void:
 		_once("gauche", 9.5, func(): _key(KEY_Q, true))
 		_once("gauche_fin", 11.0, func(): _key(KEY_Q, false))
 		_once("neutre", 12.5, func(): _key(KEY_N, true); _key(KEY_N, false))
+		_finger_presses(car)
+	for at in [13.2, 14.4, 15.0, 15.8]:
+		_once("toucher%.1f" % at, at, func():
+			print("NETTEST %s t=%.1f radio=%s klaxon=%s" % ["conducteur" if Net.is_driver() else "copilote", at,
+				car.radio.get("power"), car.horn.is_honking()]))
 	if Net.is_driver():
 		_once("monde", 3.0, func():
 			var main := session.get_parent()
@@ -89,7 +94,7 @@ func _physics_process(delta: float) -> void:
 			"conducteur" if Net.is_driver() else "copilote", _t, car.global_position.x, car.global_position.y,
 			car.global_position.z, car.forward_speed * 3.6, hb, car.radio.get("power"),
 			car.gear_lever.get_notch_label(), session.remote_player != null])
-	if _t > 16.0 and not _done.has("fin"):
+	if _t > 16.5 and not _done.has("fin"):
 		_done["fin"] = true
 		get_tree().quit()
 
@@ -98,6 +103,37 @@ func _once(key: String, at: float, f: Callable) -> void:
 	if _t >= at and not _done.has(key):
 		_done[key] = true
 		f.call()
+
+
+## Main VR simulée (VRHandInteractor.debug_points) : le doigt appuie sur la touche
+## marche de la radio (13,5 s) puis se pose sur le klaxon (14,6 à 15,4 s).
+func _finger_presses(car: SUV4x4) -> void:
+	_once("main_vr", 13.0, func():
+		var holder := Node3D.new()
+		add_child(holder)
+		var h := VRHandInteractor.new()
+		h.name = "TestRightHand"
+		holder.add_child(h)
+		h.debug_points = [Vector3(0, -100, 0), Vector3(0, -100, 0)]
+		_done["main"] = h)
+	var h = _done.get("main")
+	if h == null:
+		return
+	var far := car.to_global(Vector3(0, -50, 0))
+	var tip := far
+	var radio := car.radio
+	if _t > 13.5 and _t < 14.3:
+		var m: Node3D = radio._buttons["power"][0]
+		var g := m.get_parent() as Node3D
+		var ab: AABB = (m as MeshInstance3D).get_aabb() if m is MeshInstance3D else AABB()
+		var face := g.position + Vector3(ab.get_center().x, ab.get_center().y, ab.end.z)
+		var dt := _t - 13.5
+		var depth := lerpf(0.03, -0.003, smoothstep(0.0, 0.3, dt)) if dt < 0.5 else lerpf(-0.003, 0.03, smoothstep(0.5, 0.7, dt))
+		tip = radio.to_global(face + Vector3(0, 0, depth))
+	elif _t > 14.6 and _t < 15.4:
+		var axis: Vector3 = (car.horn.global_basis * car.horn.column_axis).normalized()
+		tip = car.horn._pad.global_position + axis * 0.004
+	h.debug_points = [tip, far]
 
 
 func _key(code: Key, pressed: bool) -> void:

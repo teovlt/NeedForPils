@@ -243,6 +243,8 @@ func _status(text: String) -> void:
 
 
 func _fail(reason: String) -> void:
+	if state == State.IDLE:
+		return   # déjà traité (déconnexion signalée deux fois)
 	var was_in_game := state == State.IN_GAME
 	cancel()
 	_status(reason)
@@ -275,8 +277,10 @@ func _on_connected_to_server() -> void:
 	lobby_complete.emit()
 
 
+# Les signaux du réseau arrivent pendant que la connexion se met à jour : la fermer
+# tout de suite fait planter Godot, on attend la fin de l'image (call_deferred).
 func _on_connection_failed() -> void:
-	_fail("Connexion impossible.")
+	_fail.call_deferred("Connexion impossible.")
 
 
 func _on_peer_disconnected(_id: int) -> void:
@@ -288,11 +292,11 @@ func _on_peer_disconnected(_id: int) -> void:
 			session.call("on_remote_left")
 		return
 	if state != State.IDLE:
-		_fail("L'autre joueur est parti.")
+		_fail.call_deferred("L'autre joueur est parti.")
 
 
 func _on_server_disconnected() -> void:
-	_fail("Le conducteur a quitté la partie.")
+	_fail.call_deferred("Le conducteur a quitté la partie.")
 
 
 func _check_command_line() -> void:
@@ -403,3 +407,8 @@ func rx_restart_request() -> void:
 		var director := session.get_parent().get_node_or_null("ChaseDirector")
 		if director and director.get("game_over"):
 			restart_game()
+
+
+@rpc("authority", "reliable", "call_remote", 2)
+func rx_rivals_fx(kind: String, data: Array) -> void:
+	_to_session(&"on_rivals_fx", [kind, data])

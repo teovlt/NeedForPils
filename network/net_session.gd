@@ -15,7 +15,8 @@ extends Node
 ##   la route) : chacun recentre son monde tous les 1,5 km, pas forcément à la même image.
 ## - Les deux : chacun envoie sa tête et ses mains (repère de la voiture) et chaque
 ##   saisie / lâcher / action. Chez l'autre, un avatar les montre et des mains
-##   « fantômes » (NetRemoteHand) rejouent les gestes sur les mêmes objets. Un objet
+##   « fantômes » (NetRemoteHand) rejouent les gestes sur les mêmes objets : saisies,
+##   prises du bout de l'index, et appuis au toucher (klaxon, radio, comodos). Un objet
 ##   lâché ne retombe pas forcément pareil chez les deux : celui qui l'a lâché envoie
 ##   ensuite où il s'est posé.
 
@@ -39,13 +40,15 @@ var _pursuer: Pursuer
 var _director: ChaseDirector
 var _trees: FallingTreeManager
 var _animals: AnimalManager
+var _rivals: Rivals
 var remote_player: Node3D
 var _remote_head: Node3D
 var _remote_body: Node3D
 var _remote_hand_meshes: Array[Node3D] = []
 var _remote_hands: Array[NetRemoteHand] = []
 var _remote_head_local := Transform3D.IDENTITY
-var _remote_hand_local: Array = [null, null, null]
+var _remote_hand_local: Array = [null, null, null]   # gauche, droite, souris
+var _remote_touch: Array = [null, null]   # mains VR : [peut toucher, bout de l'index, paume]
 
 var _local_hands := {}            # main locale -> indice (0 gauche, 1 droite, 2 souris)
 var _snapshots: Array = []        # copilote : [temps conducteur, Transform3D, vitesse, vitesse angulaire]
@@ -72,6 +75,7 @@ func _ready() -> void:
 	_director = main.get_node_or_null("ChaseDirector") as ChaseDirector
 	_trees = main.get_node_or_null("FallingTrees") as FallingTreeManager
 	_animals = main.get_node_or_null("RoadGenerator/Animals") as AnimalManager
+	_rivals = _director._rivals if _director else null
 	if Net.is_copilot():
 		# le copilote applique la position reçue avant que le reste de la scène bouge
 		process_physics_priority = -100
@@ -80,6 +84,10 @@ func _ready() -> void:
 		process_physics_priority = 100   # après la physique de la voiture
 		if _trees:
 			_trees.tree_falling.connect(_on_host_tree)
+		if _rivals:
+			_rivals.net_event.connect(func(kind: String, data: Array):
+				if Net.is_online():
+					Net.rx_rivals_fx.rpc(kind, data))
 	# la pose des mains part en fin d'image physique, une fois les mains placées
 	var late := _LateSender.new()
 	late.session = self
@@ -187,13 +195,17 @@ func _send_car() -> void:
 	if _pursuer:
 		police = _pursuer.net_state()
 		police[1] = _to_abs(police[1])
+	var rivals := []
+	if _rivals:
+		rivals = _rivals.net_state()
+		rivals[1] = _to_abs(rivals[1])
 	Net.rx_car.rpc([_now(), _to_abs(car.global_transform), car.linear_velocity, car.forward_speed,
 		car.throttle_input, car.brake_input, car.auto_gear, car.shift_timer, car.engine_state,
-		w.input_target_angle / deg_to_rad(w.max_rotation_deg), car.angular_velocity, police])
+		w.input_target_angle / deg_to_rad(w.max_rotation_deg), car.angular_velocity, police, rivals])
 
 
 func on_car(data: Array) -> void:
-	if not Net.is_copilot() or data.size() < 12:
+	if not Net.is_copilot() or data.size() < 13:
 		return
 	var t: float = data[0]
 	var offset := t - _now()
@@ -207,7 +219,7 @@ func on_car(data: Array) -> void:
 		_clock_offset = lerpf(_clock_offset, offset, 0.01)   # suit lentement une dérive
 	if not _snapshots.is_empty() and t <= _snapshots[-1][0]:
 		return
-	_snapshots.append([t, data[1], data[2], data[10], data[11]])
+	_snapshots.append([t, data[1], data[2], data[10], data[11], data[12]])
 	while _snapshots.size() > 30:
 		_snapshots.pop_front()
 	_last_car = data
@@ -225,6 +237,8 @@ func _apply_car() -> void:
 	var ang: Vector3 = a[3]
 	var police: Array = a[4]
 	var police_xf: Transform3D = police[1] if not police.is_empty() else Transform3D.IDENTITY
+	var rivals: Array = a[5]
+	var rivals_xf: Transform3D = rivals[1] if not rivals.is_empty() else Transform3D.IDENTITY
 	if _snapshots.size() >= 2 and rt >= a[0]:
 		var b: Array = _snapshots[1]
 		var span: float = b[0] - a[0]
@@ -236,11 +250,17 @@ func _apply_car() -> void:
 		if not police.is_empty() and not pb.is_empty():
 			police_xf = police_xf.interpolate_with(pb[1], w) if police[0] and pb[0] else pb[1]
 			police = pb
+		var rb: Array = b[5]
+		if not rivals.is_empty() and not rb.is_empty():
+			rivals_xf = rivals_xf.interpolate_with(rb[1], w) if rivals[0] and rb[0] else rb[1]
+			rivals = rb
 		if rt > b[0]:
 			xf = b[1]
 			xf.origin += (b[2] as Vector3) * minf(rt - b[0], MAX_EXTRAPOLATION)
 	if _pursuer and not police.is_empty():
 		_pursuer.net_apply(police, _from_abs(police_xf))
+	if _rivals and not rivals.is_empty():
+		_rivals.net_apply(rivals, _from_abs(rivals_xf))
 	car.global_transform = _from_abs(xf)
 	car.linear_velocity = vel
 	car.angular_velocity = ang
@@ -316,6 +336,11 @@ func on_animals(list: Array) -> void:
 	_animals.net_sync(list, func(p: Vector3) -> Vector3: return p - off)
 
 
+func on_rivals_fx(kind: String, data: Array) -> void:
+	if Net.is_copilot() and _rivals:
+		_rivals.net_fx(kind, data)
+
+
 func on_text(t: Array) -> void:
 	if Net.is_copilot() and _director:
 		_director.net_apply_text(t)
@@ -389,6 +414,7 @@ func _find_local_hands() -> void:
 		if not _local_hands.has(h):
 			_local_hands[h] = 0 if (h as VRHandInteractor).is_left() else 1
 			h.connect("interacted", _on_local_interaction.bind(h))
+			h.connect("tip_interacted", _on_local_tip.bind(h))
 	for h in get_tree().get_nodes_in_group(MouseHand.GROUP):
 		if h is MouseHand and not _local_hands.has(h):
 			_local_hands[h] = 2
@@ -400,8 +426,8 @@ func _find_local_hands() -> void:
 
 func _hand_active(h: Node3D) -> bool:
 	if h is VRHandInteractor:
-		var c := (h as VRHandInteractor).controller
-		return c != null and c.get_has_tracking_data()
+		var vh := h as VRHandInteractor
+		return (vh.controller != null and vh.controller.get_has_tracking_data()) or not vh.debug_points.is_empty()
 	return h.is_inside_tree() and h.is_physics_processing()
 
 
@@ -411,10 +437,15 @@ func _send_pose() -> void:
 		return
 	var inv := car.global_transform.affine_inverse()
 	var hands: Array = [null, null, null]
+	var touch: Array = [null, null]
 	for h in _local_hands:
 		if is_instance_valid(h) and _hand_active(h):
-			hands[_local_hands[h]] = inv * (h as Node3D).global_transform
-	Net.rx_pose.rpc([inv * cam.global_transform, hands[0], hands[1], hands[2]])
+			var i: int = _local_hands[h]
+			hands[i] = inv * (h as Node3D).global_transform
+			if h is VRHandInteractor:
+				var vh := h as VRHandInteractor
+				touch[i] = [vh.can_touch(), inv * vh.fingertip_position(), inv * vh.palm_position()]
+	Net.rx_pose.rpc([inv * cam.global_transform, hands[0], hands[1], hands[2], touch[0], touch[1]])
 
 
 func _on_local_interaction(kind: int, target: Node, hand: Node3D) -> void:
@@ -425,6 +456,16 @@ func _on_local_interaction(kind: int, target: Node, hand: Node3D) -> void:
 	if kind == HandEvent.RELEASE and target is VRPickable:
 		var item := (target as VRPickable).item
 		get_tree().create_timer(ITEM_REST_DELAY).timeout.connect(_send_item_rest.bind(item))
+
+
+## Prise du bout de l'index : rejouée par le doigt fantôme 3 (gauche) ou 4 (droit).
+func _on_local_tip(kind: int, target: Node, hand: VRHandInteractor) -> void:
+	if not Net.is_online() or not is_instance_valid(target) or not _local_hands.has(hand):
+		return
+	var path := String(get_parent().get_path_to(target))
+	Net.rx_hand.rpc(3 + _local_hands[hand], kind, path, car.global_transform.affine_inverse() * hand.tip_hand.global_transform)
+	if kind == HandEvent.RELEASE and target is VRPickable:
+		get_tree().create_timer(ITEM_REST_DELAY).timeout.connect(_send_item_rest.bind((target as VRPickable).item))
 
 
 ## Objet lâché par le joueur local, maintenant posé : sa place fait foi chez l'autre.
@@ -469,20 +510,23 @@ func on_item(item_name: String, parent_path: String, local_xf: Transform3D) -> v
 # --- Autre joueur -> chez soi ----------------------------------------------------------
 
 func on_pose(data: Array) -> void:
-	if car == null or data.size() < 4:
+	if car == null or data.size() < 6:
 		return
 	_ensure_remote_player()
 	_remote_head_local = data[0]
 	for i in 3:
 		_remote_hand_local[i] = data[i + 1]
+	for i in 2:
+		_remote_touch[i] = data[i + 4]
 
 
 func on_hand(index: int, kind: int, path: String, local_xf: Transform3D) -> void:
-	if car == null or index < 0 or index > 2:
+	if car == null or index < 0 or index > 4:
 		return
 	_ensure_remote_player()
 	var proxy := _remote_hands[index]
-	_remote_hand_local[index] = local_xf
+	if index < 3:
+		_remote_hand_local[index] = local_xf
 	proxy.global_transform = car.global_transform * local_xf
 	var target := get_parent().get_node_or_null(NodePath(path)) as VRInteractable
 	Net.applying_remote = true
@@ -532,14 +576,25 @@ func _update_remote_hands() -> void:
 	fwd.y = 0.0
 	var body_basis := Basis.looking_at(-fwd.normalized() if fwd.length() > 0.01 else Vector3.FORWARD, Vector3.UP)
 	_remote_body.global_transform = cxf * Transform3D(body_basis, _remote_head_local.origin + Vector3(0, -0.42, 0.04))
-	for i in 3:
+	for i in 5:
 		var proxy := _remote_hands[i]
-		var local = _remote_hand_local[i]
-		_remote_hand_meshes[i].visible = local != null
+		var local = _remote_hand_local[i if i < 3 else i - 3]
+		if i < 3:
+			_remote_hand_meshes[i].visible = local != null
 		if local == null:
+			proxy.remote_touch = false
 			continue
-		proxy.global_transform = cxf * (local as Transform3D)
-		_remote_hand_meshes[i].global_transform = proxy.global_transform
+		var touch = _remote_touch[i % 3] if i != 2 else null
+		if i < 3:
+			proxy.global_transform = cxf * (local as Transform3D)
+			_remote_hand_meshes[i].global_transform = proxy.global_transform
+			proxy.remote_touch = touch != null and touch[0]
+			if touch != null:
+				proxy.tip_global = cxf * (touch[1] as Vector3)
+				proxy.palm_global = cxf * (touch[2] as Vector3)
+		elif touch != null:
+			# bout de l'index : orientation de la main, au bout du doigt
+			proxy.global_transform = Transform3D((cxf * (local as Transform3D)).basis, cxf * (touch[1] as Vector3))
 		if proxy.held:
 			if not is_instance_valid(proxy.held) or not proxy.held.enabled:
 				_release_proxy(proxy)
@@ -619,6 +674,14 @@ func _ensure_remote_player() -> void:
 		mesh.visible = false
 		remote_player.add_child(mesh)
 		_remote_hand_meshes.append(mesh)
+	for i in 2:
+		var tip := NetRemoteTip.new()
+		tip.name = ["LeftIndexTip", "RightIndexTip"][i]
+		tip.index = 3 + i
+		tip.camera = cam
+		tip.owner_hand = _remote_hands[i]
+		remote_player.add_child(tip)
+		_remote_hands.append(tip)
 
 
 func _mat(c: Color) -> StandardMaterial3D:

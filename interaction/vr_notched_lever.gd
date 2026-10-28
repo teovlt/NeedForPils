@@ -154,15 +154,14 @@ func _update_touch_push() -> void:
 	var axis := hinge_axis.normalized()
 	var arm := _arm_angle0 + (angle - _angle0)
 	var new_angle := angle
-	var pusher: VRHandInteractor = null
-	for n in get_tree().get_nodes_in_group(VRHandInteractor.GROUP):
-		var hand := n as VRHandInteractor
+	var pusher: Node3D = null
+	for hand in get_tree().get_nodes_in_group(VRHandInteractor.TOUCH_GROUP):
 		for k in 2:
 			var key := [hand, k]
 			if not hand.can_touch():
 				_side.erase(key)
 				continue
-			var gp := hand.fingertip_position() if k == 0 else hand.palm_position()
+			var gp: Vector3 = hand.fingertip_position() if k == 0 else hand.palm_position()
 			var p := _local_point(gp)
 			var h := p.dot(axis)
 			var rho := (p - axis * h).length()
