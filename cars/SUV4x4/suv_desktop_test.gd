@@ -2077,6 +2077,8 @@ func _run_autotest_ambience(delta: float) -> void:
 	if at.call(11.5):
 		w.hour = 23.0
 		car.window_cranks["FL"].set_opening(1.0)
+		var wfl: Node3D = car.window_cranks["FL"].window
+		_log("AUTOTEST vitre FL : centre %s" % car.to_local((wfl as MeshInstance3D).global_transform * (wfl as MeshInstance3D).get_aabb().get_center()))
 	if at.call(15.5): _log("AUTOTEST nuit, vitre conducteur ouverte : " + status.call())
 	if at.call(15.6): _log("AUTOTEST cris d'oiseaux joués en 15,6 s : %d" % amb.calls_played)
 	if at.call(16.0):
@@ -4190,12 +4192,18 @@ const NC_MOVES := [
 	["tableau de bord", Vector3(-0.3, 1.05, 0.35), Vector3(-0.3, 1.0, 1.3)],
 	["console (de côté)", Vector3(0.35, 0.95, 0.1), Vector3(-0.35, 0.95, 0.1)],
 	["portière gauche", Vector3(0.5, 1.2, 0.0), Vector3(1.4, 1.2, 0.0)],
-	["toit", Vector3(-0.3, 1.3, -0.3), Vector3(-0.3, 2.4, -0.3)],
-	["dans la boîte à gants (ouverte)", Vector3(-0.52, 1.15, 0.5), Vector3(-0.52, 0.88, 0.83)],
+	["toit", Vector3(-0.3, 1.3, 0.15), Vector3(-0.3, 2.4, 0.15)],
+	["dans la boîte à gants (ouverte)", Vector3(-0.52, 0.9, 0.45), Vector3(-0.52, 0.88, 0.83)],
 	["dans l'accoudoir (ouvert)", Vector3(0.0, 1.15, 0.05), Vector3(0.0, 0.68, 0.05)],
 	["ressortir de l'accoudoir", Vector3(0.0, 0.68, 0.05), Vector3(0.0, 1.2, 0.05)],
 	["haut du pare-brise", Vector3(-0.3, 1.5, 0.2), Vector3(-0.3, 1.75, 1.4)],
-	["toit (vue)", Vector3(-0.3, 1.4, -0.2), Vector3(-0.3, 2.3, -0.2)],
+	["toit (arrière)", Vector3(0.3, 1.4, -1.2), Vector3(0.3, 2.3, -1.2)],
+	["levier de vitesse", Vector3(0.2, 0.89, 0.515), Vector3(-0.25, 0.89, 0.515)],
+	["frein à main", Vector3(0.3, 0.87, 0.12), Vector3(0.02, 0.87, 0.12)],
+	["tableau de bord côté conducteur", Vector3(0.45, 1.05, 0.3), Vector3(0.45, 1.0, 1.3)],
+	["vitre conducteur fermée", Vector3(0.35, 1.3, 0.15), Vector3(1.5, 1.3, 0.15)],
+	["vitre conducteur ouverte", Vector3(0.35, 1.3, 0.15), Vector3(1.5, 1.3, 0.15)],
+	["portière passager ouverte", Vector3(-0.35, 1.0, 0.15), Vector3(-1.6, 1.0, 0.15)],
 ]
 
 
@@ -4211,6 +4219,15 @@ func _run_autotest_no_clip(delta: float) -> void:
 		car.get_node("ConsoleLid").set_angle_deg(-100.0, true)
 		_nc["hand"] = Node3D.new()
 		add_child(_nc["hand"])
+	if at.call(0.3):
+		for nm in ["GearLever", "Handbrake"]:
+			var bb := AABB()
+			var first := true
+			for mi in car.get_node(nm).find_children("*", "MeshInstance3D", true, false):
+				var b: AABB = car.global_transform.affine_inverse() * (mi as MeshInstance3D).global_transform * (mi as MeshInstance3D).get_aabb()
+				bb = b if first else bb.merge(b)
+				first = false
+			_log("AUTOTEST %s : boîte %s -> %s" % [nm, bb.position.snapped(Vector3.ONE * 0.01), bb.end.snapped(Vector3.ONE * 0.01)])
 	if _t < 0.5:
 		return
 	var i := int((_t - 0.5) / 1.6)
@@ -4219,8 +4236,18 @@ func _run_autotest_no_clip(delta: float) -> void:
 		return
 	var mv: Array = NC_MOVES[i]
 	var hand: Node3D = _nc["hand"]
+	if str(mv[0]) == "vitre conducteur ouverte" and not _nc.has("win"):
+		_nc["win"] = true
+		car.window_cranks["FL"].set_opening(1.0)
+		var wfl: Node3D = car.window_cranks["FL"].window
+		_log("AUTOTEST vitre FL : centre %s" % car.to_local((wfl as MeshInstance3D).global_transform * (wfl as MeshInstance3D).get_aabb().get_center()))
+	if str(mv[0]) == "portière passager ouverte" and not _nc.has("door"):
+		_nc["door"] = true
+		car.get_node("Doors/DoorFR").set_angle_deg(65.0, true)
 	var ph := fmod(_t - 0.5, 1.6)
-	var it := car.find_child("Phone", true, false) as RigidBody3D
+	var it := _car_item("Phone")
+	if it == null:
+		it = _car_item("Thermos")
 	var g := it.get_node("Grab") as VRPickable
 	if not _nc.has("m%d" % i):
 		_nc["m%d" % i] = true
@@ -4241,11 +4268,9 @@ func _run_autotest_no_clip(delta: float) -> void:
 		_nc["r%d" % i] = true
 		var ip := car.to_local(it.global_position)
 		var hp := car.to_local(hand.global_position)
-		_log("AUTOTEST %-32s : main %s, objet arrêté en %s (écart %.2f m)" % [mv[0], hp.snapped(Vector3.ONE * 0.01), ip.snapped(Vector3.ONE * 0.01), ip.distance_to(hp)])
-		if i >= 9:
-			cam.global_position = car.to_global(Vector3(0.45, 1.3, -0.6))
-			cam.look_at(it.global_position)
-			_shot("traverser_%d" % i)
+		var blk: String = car.get_node("Storage").last_held_blocker
+		car.get_node("Storage").last_held_blocker = ""
+		_log("AUTOTEST %-32s : main %s, objet arrêté en %s (écart %.2f m) %s" % [mv[0], hp.snapped(Vector3.ONE * 0.01), ip.snapped(Vector3.ONE * 0.01), ip.distance_to(hp), "par " + blk if blk != "" else ""])
 		if i == 6 or i == 7:
 			g.release(hand)
 			_log("AUTOTEST   lâché -> rangé dans %s" % it.get_parent().name)

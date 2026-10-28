@@ -23,8 +23,6 @@ const ITEM_LAYER := 16
 ## Volumes pleins de l'habitacle (sièges, dossiers, banquette, console, bas du tableau
 ## de bord...) que les objets en vrac ne traversent pas (AABB, repère du véhicule).
 @export var obstacles: Array[AABB] = []
-## Plafond (sous le toit) pour les objets tenus en main.
-@export var held_ceiling := 1.86
 ## Objets en vrac soumis aux accélérations de la voiture (sinon : collés à leur place).
 @export var item_physics := true
 ## Durée de vie (s) d'un objet jeté dehors.
@@ -40,6 +38,17 @@ const ITEM_LAYER := 16
 
 var _zones: Array[StorageZone] = []
 var _car: RigidBody3D
+
+
+## Couche de collision réservée aux objets tenus en main (copie des maillages de la
+## voiture) : rien d'autre ne la voit.
+const HELD_LAYER := 1 << 20
+## Marge (m) : l'objet est un peu plus petit que sa boîte (il frôle sans accrocher).
+const HELD_SKIN := 0.003
+var _held_built := false
+## Pièce qui a arrêté l'objet tenu en dernier (tests, réglages).
+var last_held_blocker := ""
+var _held_shapes := 0
 
 
 func _ready() -> void:
@@ -386,100 +395,118 @@ static func lying_basis(grab: VRPickable, long_dir: Vector3, up: Vector3) -> Bas
 	return Basis(cols[0], cols[1], cols[2])
 
 
-## AABB de `box` (repère objet) une fois tournée par `basis`.
-## Objet tenu en main : il ne traverse pas l'habitacle. `xf` = transform voulue (monde,
-## celle de la main), `prev` = centre retenu à l'image précédente (repère de ce nœud).
-## Renvoie la transform corrigée : gardée dans l'habitacle, repoussée hors des volumes
-## pleins (sièges, dossiers, console, tableau de bord) du côté d'où elle venait. Les
-## compartiments ouverts restent accessibles : au-dessus de leur ouverture, l'objet peut
-## y descendre (sans traverser leurs parois). Hors de l'habitacle (bras par la fenêtre),
-## aucune contrainte.
+## Objet tenu en main : il ne traverse pas la voiture. `xf` = transform voulue (monde,
+## celle de la main), `prev` = position retenue à l'image précédente (repère de ce nœud).
+## L'objet (sa boîte) est déplacé par un balayage contre les vrais maillages de la
+## voiture (tableau de bord, levier de vitesse, frein à main, sièges, portières, vitres,
+## toit...), copiés en formes de collision sur une couche à part (HELD_LAYER). Bloqué, il
+## glisse le long de la surface. Ces formes suivent les pièces mobiles : portière ouverte
+## ou vitre baissée, l'objet peut sortir par l'ouverture ; couvercle ouvert, il peut
+## entrer dans le compartiment.
 func constrain_held(grab: VRPickable, xf: Transform3D, prev: Vector3) -> Transform3D:
-	var loc := global_transform.affine_inverse() * xf
-	var target := loc.origin
-	if not cabin.grow(0.06).has_point(target) and not cabin.grow(0.06).has_point(prev):
+	_ensure_held_collision()
+	if _held_shapes == 0:
 		return xf
-	var box := rotated_aabb(grab.get_local_aabb(), loc.basis.orthonormalized())
-	# par petits pas (2 cm), pour ne jamais sauter par-dessus un volume plein
-	var cur := prev
-	var d := target - prev
-	var steps := clampi(int(ceil(d.length() / 0.02)), 1, 60)
-	for k in steps:
-		cur = _resolve_held(box, cur + d / steps, cur)
-	return global_transform * Transform3D(loc.basis, cur)
-
-
-func _resolve_held(box: AABB, c: Vector3, prev: Vector3) -> Vector3:
-	var lo := box.position
-	var hi := box.end
-	var ctr := lo + box.size * 0.5
-	# 1. dans l'habitacle (portes, toit, plancher, pare-brise)
-	for a in 3:
-		var mn := cabin.position[a] - lo[a]
-		var mx := (minf(cabin.end.y, held_ceiling) if a == 1 else cabin.end[a]) - hi[a]
-		if mn <= mx:
-			c[a] = clampf(c[a], mn, mx)
-	# 2. compartiments ouverts : près de leur ouverture, leurs volumes pleins ne gênent
-	# pas ; dedans, l'objet reste entre leurs parois
-	var skip: Array[AABB] = []
-	for z in _zones:
-		if z.get_parent() != self or z.exact_snap or not z.is_accessible():
+	var from := to_global(prev)
+	var motion := xf.origin - from
+	if motion.length_squared() < 1e-10:
+		return xf
+	var box := grab.get_local_aabb()
+	var shape := BoxShape3D.new()
+	shape.size = (box.size - Vector3.ONE * HELD_SKIN * 2.0).max(Vector3.ONE * 0.004)
+	var offset := xf.basis * box.get_center()
+	var q := PhysicsShapeQueryParameters3D.new()
+	q.shape = shape
+	q.collision_mask = HELD_LAYER
+	q.collide_with_areas = false
+	var space := get_world_3d().direct_space_state
+	var hit := func(p: Vector3) -> bool:
+		q.transform = Transform3D(xf.basis, p + offset)
+		return not space.intersect_shape(q, 1).is_empty()
+	var pos := from
+	var stuck: bool = hit.call(pos)
+	# par pas plus courts que l'épaisseur de l'objet : on ne passe jamais à travers une
+	# paroi ; bloqué, on garde les composantes du pas qui passent (glisse le long)
+	var step_len := clampf(shape.size[shape.size.min_axis_index()] * 0.5, 0.003, 0.02)
+	var steps := clampi(int(ceil(motion.length() / step_len)), 1, 120)
+	var step := motion / steps
+	for _k in steps:
+		if stuck:
+			# déjà en contact (objet tout juste attrapé, rotation contre une paroi) : il
+			# peut seulement s'éloigner de la surface touchée
+			q.transform = Transform3D(xf.basis, pos + offset)
+			var info := space.get_rest_info(q)
+			if info.is_empty():
+				stuck = false
+			else:
+				var away: Vector3 = (pos + offset) - (info["point"] as Vector3)
+				if step.dot(away) > 0.0:
+					pos += step
+					stuck = hit.call(pos)
+					continue
+				var col := info.get("collider_id", 0) as int
+				var o := instance_from_id(col) as Node if col else null
+				last_held_blocker = ("%s/%s (contact)" % [o.get_parent().get_parent().name, o.get_parent().name]) if o and o.get_parent() and o.get_parent().get_parent() else "contact"
+				break
+		if not hit.call(pos + step):
+			pos += step
 			continue
-		var zs: Vector3 = z.size
-		var zb := AABB(z.position - Vector3(zs.x, 0, zs.z) * 0.5, zs)
-		var cc := c + ctr
-		var near := zb.grow(0.07)
-		near.size.y += 0.12   # on arrive souvent par le dessus (accoudoir)
-		if not near.has_point(cc):
-			continue
-		for o in obstacles:
-			if (o as AABB).intersects(zb):
-				skip.append(o)
-		if zb.has_point(prev + ctr):
-			for a in [0, 2]:
-				var mn2: float = zb.position[a] - lo[a]
-				var mx2: float = zb.end[a] - hi[a]
-				c[a] = clampf(c[a], mn2, mx2) if mn2 <= mx2 else zb.get_center()[a] - ctr[a]
-			c.y = maxf(c.y, zb.position.y - lo.y)
-	# 3. volumes pleins : repoussé du côté d'où il venait
-	for _it in 3:
 		var moved := false
-		for o in obstacles:
-			if o in skip:
-				continue
-			var b: AABB = o
-			var bmin := c + lo
-			var bmax := c + hi
-			if bmax.x <= b.position.x or bmin.x >= b.end.x or bmax.y <= b.position.y or bmin.y >= b.end.y \
-					or bmax.z <= b.position.z or bmin.z >= b.end.z:
-				continue
-			var best_a := -1
-			var best_push := 0.0
-			var best_pen := INF
-			for pass_i in 2:
-				for a in 3:
-					var out_neg: bool = prev[a] + hi[a] <= b.position[a] + 0.001
-					var out_pos: bool = prev[a] + lo[a] >= b.end[a] - 0.001
-					if pass_i == 0 and not (out_neg or out_pos):
-						continue
-					var pen_neg: float = bmax[a] - b.position[a]
-					var pen_pos: float = b.end[a] - bmin[a]
-					var push := -pen_neg if pen_neg < pen_pos else pen_pos
-					if pass_i == 0:
-						push = -pen_neg if out_neg else pen_pos
-					if absf(push) < best_pen:
-						best_pen = absf(push)
-						best_push = push
-						best_a = a
-				if best_a >= 0:
-					break
-			c[best_a] += best_push + signf(best_push) * 0.0005
-			moved = true
+		for a in 3:
+			var part := Vector3.ZERO
+			part[a] = step[a]
+			if absf(part[a]) > 1e-6 and not hit.call(pos + part):
+				pos += part
+				moved = true
 		if not moved:
+			q.transform = Transform3D(xf.basis, pos + step + offset)
+			var hits := space.intersect_shape(q, 2)
+			if not hits.is_empty():
+				last_held_blocker = str((hits[0]["collider"] as Node).get_parent().get_path()).get_file()
+				var par := (hits[0]["collider"] as Node).get_parent().get_parent()
+				if par: last_held_blocker = str(par.name) + "/" + last_held_blocker
 			break
-	return c
+	return Transform3D(xf.basis, pos)
 
 
+## Copie les maillages de la voiture (hors objets attrapables et joueur) en formes de
+## collision « trimesh », enfants de chaque maillage pour en suivre les mouvements.
+func _ensure_held_collision() -> void:
+	if _held_built or _car == null:
+		return
+	_held_built = true
+	for mi in _car.find_children("*", "MeshInstance3D", true, false):
+		var m := mi as MeshInstance3D
+		if m.mesh == null or m.has_meta("_vr_outline") or not m.is_visible_in_tree():
+			continue
+		var skip := false
+		var n: Node = m.get_parent()
+		while n and n != _car:
+			if n is RigidBody3D or n is XROrigin3D or n is Camera3D or n.name == "DriverSeat" or n.name == "Burning":
+				skip = true
+				break
+			n = n.get_parent()
+		if skip:
+			continue
+		var faces := m.mesh.get_faces()
+		if faces.size() < 3:
+			continue
+		var cs := ConcavePolygonShape3D.new()
+		cs.set_faces(faces)
+		cs.backface_collision = true
+		var body := StaticBody3D.new()
+		body.name = "HeldCollision"
+		body.collision_layer = HELD_LAYER
+		body.collision_mask = 0
+		var col := CollisionShape3D.new()
+		col.shape = cs
+		body.add_child(col)
+		m.add_child(body)
+		_held_shapes += 1
+	print("Collisions des objets tenus : %d maillages de la voiture" % _held_shapes)
+
+
+## AABB de `box` (repère objet) une fois tournée par `basis`.
 static func rotated_aabb(box: AABB, basis: Basis) -> AABB:
 	return Transform3D(basis, Vector3.ZERO) * box
 
