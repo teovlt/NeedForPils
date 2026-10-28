@@ -1,7 +1,8 @@
 class_name HornPad
 extends VRInteractable
-## Klaxon : coussin rond au centre du volant. Il klaxonne tant qu'on appuie dessus
-## (grip en VR, clic gauche maintenu à la souris, touche J au clavier). A/X ou F :
+## Klaxon : coussin rond au centre du volant. Il klaxonne tant qu'on appuie dessus :
+## en VR il suffit de poser la main (paume ou doigt) sur le coussin, sans bouton (le grip
+## marche aussi) ; clic gauche maintenu à la souris, touche J au clavier. A/X ou F :
 ## coup de klaxon bref. Le coussin s'enfonce de 4 mm pendant l'appui.
 ## Il tourne avec le volant (`wheel`) autour de la colonne de direction.
 ## Son généré par code : klaxon à deux tons (environ 415 et 520 Hz).
@@ -25,6 +26,7 @@ var _phase2 := 0.0
 var _env := 0.0
 var _hold_sources := {}       # qui appuie (main, souris, clavier)
 var _short_timer := 0.0
+var _touching := {}           # mains VR posées sur le coussin
 
 
 func _ready() -> void:
@@ -112,11 +114,38 @@ func _on_grab_begin(hand: Node3D) -> void:
 
 
 func _on_grab_end(hand: Node3D) -> void:
-	unpress(hand)
+	if not _touching.has(hand):   # encore posée dessus : continue de klaxonner
+		unpress(hand)
+
+
+## Main posée sur le coussin : bout de l'index ou paume contre sa face (repère du
+## coussin : Y = axe de la colonne, vers le conducteur ; face à y = 0,007).
+func _update_touch() -> void:
+	var pad_xf := global_transform * Transform3D(_pad.basis, _rest_pos)
+	var inv := pad_xf.affine_inverse()
+	for n in get_tree().get_nodes_in_group(VRHandInteractor.GROUP):
+		var h := n as VRHandInteractor
+		var was: bool = _touching.has(h)
+		var on := false
+		if h.can_touch():
+			var slack := 0.008 if was else 0.0
+			for pt in [[h.fingertip_position(), 0.012], [h.palm_position(), 0.03]]:
+				var l: Vector3 = inv * (pt[0] as Vector3)
+				if Vector2(l.x, l.z).length() < pad_radius + 0.012 + slack and l.y < float(pt[1]) + slack and l.y > -0.06:
+					on = true
+		if on and not was:
+			_touching[h] = true
+			press(h)
+			h.pulse(0.35, 0.05)
+		elif not on and was:
+			_touching.erase(h)
+			if not is_grabbed() or h not in _grab_hands:
+				unpress(h)
 
 
 func _process(delta: float) -> void:
 	_short_timer = maxf(_short_timer - delta, 0.0)
+	_update_touch()
 	var on := is_honking()
 	var axis := column_axis.normalized()
 	if wheel:

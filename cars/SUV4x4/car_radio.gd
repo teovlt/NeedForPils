@@ -379,10 +379,49 @@ func _twist_ref(hand: Node3D) -> Vector3:
 	return v.normalized() if v.length_squared() > 1e-4 else Vector3.RIGHT
 
 
+# --- Touches au doigt (VR) ----------------------------------------------------------
+# On appuie sur une touche avec le bout de l'index, sans bouton de manette : le doigt
+# arrive sur la face de la touche (repère de la radio : +Z vers le conducteur) ; il faut
+# le retirer d'un centimètre pour pouvoir rappuyer.
+
+var _finger_on := {}            # [main, touche] -> vrai tant que le doigt appuie
+
+
+func _update_finger_presses() -> void:
+	for n in get_tree().get_nodes_in_group(VRHandInteractor.GROUP):
+		var hand := n as VRHandInteractor
+		var ok := hand.can_touch()
+		var tip := to_local(hand.fingertip_position()) if ok else Vector3.ZERO
+		for kind in _buttons:
+			var key := [hand, kind]
+			if not ok:
+				_finger_on.erase(key)
+				continue
+			var m: Node3D = _buttons[kind][0]
+			var g := m.get_parent() as Node3D
+			var ab := AABB(Vector3(-0.008, -0.006, -0.004), Vector3(0.016, 0.012, 0.008))
+			if m is MeshInstance3D and (m as MeshInstance3D).mesh:
+				ab = (m as MeshInstance3D).get_aabb()
+			var c := g.position + ab.get_center()
+			var half := ab.size * 0.5
+			var face := g.position.z + ab.end.z
+			var on: bool = _finger_on.has(key)
+			var slack := 0.006 if on else 0.002
+			var inside := absf(tip.x - c.x) < half.x + slack and absf(tip.y - c.y) < half.y + slack
+			if on:
+				if not inside or tip.z > face + 0.01:
+					_finger_on.erase(key)
+			elif inside and tip.z < face + 0.004 and tip.z > face - 0.025:
+				_finger_on[key] = true
+				_press(kind)
+				hand.pulse(0.3, 0.03)
+
+
 # --- Mise à jour -----------------------------------------------------------------
 
 func _process(delta: float) -> void:
 	_clock += delta
+	_update_finger_presses()
 	_show_vol = maxf(_show_vol - delta, 0.0)
 	_tuning = maxf(_tuning - delta, 0.0)
 	var on := is_on()

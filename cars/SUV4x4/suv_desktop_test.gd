@@ -154,6 +154,8 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_thermos(delta)
 		elif autotest_scenario == "fatigue":
 			_run_autotest_fatigue(delta)
+		elif autotest_scenario == "toucher":
+			_run_autotest_touch(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -4615,4 +4617,121 @@ func _run_autotest_fatigue(delta: float) -> void:
 		_log("AUTOTEST épuisé pendant 30 s : paupières max %.2f, yeux fermés %.1f s, micro-sommeils %d, bâillements %d" % [_fa["lids_max"], _fa["closed"], f.microsleeps - _fa["b0"], f.yawns])
 		f.drink_coffee(1.0)
 		_log("AUTOTEST une tasse de café -> fatigue %.2f" % f.fatigue)
+		get_tree().quit()
+
+
+# --- VR au toucher : main posée sur le klaxon, comodos poussés, touches de la radio au
+# doigt (mains VR simulées : VRHandInteractor.debug_points) ---------------------------
+
+var _tc := {}
+
+
+func _run_autotest_touch(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = false
+	var horn := car.get_node("Horn") as HornPad
+	var wiper := car.get_node("WiperStalk") as VRNotchedLever
+	var light := car.get_node("LightStalk") as VRNotchedLever
+	var radio := car.get_node("Radio")
+	if at.call(0.05):
+		$Weather.hour = 13.0
+		var holder := Node3D.new()
+		add_child(holder)
+		var h := VRHandInteractor.new()
+		holder.add_child(h)
+		h.debug_points = [Vector3(0, -100, 0), Vector3(0, -100, 0)]
+		_tc["h"] = h
+		_tc["notches"] = []
+		wiper.notch_changed.connect(func(i): _tc["notches"].append(["essuie-glace", i]))
+		light.notch_changed.connect(func(i): _tc["notches"].append(["phares", i]))
+	var h: VRHandInteractor = _tc.get("h")
+	if h == null:
+		return
+	var far := Vector3(0, -100, 0)
+	# 1) klaxon : le doigt arrive sur le coussin, puis la paume, puis repart
+	var pad_c: Vector3 = horn._pad.global_position
+	var axis: Vector3 = (horn.global_basis * horn.column_axis).normalized()
+	if _t < 3.0:
+		var k := 0.0
+		if _t > 0.5: k = smoothstep(0.5, 0.9, _t) * (1.0 - smoothstep(1.3, 1.5, _t))
+		var tip := pad_c + axis * lerpf(0.06, 0.004, k)
+		var palm := far
+		if _t > 1.8 and _t < 2.6:
+			palm = pad_c + axis * 0.02
+			tip = pad_c + axis * 0.02 + car.global_basis.z * 0.09
+		h.debug_points = [tip, palm]
+		cam.global_position = car.to_global(Vector3(0.45, 1.42, 0.08))
+		cam.look_at(pad_c)
+		cam.fov = 60.0
+	for tt in [0.4, 1.1, 1.6, 2.2, 2.9]:
+		if at.call(tt):
+			_log("AUTOTEST t=%.1f klaxon : klaxonne=%s" % [_t, horn.is_honking()])
+	if at.call(1.1):
+		_shot("toucher_klaxon")
+	# 2) comodo d'essuie-glace : le doigt le pousse vers le bas puis vers le haut
+	if _t >= 3.0 and _t < 9.0:
+		var stalk := wiper if _t < 7.5 else light
+		var parent_xf: Transform3D = stalk.get_parent().global_transform
+		var ax := (parent_xf.basis * stalk.hinge_axis).normalized()
+		var hinge := stalk.global_position
+		if not _tc.has("frame_" + stalk.name) or _t < 3.05 or (_t >= 7.5 and _t < 7.55):
+			_tc["frame_" + stalk.name] = stalk.touch_arm_frame(0.2)   # pris levier au repos
+		var fr: Array = _tc["frame_" + stalk.name]
+		var perp: Vector3 = fr[1]
+		var arm_dir: Vector3 = (fr[0] - hinge).normalized()
+		if not _tc.has("perp_log"):
+			_tc["perp_log"] = true
+			_log("AUTOTEST comodo : bras %s, sens + %s (repère voiture)" % [car.global_basis.inverse() * arm_dir, car.global_basis.inverse() * perp])
+		var base: Vector3 = fr[0]
+		var off := 0.0
+		if _t < 5.0:
+			off = lerpf(-0.07, 0.05, smoothstep(3.3, 4.5, _t))       # pousse dans le sens +
+		elif _t < 5.4:
+			off = 0.16                                                # main loin : retour au cran
+		elif _t < 7.4:
+			off = lerpf(0.12, -0.03, smoothstep(5.4, 5.6, _t)) if _t < 5.6 else lerpf(-0.03, -0.03, 0.0)
+			if _t >= 5.6:
+				# repart de l'autre côté : arrive par le bas (sens -) et pousse vers +... puis vers -
+				off = lerpf(0.15, -0.04, smoothstep(5.8, 7.0, _t))
+		else:
+			off = lerpf(0.08, -0.06, smoothstep(7.6, 8.6, _t))
+		if _t >= 5.4 and _t < 5.8:
+			h.debug_points = [far, far]
+		else:
+			# arrivée : d'abord loin sur le bord de départ
+			h.debug_points = [base + perp * off + ax * 0.0, far]
+		cam.global_position = car.to_global(Vector3(0.3, 1.25, 0.2))
+		cam.look_at(hinge + arm_dir * 0.15)
+	for tt in [3.2, 4.0, 4.6, 5.3, 6.4, 7.0, 7.45, 8.7]:
+		if at.call(tt):
+			_log("AUTOTEST t=%.2f comodos : essuie-glace cran %d (%.1f°), phares cran %d (%.1f°)" % [_t, wiper.notch, rad_to_deg(wiper.angle), light.notch, rad_to_deg(light.angle)])
+	if at.call(4.6):
+		_shot("toucher_comodo")
+	# 3) radio : touches au doigt
+	if _t >= 9.0 and _t < 15.0:
+		var seq := [["next", 9.2], ["next", 10.2], ["p2", 11.2], ["power", 12.2], ["power", 13.4]]
+		var tip := far
+		for e in seq:
+			var dt: float = _t - float(e[1])
+			if dt >= 0.0 and dt < 0.8:
+				var m: Node3D = radio._buttons[e[0]][0]
+				var g := m.get_parent() as Node3D
+				var ab: AABB = (m as MeshInstance3D).get_aabb() if m is MeshInstance3D else AABB()
+				var face_l := g.position + Vector3(ab.get_center().x, ab.get_center().y, ab.end.z)
+				var depth := lerpf(0.03, -0.003, smoothstep(0.0, 0.3, dt)) if dt < 0.5 else lerpf(-0.003, 0.03, smoothstep(0.5, 0.7, dt))
+				tip = radio.to_global(face_l + Vector3(0, 0, depth))
+		h.debug_points = [tip, far]
+		cam.global_position = car.to_global(Vector3(0.2, 1.3, 0.1))
+		cam.look_at(radio.global_position)
+	for tt in [9.1, 9.9, 10.9, 11.9, 12.9, 14.1]:
+		if at.call(tt):
+			_log("AUTOTEST t=%.1f radio : allumée=%s, station %d" % [_t, radio.is_on(), radio.station])
+	if at.call(10.4):
+		_shot("toucher_radio")
+	if at.call(15.0):
+		_log("AUTOTEST crans changés : %s" % [_tc["notches"]])
 		get_tree().quit()

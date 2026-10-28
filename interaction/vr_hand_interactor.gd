@@ -21,6 +21,11 @@ var _toggle_down := false
 var _hover_grabbable := false
 var _pending: VRInteractable      # saisie en attente (défoncé : gestes plus lents)
 var _pending_t := 0.0
+var _skel: Skeleton3D
+var _tip_bone := -1
+var _palm_bone := -1
+## Tests sans casque : [bout de l'index, paume] imposés (monde). Vide = vraie main.
+var debug_points: Array = []
 
 
 func _ready() -> void:
@@ -36,6 +41,57 @@ func get_trigger() -> float:
 	if controller == null or not controller.get_has_tracking_data():
 		return 0.0
 	return controller.get_float("trigger")
+
+
+# --- Toucher (sans bouton) -------------------------------------------------------
+# Klaxon, comodos et touches de la radio réagissent au contact de la main : ils lisent
+# ces positions (os de la main XR Tools : Index_Tip_*, Palm_*).
+
+## Vrai si la main peut toucher : suivie, et ne tient rien (sinon on klaxonnerait ou on
+## bougerait un comodo en tenant le volant, un objet...).
+func can_touch() -> bool:
+	if held != null:
+		return false
+	if not debug_points.is_empty():
+		return true
+	return controller != null and controller.get_has_tracking_data()
+
+
+## Bout de l'index (monde).
+func fingertip_position() -> Vector3:
+	if not debug_points.is_empty():
+		return debug_points[0]
+	if _find_bones() and _tip_bone >= 0:
+		return _skel.global_transform * _skel.get_bone_global_pose(_tip_bone).origin
+	return global_transform * Vector3(0.0, -0.02, -0.12)
+
+
+## Centre de la paume (monde).
+func palm_position() -> Vector3:
+	if not debug_points.is_empty():
+		return debug_points[1] if debug_points.size() > 1 else Vector3(0, -1000, 0)
+	if _find_bones() and _palm_bone >= 0:
+		return _skel.global_transform * _skel.get_bone_global_pose(_palm_bone).origin
+	return global_position
+
+
+func _find_bones() -> bool:
+	if _skel and is_instance_valid(_skel):
+		return true
+	if controller == null:
+		return false
+	for sk in controller.find_children("*", "Skeleton3D", true, false):
+		var k := sk as Skeleton3D
+		for i in k.get_bone_count():
+			var n := k.get_bone_name(i).to_lower()
+			if n.begins_with("index_tip"):
+				_tip_bone = i
+			elif n.begins_with("palm"):
+				_palm_bone = i
+		if _tip_bone >= 0:
+			_skel = k
+			return true
+	return false
 
 
 func is_button_pressed(action: StringName) -> bool:
