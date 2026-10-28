@@ -148,6 +148,8 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_no_clip(delta)
 		elif autotest_scenario == "concurrents":
 			_run_autotest_rivals(delta)
+		elif autotest_scenario == "portee":
+			_run_autotest_reach(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -4360,4 +4362,40 @@ func _run_autotest_rivals(delta: float) -> void:
 		_log("AUTOTEST [30 s] pied au plancher")
 	if _rvl.has("lost") and _t - float(_rvl["lost"]) > 1.0 or _t > 70.0:
 		_log("AUTOTEST fin : impacts %d, état %d" % [_rv.hits, _rv.state])
+		get_tree().quit()
+
+
+# --- Portée VR : géométrie de l'habitacle autour du siège conducteur ---------------
+
+func _run_autotest_reach(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = false
+	cam.fov = 90.0
+	if at.call(0.05):
+		$Weather.hour = 13.0
+		for m in car.find_children("*", "MeshInstance3D", true, false):
+			var mi := m as MeshInstance3D
+			if mi.mesh == null or not mi.is_visible_in_tree():
+				continue
+			var ab: AABB = car.global_transform.affine_inverse() * mi.global_transform * mi.get_aabb()
+			var c := ab.get_center()
+			if absf(c.x) < 1.0 and c.y > 0.3 and c.y < 2.0 and c.z > -1.2 and c.z < 1.4 and ab.size.length() < 2.5:
+				_log("AUTOTEST mesh %s : %s .. %s" % [mi.get_path().get_concatenated_names().right(60), ab.position, ab.end])
+		var eye := car.to_local(car.driver_seat.global_position)
+		_log("AUTOTEST oeil %s" % eye)
+	var eye_g := car.driver_seat.global_position
+	if _t < 1.0:
+		_cabin_cam(car.to_local(eye_g), Vector3(0.45, 1.1, 1.0))
+		if at.call(0.8): _shot("portee_avant")
+	elif _t < 2.0:
+		_cabin_cam(car.to_local(eye_g), Vector3(0.0, 0.8, 0.5))
+		if at.call(1.8): _shot("portee_levier")
+	elif _t < 3.0:
+		_cabin_cam(Vector3(2.4, 1.3, 0.2), Vector3(0.0, 1.1, 0.2))
+		if at.call(2.8): _shot("portee_cote")
+	else:
 		get_tree().quit()

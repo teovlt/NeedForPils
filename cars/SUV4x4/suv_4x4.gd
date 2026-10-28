@@ -200,6 +200,10 @@ var forward_speed := 0.0   # m/s, positif = marche avant
 var _kb_steer := 0.0
 var _kb_rear_brake := false
 var _recenter_down := false
+var _xr_origin: XROrigin3D
+var _xr_camera: XRCamera3D
+## Vrai tant que la tête réelle n'a pas encore été calée sur le siège (attend un suivi valide).
+var _calib_wanted := false
 var _wiper_phase := 0.0
 var _wiper_pause := 0.0
 var _wiper_angle := 0.0
@@ -330,7 +334,7 @@ func _ready() -> void:
 	var xr: Object = XRServer.find_interface("OpenXR")
 	if xr:
 		if xr.has_signal("session_begun"):
-			xr.connect("session_begun", func(): get_tree().create_timer(0.5).timeout.connect(recenter_view))
+			xr.connect("session_begun", func(): get_tree().create_timer(0.3).timeout.connect(recenter_view))
 		if xr.has_signal("pose_recentered"):
 			xr.connect("pose_recentered", recenter_view)
 
@@ -528,11 +532,46 @@ func _seat_player() -> void:
 			n.process_mode = Node.PROCESS_MODE_DISABLED
 	origin.reparent(driver_seat, false)
 	origin.transform = Transform3D.IDENTITY
+	_xr_origin = origin
+	_xr_camera = origin.find_child("XRCamera3D", false, false) as XRCamera3D
+	_calib_wanted = true
 
 
 ## Place la tête du joueur (réelle) sur le siège conducteur (virtuel).
+## Calage manuel plutôt que XRServer.center_on_hmd (pas fiable en espace « stage » selon
+## le casque) : on décale l'XROrigin3D pour que la caméra tombe exactement sur l'œil du
+## siège (DriverSeat), regard vers l'avant (seul le cap est corrigé). Les manettes
+## suivent le même décalage, donc un geste réel = le même geste dans la voiture.
 func recenter_view() -> void:
-	XRServer.center_on_hmd(XRServer.RESET_BUT_KEEP_TILT, false)
+	_calib_wanted = true
+
+
+func _process(_delta: float) -> void:
+	if _calib_wanted and _calibrate_seated():
+		_calib_wanted = false
+
+
+## Renvoie faux tant que la pose du casque n'est pas encore connue (on réessaie).
+func _calibrate_seated() -> bool:
+	if _xr_origin == null or not is_instance_valid(_xr_origin) or _xr_camera == null:
+		return true
+	var xri := XRServer.primary_interface
+	if xri == null or not xri.is_initialized():
+		return true   # mode bureau : rien à caler
+	var cam := _xr_camera.transform   # pose de la tête dans le repère de l'origine
+	if cam.origin == Vector3.ZERO:
+		return false  # suivi pas encore valide
+	var f := -cam.basis.z
+	f.y = 0.0
+	if f.length() < 0.2:
+		f = cam.basis.y   # tête très penchée vers le bas : le haut du crâne pointe vers l'avant
+		f.y = 0.0
+	if f.length() < 0.01:
+		f = Vector3.FORWARD
+	var yaw := atan2(-f.x, -f.z)
+	var b := Basis(Vector3.UP, -yaw)
+	_xr_origin.transform = Transform3D(b, -(b * cam.origin))
+	return true
 
 
 func _physics_process(delta: float) -> void:

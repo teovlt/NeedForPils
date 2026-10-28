@@ -160,7 +160,7 @@ max_angle_deg = 0.0
 outline_width = 0.005
 
 [node name="DriverSeat" type="Marker3D" parent="."]
-transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0.45, 1.45, -0.05)
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0.45, 1.42, 0.08)
 
 [node name="GearLever" type="Node3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.77, 0.53)
