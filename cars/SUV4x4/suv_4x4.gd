@@ -331,6 +331,7 @@ func _ready() -> void:
 	_update_gear_labels()
 	if seat_player_on_ready:
 		_seat_player.call_deferred()
+	_ensure_fatigue.call_deferred()
 	var xr: Object = XRServer.find_interface("OpenXR")
 	if xr:
 		if xr.has_signal("session_begun"):
@@ -535,6 +536,17 @@ func _seat_player() -> void:
 	_xr_origin = origin
 	_xr_camera = origin.find_child("XRCamera3D", false, false) as XRCamera3D
 	_calib_wanted = true
+
+
+## Fatigue du conducteur (monte en roulant) : créée ici si la scène n'en a pas.
+func _ensure_fatigue() -> void:
+	if get_tree().get_first_node_in_group(Fatigue.GROUP):
+		return
+	var f := Fatigue.new()
+	f.name = "Fatigue"
+	get_parent().add_child(f)
+	f.car_path = f.get_path_to(self)
+	f._car = self
 
 
 ## Place la tête du joueur (réelle) sur le siège conducteur (virtuel).

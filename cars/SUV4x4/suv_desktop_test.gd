@@ -150,6 +150,10 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_rivals(delta)
 		elif autotest_scenario == "portee":
 			_run_autotest_reach(delta)
+		elif autotest_scenario == "thermos":
+			_run_autotest_thermos(delta)
+		elif autotest_scenario == "fatigue":
+			_run_autotest_fatigue(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -4398,4 +4402,217 @@ func _run_autotest_reach(delta: float) -> void:
 		_cabin_cam(Vector3(2.4, 1.3, 0.2), Vector3(0.0, 1.1, 0.2))
 		if at.call(2.8): _shot("portee_cote")
 	else:
+		get_tree().quit()
+
+
+# --- Thermos : dévisser (2 mains VR), verser dans la tasse, boire, revisser ; puis à la
+# souris (F) : dévisser, verser tout seul, boire --------------------------------------
+
+var _th := {}
+
+
+func _th_set(body: RigidBody3D, hand: Node3D, g: VRPickable, xf: Transform3D) -> void:
+	hand.global_transform = xf * g._offset.affine_inverse()
+	g.grab_update(hand)
+
+
+func _run_autotest_thermos(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = false
+	var body := _car_item("Thermos")
+	if body == null:
+		return
+	var th := body.get_node("Grab") as Thermos
+	var cb := car.global_basis
+	var P := car.to_global(Vector3(-0.3, 1.05, 0.3))
+	var up_xf := Transform3D(cb, P)
+	if at.call(0.05):
+		$Weather.hour = 13.0
+		var ha := Node3D.new()
+		ha.name = "HandA"
+		add_child(ha)
+		var hb := Node3D.new()
+		hb.name = "HandB"
+		add_child(hb)
+		_th["a"] = ha
+		_th["b"] = hb
+		car.get_node("GloveboxLid").set_angle_deg(-80.0, true)
+		car.get_node("Storage")._place_loose(body, RandomNumberGenerator.new(), [])
+		var f := get_tree().get_first_node_in_group(Fatigue.GROUP) as Fatigue
+		_log("AUTOTEST thermos : fermé=%s, %.1f tasses ; fatigue %s" % [th.capped, th.cups, f != null])
+	var ha: Node3D = _th.get("a")
+	var hb: Node3D = _th.get("b")
+	if ha == null:
+		return
+	if at.call(0.5):
+		ha.global_transform = body.global_transform
+		th.grab(ha)
+	if _t > 0.5 and _t < 13.0 and th.is_grabbed():
+		var xf := up_xf
+		if _t > 2.2 and _t < 6.0:
+			# penché au-dessus de la tasse : rotation jusqu'à 115°, bord du goulot au-dessus
+			var k := smoothstep(2.2, 3.0, _t) * (1.0 - smoothstep(5.4, 6.0, _t))
+			var cupg: ThermosCup = th.get_cup()
+			var b := cb * Basis(Vector3(0, 0, 1), -deg_to_rad(115.0) * k)
+			body.global_transform = Transform3D(b, P)
+			var lip := th.lip_position()
+			var target := P
+			if cupg:
+				target = cupg.rim_center() + Vector3.UP * 0.1
+				target = P.lerp(target - (lip - P), k)
+			xf = Transform3D(b, target)
+		_th_set(body, ha, th, xf)
+	var cam_p := car.to_global(Vector3(0.15, 1.3, 0.0))
+	if _t < 6.0:
+		cam.global_position = cam_p
+		cam.look_at(P + cb.z * 0.02 + cb.x * 0.08)
+		cam.fov = 55.0
+	if at.call(1.0):
+		_shot("thermos_1_ferme")
+	if at.call(1.3):
+		var cap := th._cap_grip
+		hb.global_transform = cap.global_transform
+		cap.grab(hb)
+		var cupg: ThermosCup = th.get_cup()
+		_th["cup"] = cupg
+		_log("AUTOTEST bouchon attrapé (main B) -> fermé=%s, tasse=%s tenue=%s, retournée=%s" % [th.capped, cupg != null, cupg.is_grabbed() if cupg else false, cupg.item.global_basis.y.dot(Vector3.UP) < 0 if cupg else false])
+	var cupv = _th.get("cup")
+	var cupg: ThermosCup = cupv if is_instance_valid(cupv) else null
+	if cupg and is_instance_valid(cupg) and _t > 1.3 and _t < 9.5 and cupg.is_grabbed():
+		var cxf := Transform3D(cb, car.to_global(Vector3(-0.12, 0.92, 0.32)))
+		var k2 := smoothstep(1.3, 2.0, _t)
+		var start := body.global_transform * Transform3D(Basis(Vector3.RIGHT, PI), Vector3(0, Thermos.CUP_TOP, 0))
+		cxf = start.interpolate_with(cxf, k2)
+		if _t > 6.5:
+			# à la bouche, penchée de 55° vers le visage
+			var mouth = EdiblePickable.mouth_position(get_tree())
+			var tb := cam.global_basis * Basis(Vector3.RIGHT, deg_to_rad(55.0))
+			var k3 := smoothstep(6.5, 7.0, _t)
+			var mxf := Transform3D(tb, mouth - tb.y * ThermosCup.HEIGHT)
+			cxf = cxf.interpolate_with(mxf, k3)
+		if _t > 8.6:
+			# retournée au-dessus du goulot pour la revisser
+			var sxf := body.global_transform * Transform3D(Basis(Vector3.RIGHT, PI), Vector3(0, Thermos.CUP_TOP + 0.01, 0))
+			cxf = sxf
+		_th_set(cupg.item, hb, cupg, cxf)
+	if _t >= 6.0 and _t < 8.6:
+		cam.global_position = car.to_global(Vector3(0.0, 1.35, -0.1))
+		cam.look_at(car.to_global(Vector3(-0.2, 1.2, 0.6)))
+	if at.call(2.1):
+		_log("AUTOTEST tasse à l'endroit sous le thermos : fill=%.2f" % cupg.fill)
+	for tt in [3.0, 3.8, 4.6, 5.4]:
+		if at.call(tt):
+			_log("AUTOTEST t=%.1f verse : débit %.2f, tasse %.2f, thermos %.2f tasses, versé dans la tasse %.2f, renversé %.2f" % [_t, th._pouring, cupg.fill, th.cups, th.poured_in_cup, cupg.spilled])
+	if at.call(3.4):
+		_shot("thermos_2_verse")
+	if at.call(6.3):
+		var f := get_tree().get_first_node_in_group(Fatigue.GROUP) as Fatigue
+		f.fatigue = 0.8
+		_th["f0"] = f.fatigue
+		_log("AUTOTEST avant de boire : tasse %.2f, fatigue %.2f" % [cupg.fill, f.fatigue])
+	if at.call(7.6):
+		_shot("thermos_3_boire")
+	if at.call(8.5):
+		var f := get_tree().get_first_node_in_group(Fatigue.GROUP) as Fatigue
+		_log("AUTOTEST après avoir bu : tasse %.2f, bu %.2f, fatigue %.2f (avant %.2f)" % [cupg.fill, cupg.drunk, f.fatigue, _th["f0"]])
+	if at.call(9.2):
+		cupg.release(hb)
+		_log("AUTOTEST tasse lâchée sur le goulot -> revissée=%s, thermos %.2f tasses" % [th.capped, th.cups])
+	if at.call(9.6):
+		_shot("thermos_4_revisse")
+		th.toggle()
+		var c2 := th.get_cup()
+		_log("AUTOTEST F sur le thermos fermé -> fermé=%s, tasse posée dans %s" % [th.capped, c2.item.get_parent().name if c2 else "?"])
+	if at.call(10.4):
+		th.toggle()
+		_log("AUTOTEST F sur le thermos ouvert -> versement auto %.1f s" % th._auto_pour)
+	if at.call(12.0):
+		var c2 := th.get_cup()
+		_log("AUTOTEST après versement auto : tasse %.2f, thermos %.2f" % [c2.fill if c2 else -1.0, th.cups])
+		if c2:
+			c2.toggle()
+	if at.call(13.5):
+		var c2 := th.get_cup()
+		var f := get_tree().get_first_node_in_group(Fatigue.GROUP) as Fatigue
+		_log("AUTOTEST F sur la tasse -> tasse %.2f, fatigue %.2f" % [c2.fill if c2 else -1.0, f.fatigue])
+		get_tree().quit()
+
+
+# --- Fatigue : monte en roulant (plus vite la nuit), effets à l'écran ---------------
+
+var _fa := {}
+
+
+func _run_autotest_fatigue(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	car.external_input = true
+	car.external_steer = 0.0
+	_inside = false
+	var f := get_tree().get_first_node_in_group(Fatigue.GROUP) as Fatigue
+	if f == null:
+		return
+	var w: WeatherSystem = $Weather
+	w.random_events = false
+	$FallingTrees.enabled = false
+	if _t < 9.0:
+		car.throttle_input = 0.5
+		car.brake_input = 0.0
+	else:
+		car.throttle_input = 0.0
+		car.brake_input = 1.0
+	if at.call(0.05):
+		w.hour = 13.0
+		f.fatigue = 0.0
+	if at.call(1.5):
+		_fa["d0"] = f.fatigue
+	if at.call(4.5):
+		_fa["d1"] = f.fatigue
+		w.hour = 1.0
+	if at.call(5.5):
+		_fa["n0"] = f.fatigue
+	if at.call(8.5):
+		var day_rate: float = (_fa["d1"] - _fa["d0"]) / 3.0
+		var night_rate: float = (f.fatigue - _fa["n0"]) / 3.0
+		_log("AUTOTEST fatigue/s : jour %.5f, nuit %.5f (x%.2f), vitesse %.0f km/h ; pleine fatigue de jour en %.0f s" % [day_rate, night_rate, night_rate / maxf(day_rate, 1e-6), car.forward_speed * 3.6, 1.0 / maxf(day_rate, 1e-6)])
+		w.hour = 13.0
+	# vue conducteur
+	_cabin_cam(car.to_local(car.driver_seat.global_position), car.to_local(car.driver_seat.global_position) + Vector3(0, -0.1, 1.0))
+	cam.fov = 75.0
+	if at.call(9.0):
+		f.fatigue = 0.0
+	if at.call(10.0):
+		_shot("fatigue_0")
+		f.fatigue = 0.65
+	if at.call(11.0):
+		_shot("fatigue_65")
+		f.fatigue = 1.0
+		_fa["lids_max"] = 0.0
+		_fa["closed"] = 0.0
+		_fa["b0"] = f.microsleeps
+	if _t > 11.0 and _t < 41.0:
+		_fa["lids_max"] = maxf(_fa["lids_max"], f.lids)
+		if f.lids > 0.95:
+			_fa["closed"] += delta
+		if not _fa.has("shot_lids") and f.lids > 0.45 and f.lids < 0.8:
+			_fa["shot_lids"] = true
+			_shot("fatigue_paupieres")
+	if at.call(13.0):
+		_shot("fatigue_100")
+	if at.call(20.0):
+		f.yawn()
+		_fa["y"] = f.yawns
+	if at.call(22.6):
+		_shot("fatigue_baillement")
+	if at.call(25.0):
+		_shot("fatigue_larmes")
+	if at.call(41.0):
+		_log("AUTOTEST épuisé pendant 30 s : paupières max %.2f, yeux fermés %.1f s, micro-sommeils %d, bâillements %d" % [_fa["lids_max"], _fa["closed"], f.microsleeps - _fa["b0"], f.yawns])
+		f.drink_coffee(1.0)
+		_log("AUTOTEST une tasse de café -> fatigue %.2f" % f.fatigue)
 		get_tree().quit()

@@ -1,0 +1,27 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://props/thermos_cup.glb" id="1_model"]
+[ext_resource type="Script" path="res://interaction/thermos_cup.gd" id="2_cup"]
+
+[sub_resource type="CylinderShape3D" id="Cyl_item"]
+height = 0.078
+radius = 0.041
+
+[node name="ThermosCup" type="RigidBody3D"]
+collision_layer = 0
+collision_mask = 0
+mass = 0.08
+continuous_cd = true
+freeze = true
+freeze_mode = 1
+
+[node name="Model" parent="." instance=ExtResource("1_model")]
+
+[node name="Shape" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.039, 0)
+shape = SubResource("Cyl_item")
+
+[node name="Grab" type="Node3D" parent="."]
+script = ExtResource("2_cup")
+item_name = "Tasse de café"
+rest_up_axis = 1
