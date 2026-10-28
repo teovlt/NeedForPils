@@ -40,6 +40,7 @@ var _crunch: AudioStreamPlayer3D
 var _snap: AudioStreamPlayer3D
 var _auto_grind := 0.0
 var _built_g := false
+var _taken := 0   # pincées sorties (nom stable, le même chez les deux joueurs)
 
 
 ## Couvercle à tourner (VR, grinder fermé avec des têtes dedans).
@@ -301,6 +302,8 @@ func take_pinch_into(hand: Node3D) -> VRPickable:
 	if ground < 0.02:
 		ground = 0.0
 	var p := (load(PINCH_SCENE) as PackedScene).instantiate() as RigidBody3D
+	_taken += 1
+	p.name = "%s_Pinch%d" % [item.name, _taken]
 	var storage := _nearest_storage()
 	(storage if storage else item.get_parent()).add_child(p)
 	p.global_transform = Transform3D(item.global_basis, hand.global_position if hand.has_method("is_fingertip") else chamber_center())

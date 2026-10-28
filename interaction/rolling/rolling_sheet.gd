@@ -129,6 +129,7 @@ func roll() -> Smokable:
 	rolled = true
 	var is_joint := weed > 0.01
 	var obj := (load(JOINT_SCENE if is_joint else CIG_SCENE) as PackedScene).instantiate() as RigidBody3D
+	obj.name = "%s_Rolled" % item.name   # nom stable, le même chez les deux joueurs
 	var hands := _grab_hands.duplicate()
 	for h in hands:
 		release_quiet(h)

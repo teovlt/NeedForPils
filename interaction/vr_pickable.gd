@@ -163,7 +163,7 @@ static func replace_held(tree: SceneTree, old: VRInteractable, new: VRInteractab
 			for k in d:
 				if d[k] == old:
 					d[k] = new
-	for grp in [VRHandInteractor.GROUP, MouseHand.GROUP]:
+	for grp in [VRHandInteractor.GROUP, MouseHand.GROUP, NetRemoteHand.GROUP]:
 		for h in tree.get_nodes_in_group(grp):
 			if h.get("held") == old:
 				h.set("held", new)

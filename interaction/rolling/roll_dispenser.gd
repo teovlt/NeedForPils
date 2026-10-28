@@ -25,6 +25,7 @@ var _units_root: Node3D
 var _taker: UnitTaker
 var _snap: AudioStreamPlayer3D
 var _built_d := false
+var _taken := 0   # feuilles / filtres sortis (nom stable, le même chez les deux joueurs)
 
 
 class UnitTaker:
@@ -291,6 +292,8 @@ func take_into(hand: Node3D) -> VRPickable:
 		u.visible = false
 		xf = u.global_transform.translated(item.global_basis.y * 0.012)
 	var obj := (load(scene) as PackedScene).instantiate() as RigidBody3D
+	_taken += 1
+	obj.name = "%s_%d" % [item.name, _taken]
 	var storage := _nearest_storage()
 	(storage if storage else item.get_parent()).add_child(obj)
 	obj.global_transform = xf
