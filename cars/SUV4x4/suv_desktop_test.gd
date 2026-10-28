@@ -146,6 +146,8 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_cig_pack(delta)
 		elif autotest_scenario == "traverser":
 			_run_autotest_no_clip(delta)
+		elif autotest_scenario == "concurrents":
+			_run_autotest_rivals(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -4282,3 +4284,80 @@ func _car_item(n: String) -> RigidBody3D:
 	for c in car.find_children(n, "RigidBody3D", true, false):
 		return c
 	return null
+
+
+# --- Concurrents : le camping-car surgit, remonte, tire, colle ; on accélère et on le sème --
+
+var _rv: Rivals
+var _rvl := {}
+
+
+func _run_autotest_rivals(delta: float) -> void:
+	var road: RoadGenerator = $RoadGenerator
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	$Weather.random_events = false
+	$FallingTrees.enabled = false
+	road.get_node("Animals").set("enabled", false)
+	car.external_input = true
+	_inside = false
+	var kmh: float = car.forward_speed * 3.6
+	if at.call(0.05):
+		$Weather.hour = 16.0
+		$Weather.set_weather("degage", true)
+		car.handbrake_lever.set_angle_deg(0.0, true)
+		car.gear_lever.set_notch(2, true)
+		_rv = Rivals.new()
+		_rv.road_path = NodePath("../RoadGenerator")
+		_rv.car_path = NodePath("../SUV4x4")
+		_rv.auto_encounters = false
+		_rv.cruise_kmh = 115.0
+		_rv.lose_gap = 160.0
+		_rv.lose_time = 3.0
+		_rv.max_hits = 99
+		add_child(_rv)
+		_rv.hit.connect(func(n): _log("AUTOTEST [%.1f s] touché %d (écart %.0f m)" % [_t, n, _rv.gap]))
+		_rv.lost.connect(func(): _log("AUTOTEST [%.1f s] SEMÉS (impacts %d, vitesse 4x4 %.0f km/h)" % [_t, _rv.hits, car.forward_speed * 3.6]); _rvl["lost"] = _t)
+	if _rv == null:
+		return
+	# conduite : voie de droite ; 95 km/h (il nous rattrape), puis pied au plancher
+	var fwd: Vector3 = car.global_basis.z
+	var info := road.sample_road(car.global_position + fwd * (8.0 + absf(car.forward_speed) * 0.45))
+	if info["found"]:
+		var target: Vector3 = info["point"] + info["right"] * 1.75
+		var to_t := target - car.global_position
+		to_t.y = 0.0
+		_steer(clampf(fwd.cross(to_t.normalized()).y * 2.2, -1.0, 1.0))
+	var full := _t > 42.0
+	car.throttle_input = 1.0 if full else clampf((95.0 - kmh) * 0.15, 0.0, 1.0)
+	car.brake_input = 0.0
+	if at.call(8.0):
+		_rv.force_encounter()
+	var close := _rv.state == Rivals.State.CHASE and _rv.gap < 40.0
+	if close and not _rvl.has("shot1"):
+		_rvl["shot1"] = true
+		_log("AUTOTEST [%.1f s] camping-car à %.0f m, vitesse %.0f km/h" % [_t, _rv.gap, _rv.get_speed_kmh()])
+	if _t > 8.0 and fmod(_t, 3.0) < delta and _rv.state == Rivals.State.CHASE:
+		_log("AUTOTEST [%.1f s] écart %.0f m, camping-car %.0f km/h, nous %.0f km/h, impacts %d" % [_t, _rv.gap, _rv.get_speed_kmh(), kmh, _rv.hits])
+	# caméras : derrière la voiture, puis vue de côté quand il est à notre hauteur
+	if _rv.state == Rivals.State.CHASE and _rv.gap < 8.0 and _rv.get_car_position() != Vector3.ZERO:
+		var rp := _rv.get_car_position()
+		cam.global_position = car.global_position + car.global_basis.z * 9.0 + car.global_basis.y * 2.5 + car.global_basis.x * 2.5
+		cam.look_at((rp + car.global_position) * 0.5 + Vector3.UP)
+		if not _rvl.has("side"):
+			_rvl["side_t"] = _t
+			_rvl["side"] = true
+		if _t - float(_rvl["side_t"]) > 1.5 and not _rvl.has("shot_side"):
+			_rvl["shot_side"] = true
+			_shot("concurrents_2_a_cote")
+	else:
+		_cabin_cam(Vector3(0.0, 3.5, -10.0), Vector3(0.0, 1.0, 10.0))
+		if _rv.state == Rivals.State.CHASE and _rv.gap < 60.0 and not _rvl.has("shot_back"):
+			_rvl["shot_back"] = true
+			_shot("concurrents_1_derriere")
+	if at.call(30.0):
+		_log("AUTOTEST [30 s] pied au plancher")
+	if _rvl.has("lost") and _t - float(_rvl["lost"]) > 1.0 or _t > 70.0:
+		_log("AUTOTEST fin : impacts %d, état %d" % [_rv.hits, _rv.state])
+		get_tree().quit()

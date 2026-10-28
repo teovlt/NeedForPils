@@ -59,6 +59,7 @@ var _drone_t := 0.0
 var _drone_fwd := Vector3.ZERO
 var _origin: Node3D
 var _trees: FallingTreeManager
+var _rivals: Rivals
 
 
 func _ready() -> void:
@@ -71,6 +72,19 @@ func _ready() -> void:
 		_pursuer.caught.connect(_on_caught)
 		_pursuer.chase_started.connect(_on_chase_started)
 		_pursuer.lost.connect(_on_police_lost)
+	# concurrents (camping-car) : créés ici, pas besoin de les placer dans la scène
+	var road := _pills.get_road() if _pills else null
+	if road and _car:
+		_rivals = Rivals.new()
+		_rivals.name = "Rivals"
+		add_child(_rivals)
+		_rivals.road_path = _rivals.get_path_to(road)
+		_rivals.car_path = _rivals.get_path_to(_car)
+		_rivals._ready_links()
+		_rivals.started.connect(_on_rivals_started)
+		_rivals.lost.connect(_on_rivals_lost)
+		_rivals.hit.connect(_on_rivals_hit)
+		_rivals.killed.connect(_on_rivals_killed)
 	if _addiction:
 		_addiction.assimilated.connect(_on_assimilated)
 		_addiction.pill_taken.connect(_on_pill_taken)
@@ -150,6 +164,8 @@ func _start_chase() -> void:
 		_car.external_input = false
 	if _pursuer:
 		_pursuer.start_patrols()   # la police surgira au hasard sur la route
+	if _rivals:
+		_rivals.start()            # les concurrents aussi
 	_set_paused(false)
 	if _pills:
 		_pills.start()
@@ -342,9 +358,40 @@ func _on_police_lost() -> void:
 		_say("SEMÉE !", "La police a perdu ta trace... pour l'instant.", 3.0)
 
 
+func _on_rivals_started() -> void:
+	if game_over:
+		return
+	if not _hint_done.has("rivaux"):
+		_hint_done["rivaux"] = true
+		_say("LES CONCURRENTS !", "Le camping-car veut ta came. Ils vont tirer : sème-les.", 3.5)
+	else:
+		_say("ILS SONT REVENUS", "Le camping-car est derrière toi.", 2.5)
+
+
+func _on_rivals_lost() -> void:
+	if not game_over and not _co_running:
+		_say("SEMÉS !", "Le camping-car a disparu du rétro.", 3.0)
+
+
+func _on_rivals_hit(count: int) -> void:
+	if game_over or _co_running:
+		return
+	var left := _rivals.max_hits - count
+	if count == 1 or left <= 2:
+		_say("ON TE TIRE DESSUS !", "Encore %d balle%s et c'est fini." % [left, "s" if left > 1 else ""], 1.6)
+
+
+func _on_rivals_killed() -> void:
+	if _pursuer:
+		_pursuer.stop()
+	_end("ILS T'ONT EU.", "Les concurrents ont pris ta came.")
+
+
 # --- Fins ---------------------------------------------------------------------------------
 
 func _on_caught() -> void:
+	if _rivals:
+		_rivals.stop()
 	_end("ILS T'ONT RATTRAPÉ.", "La police t'a eu.")
 
 
