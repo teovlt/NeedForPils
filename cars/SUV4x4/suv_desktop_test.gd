@@ -162,6 +162,8 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_pack_two_hands(delta)
 		elif autotest_scenario == "pochette_deux_mains":
 			_run_autotest_bag_two_hands(delta)
+		elif autotest_scenario == "mains":
+			_run_autotest_hands(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -4983,3 +4985,104 @@ func _run_autotest_bag_two_hands(delta: float) -> void:
 		bag._taker.release(hb)
 	if at.call(4.6):
 		get_tree().quit()
+
+
+# --- Mains VR affichées : butent sur l'habitacle, s'accrochent aux commandes ---------
+# (main droite XR Tools sur un XRController3D déplacé à la main)
+
+var _hd := {}
+
+
+func _run_autotest_hands(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = false
+	if at.call(0.05):
+		$Weather.hour = 13.0
+		var ctrl := XRController3D.new()
+		ctrl.name = "TestRightController"
+		ctrl.tracker = &"right_hand"
+		ctrl.pose = &"grip"
+		add_child(ctrl)
+		var hand := (load("res://addons/godot-xr-tools/hands/scenes/lowpoly/right_hand_low.tscn") as PackedScene).instantiate()
+		ctrl.add_child(hand)
+		var hi := VRHandInteractor.new()
+		ctrl.add_child(hi)
+		hi.debug_points = [Vector3(0, -100, 0)]
+		_hd["c"] = ctrl
+		_hd["h"] = hi
+		_hd["xh"] = hand
+	var ctrl: XRController3D = _hd.get("c")
+	var hi: VRHandInteractor = _hd.get("h")
+	if ctrl == null:
+		return
+	var eye := car.to_local(car.driver_seat.global_position)
+	var cb := car.global_basis
+	# poignet orienté « main tendue vers l'avant, paume vers le bas-gauche »
+	var hb := cb * Basis.from_euler(Vector3(deg_to_rad(-20.0), PI, 0.0))
+	cam.fov = 70.0
+	# 1) la main avance dans le tableau de bord
+	if _t < 2.5:
+		var k := smoothstep(0.3, 1.8, _t)
+		var p := car.to_global(Vector3(-0.25, 1.12, 0.35).lerp(Vector3(-0.25, 1.0, 1.05), k))
+		ctrl.global_transform = Transform3D(hb, p)
+		_cabin_cam(eye, Vector3(-0.25, 1.0, 0.9))
+	for tt in [0.9, 1.5, 2.2]:
+		if at.call(tt):
+			var vis: Vector3 = hi.visual_transform().origin
+			_log("AUTOTEST t=%.1f main réelle %s, main affichée %s (écart %.3f m) ; libre ici=%s, libre à la vraie main=%s" % [_t, car.to_local(ctrl.global_position), car.to_local(vis), vis.distance_to(ctrl.global_position), hi._hand_free(ctrl.global_basis, vis), hi._hand_free(ctrl.global_basis, ctrl.global_position)])
+	if at.call(2.2):
+		_shot("mains_tableau_de_bord")
+	# 2) volant : main sur la jante à 10 h, saisie, on tourne
+	var wheel := car.get_node("SteeringWheel") as VRSteeringWheel
+	var ax: Vector3 = (wheel.get_parent().global_basis * wheel.column_axis).normalized()
+	var wc := wheel.global_position
+	var up_in_plane := (cb.y - ax * cb.y.dot(ax)).normalized()
+	var left_in_plane := ax.cross(up_in_plane).normalized()
+	if _t >= 2.5 and _t < 6.0:
+		var ang := deg_to_rad(50.0) - (deg_to_rad(40.0) * smoothstep(4.0, 5.2, _t))
+		var rim := wc + (up_in_plane * cos(ang) + left_in_plane * sin(ang)) * 0.2 + ax * 0.02
+		ctrl.global_transform = Transform3D(hb, rim)
+		_cabin_cam(eye, car.to_local(wc))
+		if hi.held:
+			hi.held.grab_update(hi)
+	if at.call(3.0):
+		hi._grab_now(wheel)
+		var xh: Node3D = _hd["xh"]
+		_log("AUTOTEST volant saisi : main accrochée=%s ; distance du poing à l'axe %.3f m (jante ~%.3f)" % [hi._snap_target != null, _dist_to_axis(xh.global_position, wc, ax), wheel._snap_radius])
+	if at.call(3.8):
+		_shot("mains_volant")
+		var xh: Node3D = _hd["xh"]
+		_log("AUTOTEST main affichée à %.3f m de l'axe du volant" % _dist_to_axis(xh.global_position, wc, ax))
+	if at.call(5.4):
+		_log("AUTOTEST volant tourné à %.0f° ; main toujours accrochée=%s" % [rad_to_deg(wheel.wheel_angle), hi._snap_target != null])
+		_shot("mains_volant_tourne")
+	if at.call(5.8):
+		hi._release()
+		wheel.set_steer_input(0.0)
+	# 3) levier de vitesse, frein à main, comodo
+	var seq := [["GearLever", 6.0, Vector3(0.0, 0.93, 0.5)], ["Handbrake", 7.5, Vector3(0.165, 0.9, 0.18)], ["WiperStalk", 9.0, Vector3(0.22, 0.96, 0.57)]]
+	for e in seq:
+		var t_s: float = e[1]
+		if _t >= t_s and _t < t_s + 1.5:
+			var it := car.get_node(e[0]) as VRInteractable
+			ctrl.global_transform = Transform3D(hb, car.to_global(e[2]))
+			_cabin_cam(eye, e[2])
+			if at.call(t_s + 0.3):
+				hi._grab_now(it)
+				var xh: Node3D = _hd["xh"]
+				_log("AUTOTEST %s saisi : main accrochée=%s, cible d'accroche à %.3f m de la main réelle" % [e[0], hi._snap_target != null, hi._snap_target.global_position.distance_to(ctrl.global_position) if hi._snap_target else -1.0])
+			if at.call(t_s + 1.0):
+				_shot("mains_" + str(e[0]).to_lower())
+			if at.call(t_s + 1.4):
+				hi._release()
+	if at.call(10.6):
+		get_tree().quit()
+
+
+func _dist_to_axis(p: Vector3, c: Vector3, ax: Vector3) -> float:
+	var v := p - c
+	return (v - ax * v.dot(ax)).length()

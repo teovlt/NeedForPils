@@ -25,6 +25,20 @@ const GROUP := "vr_interactable"
 ## VR : se prend aussi du bout de l'index en pressant la gâchette (petits objets : les
 ## pilules dans la pochette). La distance est alors mesurée depuis le bout de l'index.
 @export var grab_with_trigger := false
+## VR : en le saisissant, la main affichée s'accroche dessus et se referme autour
+## (poing fermé) : « barre » = levier, comodo, frein à main ; « anneau » = volant.
+## La géométrie est déduite des meshes de l'objet.
+@export_enum("aucune", "barre", "anneau") var hand_snap := 0
+## Barre : partie qu'on empoigne, de cette fraction de la longueur jusqu'au bout le
+## plus éloigné du pivot (0 = toute la barre).
+@export_range(0.0, 1.0) var snap_grip_from := 0.5
+
+var _snap_ready := false
+var _snap_a := Vector3.ZERO      # barre : début / fin de la partie empoignée (repère local)
+var _snap_b := Vector3.ZERO
+var _snap_center := Vector3.ZERO # anneau : centre, axe, rayon (repère local)
+var _snap_axis := Vector3.UP
+var _snap_radius := 0.0
 ## Épaisseur du contour en mètres.
 @export var outline_width := 0.008
 @export var color_near := Color(0.25, 0.8, 1.0)
@@ -52,6 +66,106 @@ func _ready() -> void:
 ## Priorité de sélection (main VR, souris) : pick_bonus, que les objets peuvent moduler.
 func get_pick_bonus() -> float:
 	return pick_bonus
+
+
+## Pose de la main accrochée à l'objet (monde) pour une main tenue en `hand_xf` :
+## centre du poing sur la barre / l'anneau, poing (axe Z de la pose « grip » OpenXR)
+## aligné dessus, paume tournée comme la vraie main. null si pas d'accroche.
+func get_hand_snap(hand_xf: Transform3D) -> Variant:
+	if hand_snap == 0:
+		return null
+	if not _snap_ready:
+		_setup_snap()
+	if not _snap_ready:
+		return null
+	var xf := global_transform
+	var p := hand_xf.origin
+	var point: Vector3
+	var dir: Vector3
+	if hand_snap == 2:
+		var c := xf * _snap_center
+		var ax := (xf.basis * _snap_axis).normalized()
+		var v := p - c
+		v -= ax * v.dot(ax)
+		if v.length() < 0.01:
+			return null
+		var radial := v.normalized()
+		point = c + radial * _snap_radius
+		dir = ax.cross(radial).normalized()
+	else:
+		var a := xf * _snap_a
+		var b := xf * _snap_b
+		point = Geometry3D.get_closest_point_to_segment(p, a, b)
+		dir = (b - a).normalized()
+	var z := dir if dir.dot(hand_xf.basis.z) >= 0.0 else -dir
+	var x := hand_xf.basis.x - z * hand_xf.basis.x.dot(z)
+	if x.length() < 0.01:
+		x = hand_xf.basis.y.cross(z)
+	x = x.normalized()
+	return Transform3D(Basis(x, z.cross(x), z), point)
+
+
+func _setup_snap() -> void:
+	var pts: Array[Vector3] = []
+	var inv := global_transform.affine_inverse()
+	var root: Node = mesh_root if mesh_root else self
+	var meshes := root.find_children("*", "MeshInstance3D", true, false)
+	if root is MeshInstance3D:
+		meshes.append(root)
+	for m in meshes:
+		var mi := m as MeshInstance3D
+		if mi.has_meta("_vr_outline") or mi.mesh == null:
+			continue
+		var mxf := inv * mi.global_transform
+		for v in mi.mesh.get_faces():
+			pts.append(mxf * v)
+	if pts.size() < 3:
+		return
+	_snap_ready = true
+	if hand_snap == 2:
+		var axis_v = get("column_axis")
+		_snap_axis = (transform.basis.inverse() * (axis_v as Vector3)).normalized() if axis_v is Vector3 else Vector3.UP
+		var rmax := 0.0
+		for v in pts:
+			rmax = maxf(rmax, (v - _snap_axis * v.dot(_snap_axis)).length())
+		var h := 0.0
+		var n := 0
+		for v in pts:
+			if (v - _snap_axis * v.dot(_snap_axis)).length() > rmax * 0.85:
+				h += v.dot(_snap_axis)
+				n += 1
+		_snap_center = _snap_axis * (h / maxf(n, 1))
+		_snap_radius = maxf(rmax - 0.016, 0.02)
+		return
+	var lo := pts[0]
+	var hi := pts[0]
+	for v in pts:
+		lo = lo.min(v)
+		hi = hi.max(v)
+	var ext := hi - lo
+	var k := 0
+	for i in 3:
+		if ext[i] > ext[k]:
+			k = i
+	var a := Vector3.ZERO
+	var b := Vector3.ZERO
+	var na := 0
+	var nb := 0
+	for v in pts:
+		if v[k] <= lo[k] + ext[k] * 0.12:
+			a += v
+			na += 1
+		elif v[k] >= hi[k] - ext[k] * 0.12:
+			b += v
+			nb += 1
+	a /= maxf(na, 1)
+	b /= maxf(nb, 1)
+	if a.length() > b.length():   # b = bout le plus éloigné du pivot (origine)
+		var t := a
+		a = b
+		b = t
+	_snap_a = a.lerp(b, snap_grip_from)
+	_snap_b = b
 
 
 ## Cette main peut-elle viser / saisir l'objet ? (ex. paquet de cigarettes tenu :

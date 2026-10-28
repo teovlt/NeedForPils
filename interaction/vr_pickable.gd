@@ -77,7 +77,7 @@ func _on_grab_update(hand: Node3D) -> void:
 	if hand != _active_hand:
 		return
 	CarStorage.pin_body(item)
-	var xf := hand.global_transform * _offset
+	var xf := _hand_xf(hand) * _offset
 	var dt := get_physics_process_delta_time()
 	# défoncé (joint) : l'objet suit la main avec du retard (calculé dans le repère de la
 	# voiture, pour ne pas rester en arrière quand elle roule)
@@ -139,11 +139,19 @@ func _take(hand: Node3D) -> void:
 	ItemPhysics.stop(item)
 	item.top_level = true
 	CarStorage.pin_body(item)
-	_offset = hand.global_transform.affine_inverse() * item.global_transform
+	_offset = _hand_xf(hand).affine_inverse() * item.global_transform
 	_last_pos = item.global_position
 	_lag_ready = false
 	_prev_ok = false
 	hand_velocity = Vector3.ZERO
+
+
+## Pose de la main qui tient l'objet : la main affichée en VR (elle bute sur la
+## voiture, l'objet reste dedans), la main elle-même sinon.
+func _hand_xf(hand: Node3D) -> Transform3D:
+	if hand.has_method("visual_transform"):
+		return hand.visual_transform()
+	return hand.global_transform
 
 
 func _nearest_storage() -> CarStorage:
