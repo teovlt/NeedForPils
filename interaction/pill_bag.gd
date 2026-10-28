@@ -4,10 +4,13 @@ extends VRPickable
 ##
 ## - S'attrape et se range comme les autres objets de la voiture (placée au hasard au
 ##   démarrage par CarStorage).
-## - Fermée : A/X (VR) ou F (bureau) en la visant -> le zip s'ouvre (la lèvre se
-##   soulève, petit bruit de zip). Viser la bande du zip et refaire A/X / F la referme.
-## - Ouverte, VR : plonger la main dedans (sur les pilules) et serrer -> une pilule
-##   sort dans la main ; la porter à la bouche pour l'avaler (EdiblePickable).
+## - Fermée : A/X (VR) ou F (bureau) en la visant -> le zip s'ouvre en grand : le film
+##   du dessus se soulève en arche et l'ouverture s'arrondit (petit bruit de zip). Viser
+##   la bande du zip et refaire A/X / F la referme.
+## - Ouverte, VR : glisser l'index dans l'ouverture jusqu'aux pilules et presser la
+##   gâchette -> la pilule la plus proche se colle au bout du doigt tant que la gâchette
+##   reste enfoncée ; la porter à la bouche pour l'avaler (EdiblePickable). Serrer
+##   (grip) la main sur les pilules marche aussi.
 ##   Bureau : viser les pilules dans la pochette et appuyer sur F -> une pilule avalée.
 ##   On peut aussi en sortir une au clic gauche et la poser ailleurs.
 ## - Les pilules visibles dans la pochette diminuent à mesure qu'on les prend.
@@ -15,6 +18,10 @@ extends VRPickable
 
 const SIZE := Vector2(0.10, 0.14)          # largeur (X), longueur (Z)
 const ZIP_Z := 0.052                       # ligne du zip
+const MOUTH_H := 0.046                     # hauteur de l'arche du film du dessus, ouverte
+const MOUTH_H_BOTTOM := 0.007              # le film du dessous se creuse un peu
+const NX := 18                             # subdivisions en largeur (arche bien ronde)
+const NZ := 14
 const CAPSULE_SCENE := "res://props/items/pill_capsule_item.tscn"
 const SMILEY_SCENE := "res://props/items/pill_smiley_item.tscn"
 const CAPSULE_MODEL := "res://props/pill_capsule.glb"
@@ -24,8 +31,11 @@ const SMILEY_MODEL := "res://props/pill_smiley.glb"
 @export var open := false
 
 var _pills_root: Node3D
-var _pill_nodes: Array[Node3D] = []        # pilules visibles (la dernière part en premier)
-var _lip: Node3D
+var _pill_nodes: Array[Node3D] = []        # pilules (cachées quand on les a prises)
+var _bag_mi: MeshInstance3D
+var _zip_mi: MeshInstance3D
+var _open_amount := 0.0                    # 0 fermée -> 1 grande ouverte (animé)
+var _shape_tween: Tween
 var _taker: Taker
 var _zip_player: AudioStreamPlayer3D
 var _bag_built := false
@@ -44,7 +54,12 @@ class Taker:
 		grab_distance = 0.045    # (marge de visée souris = 30 % : 1,3 cm)
 		outline_width = 0.0015
 		pick_bonus = 0.024       # devant la pochette quand la main est sur les pilules
+		grab_with_trigger = true # VR : du bout de l'index, à la gâchette
 		super._ready()
+
+	## Distance à la pilule visible la plus proche (pas aux pilules déjà prises).
+	func get_distance_to(global_point: Vector3) -> float:
+		return bag.distance_to_pills(global_point)
 
 	func _on_grab_begin(hand: Node3D) -> void:
 		var g = bag.take_pill_into(hand)
@@ -95,21 +110,29 @@ func _build() -> void:
 		model = Node3D.new()
 		model.name = "Model"
 		item.add_child(model)
-	model.add_child(_bag_mesh())
-	# zip : bande blanche dessous, et sur la lèvre (bande blanche + trait rouge) qui
-	# se soulève à l'ouverture
-	var white := _mat(Color(0.95, 0.95, 0.93, 0.85), true)
-	var red := _mat(Color(0.85, 0.08, 0.08), false)
-	var grey := _mat(Color(0.35, 0.35, 0.38), false)
-	model.add_child(_box(Vector3(SIZE.x - 0.004, 0.0012, 0.013), Vector3(0, -0.0018, ZIP_Z + 0.008), white))
-	_lip = Node3D.new()
-	_lip.name = "Lip"
-	_lip.position = Vector3(0, 0.0, ZIP_Z - 0.004)
-	model.add_child(_lip)
-	_lip.add_child(_box(Vector3(SIZE.x - 0.004, 0.0012, 0.013), Vector3(0, 0.0032, 0.012), white))
-	_lip.add_child(_box(Vector3(SIZE.x - 0.002, 0.0016, 0.0016), Vector3(0, 0.0036, 0.004), red))
-	for k in 4:   # petites inscriptions grises sur la bande blanche
-		_lip.add_child(_box(Vector3(0.008, 0.0004, 0.003), Vector3(-0.03 + k * 0.02, 0.0040, 0.013), grey))
+	_bag_mi = MeshInstance3D.new()
+	_bag_mi.name = "Bag"
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.9, 0.95, 1.0, 0.24)
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	m.roughness = 0.12
+	m.metallic_specular = 0.9
+	m.rim_enabled = true
+	m.rim = 0.4
+	_bag_mi.material_override = m
+	_bag_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	model.add_child(_bag_mi)
+	# zip : bandes blanches sur les deux films, trait rouge sur celle du dessus
+	_zip_mi = MeshInstance3D.new()
+	_zip_mi.name = "Zip"
+	var zm := StandardMaterial3D.new()
+	zm.vertex_color_use_as_albedo = true
+	zm.cull_mode = BaseMaterial3D.CULL_DISABLED
+	zm.roughness = 0.5
+	_zip_mi.material_override = zm
+	model.add_child(_zip_mi)
+	_rebuild_shape()
 	# pilules
 	_pills_root = Node3D.new()
 	_pills_root.name = "Pills"
@@ -149,62 +172,94 @@ func _build() -> void:
 	_apply_open(true)
 
 
-func _bag_mesh() -> MeshInstance3D:
-	# coussin : dessus bombé, dessous presque plat, reliés par une couture
-	var nx := 10
-	var nz := 12
+## Hauteur du film du dessus (side = 1) ou du dessous (side = -1) en (x, z).
+## Fermée : coussin (dessus bombé au-dessus des pilules, bande du zip à plat).
+## Ouverte : vers l'ouverture (+Z), le dessus se soulève en demi-ellipse et le dessous
+## se creuse un peu : l'ouverture devient un ovale bien rond.
+func _surface_y(x: float, z: float, side: float) -> float:
+	var w := SIZE.x
+	var l := SIZE.y
+	var fx := 1.0 - pow(absf(2.0 * x / w), 4.0)
+	var fz := 1.0 - pow(absf(2.0 * (z + 0.006) / (l - 0.012)), 4.0)
+	var bulge := 0.011 if z < ZIP_Z - 0.004 else 0.0
+	var top := 0.0025 + bulge * maxf(fx, 0.0) * maxf(fz, 0.0)
+	var arch := sqrt(maxf(1.0 - pow(2.0 * x / w, 2.0), 0.0))
+	var ramp := smoothstep(-0.03, l * 0.5 - 0.014, z)
+	if side > 0.0:
+		return maxf(top, 0.0025 + _open_amount * MOUTH_H * arch * ramp)
+	return -0.002 - 0.0015 * (top - 0.0025) / 0.011 - _open_amount * MOUTH_H_BOTTOM * arch * ramp
+
+
+func _rebuild_shape() -> void:
+	if _bag_mi == null:
+		return
 	var w := SIZE.x
 	var l := SIZE.y
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var top := func(x: float, z: float) -> float:
-		var fx := 1.0 - pow(absf(2.0 * x / w), 4.0)
-		var fz := 1.0 - pow(absf(2.0 * (z + 0.006) / (l - 0.012)), 4.0)
-		var bulge := 0.011 if z < ZIP_Z - 0.004 else 0.0
-		return 0.0025 + bulge * maxf(fx, 0.0) * maxf(fz, 0.0)
 	for side in [1.0, -1.0]:
-		for i in nx:
-			for j in nz:
-				var x0 := -w / 2 + w * i / nx
-				var x1 := -w / 2 + w * (i + 1) / nx
-				var z0 := -l / 2 + l * j / nz
-				var z1 := -l / 2 + l * (j + 1) / nz
-				var y := func(x: float, z: float) -> float:
-					return top.call(x, z) if side > 0.0 else -0.002 - 0.0015 * (top.call(x, z) - 0.0025) / 0.011
-				var a := Vector3(x0, y.call(x0, z0), z0)
-				var b := Vector3(x1, y.call(x1, z0), z0)
-				var c := Vector3(x1, y.call(x1, z1), z1)
-				var d := Vector3(x0, y.call(x0, z1), z1)
+		for i in NX:
+			for j in NZ:
+				var x0 := -w / 2 + w * i / NX
+				var x1 := -w / 2 + w * (i + 1) / NX
+				var z0 := -l / 2 + l * j / NZ
+				var z1 := -l / 2 + l * (j + 1) / NZ
+				var a := Vector3(x0, _surface_y(x0, z0, side), z0)
+				var b := Vector3(x1, _surface_y(x1, z0, side), z0)
+				var c := Vector3(x1, _surface_y(x1, z1, side), z1)
+				var d := Vector3(x0, _surface_y(x0, z1, side), z1)
 				if side > 0.0:
 					for v in [a, d, c, a, c, b]:
 						st.add_vertex(v)
 				else:
 					for v in [a, b, c, a, c, d]:
 						st.add_vertex(v)
-	# couture du tour
-	var ring := [Vector3(-w / 2, 0, -l / 2), Vector3(w / 2, 0, -l / 2), Vector3(w / 2, 0, l / 2), Vector3(-w / 2, 0, l / 2)]
-	for k in 4:
-		var p0: Vector3 = ring[k]
-		var p1: Vector3 = ring[(k + 1) % 4]
-		var up := Vector3(0, 0.0025, 0)
-		var dn := Vector3(0, -0.002, 0)
-		for v in [p0 + dn, p1 + dn, p1 + up, p0 + dn, p1 + up, p0 + up]:
+	# couture : le fond et les deux côtés ; l'ouverture (+Z) n'est fermée que zip fermé
+	var segs := []
+	for i in NZ:
+		var z0 := -l / 2 + l * i / NZ
+		var z1 := -l / 2 + l * (i + 1) / NZ
+		segs.append([Vector2(-w / 2, z0), Vector2(-w / 2, z1)])
+		segs.append([Vector2(w / 2, z0), Vector2(w / 2, z1)])
+	segs.append([Vector2(-w / 2, -l / 2), Vector2(w / 2, -l / 2)])
+	if _open_amount < 0.05:
+		segs.append([Vector2(-w / 2, l / 2), Vector2(w / 2, l / 2)])
+	for sg in segs:
+		var p0: Vector2 = sg[0]
+		var p1: Vector2 = sg[1]
+		var a0 := Vector3(p0.x, _surface_y(p0.x, p0.y, -1.0), p0.y)
+		var a1 := Vector3(p1.x, _surface_y(p1.x, p1.y, -1.0), p1.y)
+		var b0 := Vector3(p0.x, _surface_y(p0.x, p0.y, 1.0), p0.y)
+		var b1 := Vector3(p1.x, _surface_y(p1.x, p1.y, 1.0), p1.y)
+		for v in [a0, a1, b1, a0, b1, b0]:
 			st.add_vertex(v)
 	st.generate_normals()
-	var mi := MeshInstance3D.new()
-	mi.name = "Bag"
-	mi.mesh = st.commit()
-	var m := StandardMaterial3D.new()
-	m.albedo_color = Color(0.9, 0.95, 1.0, 0.24)
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	m.cull_mode = BaseMaterial3D.CULL_DISABLED
-	m.roughness = 0.12
-	m.metallic_specular = 0.9
-	m.rim_enabled = true
-	m.rim = 0.4
-	mi.material_override = m
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	return mi
+	_bag_mi.mesh = st.commit()
+	# bandes du zip, qui suivent les films
+	var zt := SurfaceTool.new()
+	zt.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var white := Color(0.95, 0.95, 0.93)
+	var red := Color(0.85, 0.08, 0.08)
+	_strip(zt, ZIP_Z + 0.002, ZIP_Z + 0.015, 1.0, 0.0008, white)
+	_strip(zt, ZIP_Z + 0.0035, ZIP_Z + 0.0055, 1.0, 0.0012, red)
+	_strip(zt, ZIP_Z + 0.002, ZIP_Z + 0.015, -1.0, 0.0008, white)
+	zt.generate_normals()
+	_zip_mi.mesh = zt.commit()
+
+
+## Bande collée sur un film (côté intérieur décalé de `off`), de z0 à z1.
+func _strip(st: SurfaceTool, z0: float, z1: float, side: float, off: float, c: Color) -> void:
+	var w := SIZE.x - 0.004
+	st.set_color(c)
+	for i in NX:
+		var x0 := -w / 2 + w * i / NX
+		var x1 := -w / 2 + w * (i + 1) / NX
+		var a := Vector3(x0, _surface_y(x0, z0, side) + off * side, z0)
+		var b := Vector3(x1, _surface_y(x1, z0, side) + off * side, z0)
+		var cc := Vector3(x1, _surface_y(x1, z1, side) + off * side, z1)
+		var d := Vector3(x0, _surface_y(x0, z1, side) + off * side, z1)
+		for v in [a, d, cc, a, cc, b]:
+			st.add_vertex(v)
 
 
 func _box(size: Vector3, pos: Vector3, mat: Material) -> MeshInstance3D:
@@ -263,16 +318,25 @@ func toggle() -> void:
 
 
 func _apply_open(instant: bool) -> void:
-	if _lip:
-		var a := deg_to_rad(-32.0 if open else 0.0)
-		if instant:
-			_lip.rotation.x = a
-		else:
-			create_tween().tween_property(_lip, "rotation:x", a, 0.25)
-			if _zip_player:
-				_zip_player.pitch_scale = 1.0 if open else 0.85
-				_zip_player.play()
+	var target := 1.0 if open else 0.0
+	if _shape_tween:
+		_shape_tween.kill()
+	if instant or _bag_mi == null:
+		_open_amount = target
+		_rebuild_shape()
+	else:
+		_shape_tween = create_tween()
+		_shape_tween.tween_method(_set_open_amount, _open_amount, target, 0.35).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		_shape_tween.tween_callback(refresh_meshes)   # contours de surbrillance refaits
+		if _zip_player:
+			_zip_player.pitch_scale = 1.0 if open else 0.85
+			_zip_player.play()
 	refresh_state()
+
+
+func _set_open_amount(v: float) -> void:
+	_open_amount = v
+	_rebuild_shape()
 
 
 func refresh_state() -> void:
@@ -282,7 +346,7 @@ func refresh_state() -> void:
 
 ## Sort une pilule de la pochette dans la main (VR, clic gauche) ; renvoie son Grab.
 func take_pill_into(hand: Node3D) -> VRPickable:
-	var node := _last_visible()
+	var node := _nearest_visible(hand.global_position)
 	if node == null:
 		return null
 	node.visible = false
@@ -291,6 +355,9 @@ func take_pill_into(hand: Node3D) -> VRPickable:
 	var storage := _nearest_storage()
 	(storage if storage else item.get_parent()).add_child(pill)
 	pill.global_transform = node.global_transform
+	if hand.has_method("is_fingertip"):
+		# prise du bout de l'index : la pilule se colle au bout du doigt
+		pill.global_position = hand.global_position
 	var g := pill.get_node("Grab") as VRPickable
 	g.grab(hand)
 	refresh_state()
@@ -305,6 +372,27 @@ func eat_from_bag() -> void:
 	node.visible = false
 	EdiblePickable.swallow(get_tree())
 	refresh_state()
+
+
+## Distance (m) entre un point et la pilule visible la plus proche.
+func distance_to_pills(global_point: Vector3) -> float:
+	var best := INF
+	for p in _pill_nodes:
+		if p.visible:
+			best = minf(best, p.global_position.distance_to(global_point) - 0.006)
+	return maxf(best, 0.0)
+
+
+func _nearest_visible(global_point: Vector3) -> Node3D:
+	var node: Node3D = null
+	var best := INF
+	for p in _pill_nodes:
+		if p.visible:
+			var d := p.global_position.distance_to(global_point)
+			if d < best:
+				best = d
+				node = p
+	return node
 
 
 func _last_visible() -> Node3D:

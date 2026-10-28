@@ -22,6 +22,9 @@ const GROUP := "vr_interactable"
 ## Bonus (m) quand deux objets sont à égale distance de la main
 ## (ex. le comodo, caché en partie derrière le volant).
 @export var pick_bonus := 0.0
+## VR : se prend aussi du bout de l'index en pressant la gâchette (petits objets : les
+## pilules dans la pochette). La distance est alors mesurée depuis le bout de l'index.
+@export var grab_with_trigger := false
 ## Épaisseur du contour en mètres.
 @export var outline_width := 0.008
 @export var color_near := Color(0.25, 0.8, 1.0)

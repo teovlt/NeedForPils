@@ -156,6 +156,8 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_fatigue(delta)
 		elif autotest_scenario == "toucher":
 			_run_autotest_touch(delta)
+		elif autotest_scenario == "pochette_index":
+			_run_autotest_bag_index(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -4734,4 +4736,94 @@ func _run_autotest_touch(delta: float) -> void:
 		_shot("toucher_radio")
 	if at.call(15.0):
 		_log("AUTOTEST crans changés : %s" % [_tc["notches"]])
+		get_tree().quit()
+
+
+# --- Pochette : grande ouverture arrondie, pilule prise du bout de l'index (gâchette) --
+
+var _bi := {}
+
+
+func _run_autotest_bag_index(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = false
+	var body := _car_item("PillBag")
+	var bag := body.get_node("Grab") as PillBag
+	if at.call(0.05):
+		$Weather.hour = 13.0
+		car.get_node("Storage")._place_loose(body, RandomNumberGenerator.new(), [])
+		var holder := Node3D.new()
+		add_child(holder)
+		var h := VRHandInteractor.new()
+		holder.add_child(h)
+		h.debug_points = [Vector3(0, -100, 0), Vector3(0, -100, 0)]
+		h.debug_trigger = 0.0
+		_bi["h"] = h
+		_bi["n0"] = 0
+	var h: VRHandInteractor = _bi.get("h")
+	if h == null:
+		return
+	var bx := body.global_transform
+	var mouth := bx * Vector3(0, 0.02, PillBag.SIZE.y * 0.5 + 0.02)
+	cam.fov = 50.0
+	if _t < 1.6:
+		cam.global_position = bx * Vector3(0.0, 0.16, 0.26)
+		cam.look_at(bx * Vector3(0, 0.0, 0.0))
+	elif _t < 2.0:
+		cam.global_position = bx * Vector3(0.0, 0.05, 0.22)
+		cam.look_at(bx * Vector3(0, 0.0, 0.0))
+	else:
+		# vue conducteur (la bouche du joueur est là, loin de la pochette)
+		cam.global_position = car.driver_seat.global_position
+		cam.look_at(body.global_position)
+	if at.call(0.8):
+		_shot("pochette_fermee")
+		bag.toggle()
+	if at.call(1.6):
+		_shot("pochette_ouverte")
+		_bi["n0"] = bag.pills_left()
+	if at.call(1.8):
+		_shot("pochette_ouverture_face")
+	# l'index entre par l'ouverture jusqu'à la pilule la plus proche, gâchette, ressort
+	if _t > 2.0 and _t < 6.0:
+		var target := bag._nearest_visible(bx * Vector3(0, 0, 0.0)).global_position if not _bi.has("held") else bx * Vector3(0, 0, 0)
+		if not _bi.has("target"):
+			_bi["target"] = target
+		var tg: Vector3 = _bi["target"]
+		var tip := mouth
+		if _t < 3.0:
+			tip = mouth.lerp(tg, smoothstep(2.0, 2.8, _t))
+		elif _t < 3.4:
+			tip = tg
+			h.debug_trigger = 1.0
+		else:
+			# ressort par l'ouverture puis monte vers la bouche du joueur
+			var mp = EdiblePickable.mouth_position(get_tree())
+			tip = tg.lerp(mouth, smoothstep(3.4, 4.0, _t)).lerp(mp, smoothstep(4.2, 5.2, _t))
+		h.debug_points = [tip, Vector3(0, -100, 0)]
+		h._update_trigger_grab()
+	if at.call(2.85):
+		_log("AUTOTEST index sur la pilule : visée=%s, à portée=%s" % [h._tip_hover.name if h._tip_hover else "rien", h._tip_in_reach])
+	if at.call(3.5):
+		_bi["held"] = true
+		var held_name: String = h.tip_held.name if h.tip_held else "rien"
+		var pill = null
+		for n in get_tree().get_nodes_in_group(VRInteractable.GROUP):
+			if n is EdiblePickable and n.is_grabbed():
+				pill = n
+		_bi["pill"] = pill
+		_log("AUTOTEST gâchette -> tenu par l'index : %s, pilule %s à %.3f m du bout du doigt ; pilules %d (avant %d)" % [held_name, pill.item.name if pill else "aucune", pill.item.global_position.distance_to(h.tip_hand.global_position) if pill else -1.0, bag.pills_left(), _bi["n0"]])
+	if at.call(4.1):
+		var pill = _bi.get("pill")
+		_log("AUTOTEST pilule sortie de la pochette : suit le doigt=%s" % [pill != null and is_instance_valid(pill) and pill.item.global_position.distance_to(h.tip_hand.global_position) < 0.03])
+		_shot("pochette_pilule_doigt")
+	if at.call(5.6):
+		var pill = _bi.get("pill")
+		_log("AUTOTEST à la bouche -> pilule avalée=%s, prises=%d" % [pill == null or not is_instance_valid(pill) or pill._eaten, get_tree().root.get_meta("pills_eaten", 0)])
+		h.debug_trigger = 0.0
+		h._update_trigger_grab()
 		get_tree().quit()

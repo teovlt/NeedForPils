@@ -3,6 +3,9 @@ extends Node3D
 ## À placer comme enfant d'un XRController3D.
 ## Cherche l'objet VRInteractable le plus proche, le fait s'illuminer,
 ## le saisit avec "grip" et l'ouvre/ferme avec A/X (si l'objet a toggle()).
+## Les objets `grab_with_trigger` (pilules de la pochette) se prennent aussi du bout de
+## l'index avec la gâchette : ils suivent alors le bout du doigt (`tip_hand`) tant que
+## la gâchette reste enfoncée, et la gâchette ne sert plus d'accélérateur / de frein.
 
 const GROUP := "vr_hands"
 
@@ -17,6 +20,11 @@ var hovered: VRInteractable
 var held: VRInteractable
 
 var _grip_down := false
+var tip_hand: TipHand             # « main » placée au bout de l'index (prise à la gâchette)
+var tip_held: VRInteractable      # objet tenu du bout de l'index
+var _tip_hover: VRInteractable
+var _tip_in_reach := false
+var _trig_down := false
 var _toggle_down := false
 var _hover_grabbable := false
 var _pending: VRInteractable      # saisie en attente (défoncé : gestes plus lents)
@@ -26,11 +34,30 @@ var _tip_bone := -1
 var _palm_bone := -1
 ## Tests sans casque : [bout de l'index, paume] imposés (monde). Vide = vraie main.
 var debug_points: Array = []
+## Tests sans casque : valeur de gâchette imposée (< 0 : vraie manette).
+var debug_trigger := -1.0
+
+
+## Bout de l'index, utilisé comme une main par les objets pris à la gâchette.
+class TipHand:
+	extends Node3D
+	var owner_hand
+	func pulse(amplitude: float, duration: float) -> void:
+		owner_hand.pulse(amplitude, duration)
+	func is_left() -> bool:
+		return owner_hand.is_left()
+	func is_fingertip() -> bool:
+		return true
 
 
 func _ready() -> void:
 	add_to_group(GROUP)
 	controller = get_parent() as XRController3D
+	tip_hand = TipHand.new()
+	tip_hand.name = "IndexTip"
+	tip_hand.owner_hand = self
+	tip_hand.top_level = true
+	add_child(tip_hand)
 
 
 func is_left() -> bool:
@@ -40,6 +67,8 @@ func is_left() -> bool:
 func get_trigger() -> float:
 	if controller == null or not controller.get_has_tracking_data():
 		return 0.0
+	if tip_held or _tip_in_reach:
+		return 0.0   # l'index prend une pilule : pas d'accélération ni de freinage
 	return controller.get_float("trigger")
 
 
@@ -50,7 +79,7 @@ func get_trigger() -> float:
 ## Vrai si la main peut toucher : suivie, et ne tient rien (sinon on klaxonnerait ou on
 ## bougerait un comodo en tenant le volant, un objet...).
 func can_touch() -> bool:
-	if held != null:
+	if held != null or tip_held != null:
 		return false
 	if not debug_points.is_empty():
 		return true
@@ -103,8 +132,11 @@ func _physics_process(_delta: float) -> void:
 		_set_hover(null, -1.0)
 		if held:
 			_release()
+		if tip_held and debug_points.is_empty():
+			_release_tip()
 		return
 
+	_update_trigger_grab()
 	var grip := controller.get_float(grip_action)
 	var grip_pressed := false
 	if not _grip_down and grip > grab_threshold:
@@ -166,6 +198,54 @@ func _physics_process(_delta: float) -> void:
 		_toggle_down = toggle_now
 	else:
 		_toggle_down = controller.is_button_pressed(toggle_action)
+
+
+## Prise du bout de l'index à la gâchette (objets grab_with_trigger).
+func _update_trigger_grab() -> void:
+	tip_hand.global_transform = Transform3D(global_basis, fingertip_position())
+	var trig := debug_trigger if debug_trigger >= 0.0 else (controller.get_float("trigger") if controller else 0.0)
+	var trig_pressed := false
+	if not _trig_down and trig > grab_threshold:
+		_trig_down = true
+		trig_pressed = true
+	elif _trig_down and trig < release_threshold:
+		_trig_down = false
+	if tip_held:
+		if not _trig_down or not is_instance_valid(tip_held) or not tip_held.enabled and not tip_held.is_grabbed():
+			_release_tip()
+		else:
+			tip_held.grab_update(tip_hand)
+		return
+	var best: VRInteractable = null
+	var best_d := INF
+	if held == null:
+		var tip := tip_hand.global_position
+		for n in get_tree().get_nodes_in_group(VRInteractable.GROUP):
+			var it := n as VRInteractable
+			if it == null or not it.grab_with_trigger or not it.enabled or not it.is_visible_in_tree():
+				continue
+			var d := it.get_distance_to(tip)
+			if d < it.highlight_distance and d < best_d:
+				best = it
+				best_d = d
+	if _tip_hover and _tip_hover != best and is_instance_valid(_tip_hover):
+		_tip_hover.set_hand_distance(tip_hand, -1.0)
+	_tip_hover = best
+	_tip_in_reach = best != null and best_d <= best.grab_distance
+	if best:
+		best.set_hand_distance(tip_hand, best_d)
+	if trig_pressed and _tip_in_reach:
+		_tip_hover.set_hand_distance(tip_hand, -1.0)
+		tip_held = best
+		_tip_hover = null
+		tip_held.grab(tip_hand)
+		pulse(0.4, 0.04)
+
+
+func _release_tip() -> void:
+	if tip_held and is_instance_valid(tip_held):
+		tip_held.release(tip_hand)
+	tip_held = null
 
 
 func _grab_now(it: VRInteractable) -> void:
