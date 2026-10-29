@@ -16,6 +16,9 @@ extends Node3D
 ## - Le son sort de 4 AudioStreamPlayer3D enfants des portières : porte ouverte,
 ##   son haut-parleur tourne avec elle et le son vient d'ailleurs.
 ## - Les stations « tournent » même radio éteinte : on retombe au milieu d'un morceau.
+##   Pour la playlist, c'est la vraie fin du morceau (signal `finished`) qui lance le
+##   suivant : la durée annoncée d'un mp3 est approximative, et un lecteur qui vient
+##   d'être lancé ne dit pas encore qu'il joue (le relancer superposait deux lectures).
 ## - La nuit, l'écran allumé laisse échapper une légère lueur bleutée sur la console et
 ##   le tableau de bord (rien en plein jour : elle suit l'obscurité de la météo).
 ## Clavier (test) : F2 / F3 station précédente / suivante, F4 marche / arrêt,
@@ -70,6 +73,8 @@ var _loaded := -2          # ce que jouent les haut-parleurs : -2 rien, -1 grés
 var _playlist: Array[Dictionary] = []   # {title, stream, length}, dans l'ordre de passage
 var _playlist_total := 0.0
 var _track := -1           # morceau de la playlist en cours dans les haut-parleurs
+var _pl_index := 0         # morceau en cours de la playlist (même radio éteinte)
+var _pl_started := 0.0     # instant (_clock) où ce morceau a commencé
 var _show_vol := 0.0
 var _knob: Node3D
 var _knob_grip: VRInteractable
@@ -178,7 +183,11 @@ func _ready() -> void:
 		if s.has("playlist"):
 			_load_playlist(s["playlist"])
 			_streams.append(null)
-			_offsets.append(randf() * maxf(_playlist_total, 1.0))
+			_offsets.append(0.0)
+			# on tombe au milieu d'un morceau tiré au hasard
+			_pl_index = randi() % maxi(_playlist.size(), 1)
+			if not _playlist.is_empty():
+				_pl_started = -randf() * float(_playlist[_pl_index]["length"]) * 0.8
 			continue
 		var w := load(s["file"]) as AudioStreamWAV
 		_prepare_loop(w)
@@ -186,6 +195,8 @@ func _ready() -> void:
 		_offsets.append(randf() * 60.0)
 	_static = load(STATIC_FILE) as AudioStreamWAV
 	_prepare_loop(_static)
+	if not speakers.is_empty():
+		speakers[0].finished.connect(_on_track_finished)
 	_apply_knob()
 
 
@@ -247,25 +258,32 @@ func _is_playlist(i: int) -> bool:
 	return i >= 0 and STATIONS[i].has("playlist")
 
 
-## Morceau et position dans la playlist à l'instant présent : la station « tourne »
-## même radio éteinte, comme les autres. Renvoie [index, secondes].
-func _playlist_now(st: int) -> Array:
+## Morceau et position dans la playlist à l'instant présent : [index, secondes]. Tant
+## qu'on ne l'écoute pas, la station « tourne » d'après les durées annoncées.
+func _playlist_now() -> Array:
 	if _playlist.is_empty():
 		return [-1, 0.0]
-	var x := fmod(_clock + _offsets[st], _playlist_total)
-	for i in _playlist.size():
-		var length: float = _playlist[i]["length"]
-		if x < length:
-			return [i, x]
-		x -= length
-	return [0, 0.0]
+	if _track < 0:   # pas dans les haut-parleurs : on avance au fil des durées
+		while _clock - _pl_started >= float(_playlist[_pl_index]["length"]):
+			_pl_started += float(_playlist[_pl_index]["length"])
+			_pl_index = (_pl_index + 1) % _playlist.size()
+	return [_pl_index, clampf(_clock - _pl_started, 0.0, float(_playlist[_pl_index]["length"]) - 0.5)]
+
+
+## Le morceau écouté est vraiment fini : on passe au suivant.
+func _on_track_finished() -> void:
+	if not _is_playlist(_loaded) or _playlist.is_empty():
+		return
+	_pl_index = (_pl_index + 1) % _playlist.size()
+	_pl_started = _clock
+	_load(_loaded)
 
 
 ## Titre du morceau en cours (vide si la station n'est pas une playlist).
 func get_track_title() -> String:
 	if not _is_playlist(station) or _playlist.is_empty():
 		return ""
-	return _playlist[_playlist_now(station)[0]]["title"]
+	return _playlist[_playlist_now()[0]]["title"]
 
 
 static func _prepare_loop(w: AudioStreamWAV) -> void:
@@ -428,10 +446,7 @@ func _process(delta: float) -> void:
 	if on:
 		want = -1 if _tuning > 0.0 else station
 	if want != _loaded:
-		_load(want)
-	elif _is_playlist(want) and (_playlist_now(want)[0] != _track \
-			or (not speakers.is_empty() and not speakers[0].playing)):
-		_load(want)   # morceau suivant (ou le même qui recommence s'il est seul)
+		_load(want)   # (playlist : le morceau suivant est lancé par _on_track_finished)
 	var db := linear_to_db(maxf(pow(volume, 1.6), 0.0001)) + max_volume_db
 	if _is_playlist(want):
 		db += playlist_gain_db
@@ -479,15 +494,15 @@ func _playlist_screen(station_name: String) -> String:
 
 func _load(what: int) -> void:
 	_loaded = what
+	_track = -1   # la playlist n'est plus dans les haut-parleurs : elle tourne seule
 	for p in speakers:
 		p.stop()
 	if what == -2:
 		return
 	var stream: AudioStream = _static if what == -1 else _streams[what]
 	var pos := 0.0
-	_track = -1
 	if _is_playlist(what):
-		var now := _playlist_now(what)
+		var now := _playlist_now()
 		_track = now[0]
 		if _track < 0:
 			stream = _static   # dossier vide : grésillement

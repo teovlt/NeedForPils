@@ -2603,15 +2603,15 @@ func _run_autotest_playlist(delta: float) -> void:
 		_shot("playlist_2_titre")
 	if at.call(5.0):
 		# saute à 1,5 s de la fin du morceau en cours
-		var now: Array = r._playlist_now(r.station)
+		var now: Array = r._playlist_now()
 		var left: float = r._playlist[now[0]]["length"] - now[1]
-		r._clock += left - 1.5
+		r._pl_started -= left - 1.5
 		r._load(r.station)   # les haut-parleurs repartent à la nouvelle position
 		_log("AUTOTEST saut à 1,5 s de la fin du morceau")
 	if at.call(5.2):
 		_log("AUTOTEST avant la fin : " + st.call())
 	if at.call(7.5):
-		_log("AUTOTEST après la fin : " + st.call())
+		_log("AUTOTEST après la fin (morceau suivant depuis le début, une seule fois) : " + st.call())
 	if at.call(8.0):
 		r.toggle_power()
 	if at.call(8.5):
