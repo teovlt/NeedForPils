@@ -94,6 +94,12 @@ func _physics_process(delta: float) -> void:
 			"conducteur" if Net.is_driver() else "copilote", _t, car.global_position.x, car.global_position.y,
 			car.global_position.z, car.forward_speed * 3.6, hb, car.radio.get("power"),
 			car.gear_lever.get_notch_label(), session.remote_player != null])
+	_once("menu_pause", 16.0, func():
+		var menu := session.get_parent().get_node("PauseMenu") as PauseMenu
+		menu.open()
+		print("NETTEST %s menu : ouvert=%s jeu en pause=%s REJOUER proposé=%s" % ["conducteur" if Net.is_driver() else "copilote",
+			menu.is_open, get_tree().paused, menu._ui.restart_button.visible])
+		menu.close())
 	if _t > 16.5 and not _done.has("fin"):
 		_done["fin"] = true
 		get_tree().quit()

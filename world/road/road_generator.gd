@@ -267,6 +267,14 @@ func _physics_process(delta: float) -> void:
 		print("Route : collision %.1f ms, suppression %.1f ms" % [t_col / 1000.0, t_del / 1000.0])
 
 
+## Scène quittée (rejouer, retour au menu) : on attend les tronçons en cours de calcul
+## sur les autres fils, sinon ils travaillent sur une route déjà libérée.
+func _exit_tree() -> void:
+	for job in _pending:
+		WorkerThreadPool.wait_for_task_completion(job["task"])
+	_pending.clear()
+
+
 # --- Informations sur la route -----------------------------------------------
 
 ## Point de route le plus proche : {point, dir, right, lateral, s, found}.

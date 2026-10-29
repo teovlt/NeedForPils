@@ -107,6 +107,8 @@ func _run_intro() -> void:
 	if not play_intro:
 		_set_paused(true)
 		await _wait_engine_start()
+		if not is_inside_tree():
+			return   # partie quittée (rejouer, menu) avant le démarrage
 		_start_chase()
 		return
 	# Pendant l'intro, le 4x4 roule tout seul ; ni pilules, ni arbres, ni manque.
@@ -133,6 +135,8 @@ func _run_intro() -> void:
 		_car.external_input = false
 	await _fade_curtain(0.0, 0.8)
 	await _wait_engine_start()
+	if not is_inside_tree():
+		return   # partie quittée (rejouer, menu) avant le démarrage
 	_start_chase()
 	await _say("PRENDS LE VOLANT !", _controls_text(), 4.5)
 
@@ -143,7 +147,7 @@ func _wait_engine_start() -> void:
 	if _car == null or _car.is_engine_running():
 		return
 	_play_start_voice()
-	while not _car.is_engine_running():
+	while is_inside_tree() and not _car.is_engine_running():
 		await get_tree().process_frame
 
 
