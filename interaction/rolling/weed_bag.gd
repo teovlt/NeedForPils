@@ -1,7 +1,7 @@
 class_name WeedBag
 extends PillBag
 ## Pochon de weed : la même pochette à zip que celle des pilules (PillBag : grande
-## ouverture arrondie, la main qui la tient l'ouvre avec A/X, l'autre main n'y prend que
+## ouverture arrondie, A/X ou geste de l'autre main pour l'ouvrir, l'autre main n'y prend que
 ## le contenu, contenu visé surligné), avec quelques têtes dedans au lieu des pilules.
 ## Une tête sortie (RollItem « bud ») se met dans le grinder.
 

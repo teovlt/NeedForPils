@@ -4,6 +4,15 @@ extends MeshInstance3D
 ## Une petite carte d'humidité (CPU) est remplie par la pluie et remise à zéro
 ## dans la zone balayée par chaque balai. Placé à la surface extérieure du pare-brise
 ## (axe X = largeur, axe Y = vers le haut de la vitre).
+## Dans le casque, la vitre mouillée n'est pas floue mais voilée (variante du shader
+## sans relecture de l'image, impossible en stéréo avec le rendu Compatibility : elle
+## donnait un voile noir).
+
+const SHADER := preload("res://cars/SUV4x4/windshield_rain.gdshader")
+const SHADER_VR := preload("res://cars/SUV4x4/windshield_rain_vr.gdshader")
+
+## Tests sans casque : utiliser quand même la variante du casque.
+static var force_xr := false
 
 ## Taille de la vitre (m).
 @export var size := Vector2(1.74, 0.80)
@@ -46,7 +55,7 @@ func _ready() -> void:
 	mesh = quad
 	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_mat = ShaderMaterial.new()
-	_mat.shader = preload("res://cars/SUV4x4/windshield_rain.gdshader")
+	_mat.shader = SHADER
 	_mat.set_shader_parameter("aspect", size.y / size.x)
 	material_override = _mat
 	var n := resolution.x * resolution.y
@@ -129,3 +138,11 @@ func update_rain(rain: float, wiper_angle: float, light: float, delta: float, st
 	_img.set_data(resolution.x, resolution.y, false, Image.FORMAT_R8, _bytes)
 	_tex.update(_img)
 	_mat.set_shader_parameter("light", light)
+	var sh := SHADER_VR if is_xr_view(self) else SHADER
+	if _mat.shader != sh:
+		_mat.shader = sh
+
+
+## Vrai si la scène est rendue dans le casque (viewport XR).
+static func is_xr_view(n: Node) -> bool:
+	return force_xr or (n.is_inside_tree() and n.get_viewport().use_xr)

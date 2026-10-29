@@ -3,10 +3,10 @@ extends Node3D
 ##
 ## - Marche seulement contact mis (clé sur I ou II), comme une vraie voiture.
 ## - Bouton de volume (à gauche) : le saisir et le tourner (VR : poignet ; souris :
-##   glisser vers la droite / la gauche). A/X ou F sur le bouton : marche / arrêt.
+##   glisser vers la droite / la gauche). F sur le bouton : marche / arrêt.
 ## - Touche PWR (en bas à droite) : marche / arrêt (l'écran et sa lueur s'éteignent).
 ## - Touches ◀ ▶ : station précédente / suivante (petit grésillement entre deux).
-##   Touches 1 à 4 : stations mémorisées. Saisir une touche ou A/X / F : l'enfoncer.
+##   Touches 1 à 4 : stations mémorisées. Saisir une touche ou F : l'enfoncer.
 ## - Station « PILS MIX » (5e, avec ◀ ▶) : joue les musiques du dossier
 ##   res://audio/radio/playlist/ (mp3, ogg ou wav), dans un ordre tiré au hasard à
 ##   chaque partie, l'une après l'autre. Pour ajouter une musique : déposer le fichier
@@ -17,8 +17,15 @@ extends Node3D
 ##   son haut-parleur tourne avec elle et le son vient d'ailleurs.
 ## - Les stations « tournent » même radio éteinte : on retombe au milieu d'un morceau.
 ##   Pour la playlist, c'est la vraie fin du morceau (signal `finished`) qui lance le
-##   suivant : la durée annoncée d'un mp3 est approximative, et un lecteur qui vient
-##   d'être lancé ne dit pas encore qu'il joue (le relancer superposait deux lectures).
+##   suivant : un lecteur qui vient d'être lancé ne dit pas encore qu'il joue (le
+##   relancer superposait deux lectures).
+## - Playlist : chaque morceau (mp3, ogg) est décodé à l'avance en WAV en mémoire, dans un
+##   fil de travail (celui en cours et le suivant ; ~40 Mo par morceau de 4 min). Caler
+##   un mp3 au milieu du morceau prend ~60 ms (bien plus sur le casque) et
+##   AudioStreamPlayer3D.play(position) le fait sur le fil principal, une fois par
+##   haut-parleur : l'image saccadait et les 4 haut-parleurs partaient décalés (son
+##   décalé entre gauche et droite). Un WAV se cale instantanément : ils partent
+##   ensemble. Tant que le morceau n'est pas prêt (début de partie), grésillement.
 ## - La nuit, l'écran allumé laisse échapper une légère lueur bleutée sur la console et
 ##   le tableau de bord (rien en plein jour : elle suit l'obscurité de la météo).
 ## Clavier (test) : F2 / F3 station précédente / suivante, F4 marche / arrêt,
@@ -81,6 +88,10 @@ var _playlist_total := 0.0
 var _track := -1           # morceau de la playlist en cours dans les haut-parleurs
 var _pl_index := 0         # morceau en cours de la playlist (même radio éteinte)
 var _pl_started := 0.0     # instant (_clock) où ce morceau a commencé
+var _decoded := {}         # morceau de la playlist -> AudioStreamWAV décodé (en cours, suivant)
+var _decode_task := -1     # tâche WorkerThreadPool en cours (-1 : aucune)
+var _decode_track := -1    # ... morceau qu'elle décode
+var _decode_out: AudioStreamWAV   # ... son résultat (écrit par le fil de travail)
 var _show_vol := 0.0
 var _knob: Node3D
 var _knob_grip: VRInteractable
@@ -260,6 +271,84 @@ func _load_playlist(dir: String) -> void:
 		_playlist_total += length
 
 
+## Décodage en mémoire des morceaux de la playlist (voir l'en-tête) : celui en cours et
+## le suivant, un à la fois, dans un fil de travail. Appelé à chaque image.
+func _update_decoding() -> void:
+	if _playlist.is_empty():
+		return
+	if _decode_task >= 0:
+		if not WorkerThreadPool.is_task_completed(_decode_task):
+			return
+		WorkerThreadPool.wait_for_task_completion(_decode_task)
+		_decode_task = -1
+		if _decode_out:
+			_decoded[_decode_track] = _decode_out
+			# durée exacte (celle annoncée par un mp3 est approximative)
+			_playlist[_decode_track]["length"] = _decode_out.get_length()
+		_decode_out = null
+		# morceau attendu (grésillement en attendant) : on le lance
+		if _is_playlist(_loaded) and _track < 0 and _decoded.has(_playlist_now()[0]):
+			_load(_loaded)
+	var cur: int = _track if _track >= 0 else _playlist_now()[0]
+	var wanted := [cur, (cur + 1) % _playlist.size()]
+	for k in _decoded.keys():
+		if k not in wanted:
+			_decoded.erase(k)   # libère la mémoire des morceaux passés
+	for i in wanted:
+		if not _decoded.has(i):
+			var src: AudioStream = _playlist[i]["stream"]
+			if src is AudioStreamWAV:
+				_decoded[i] = src   # déjà en mémoire
+				continue
+			_decode_track = i
+			_decode_task = WorkerThreadPool.add_task(_decode_job.bind(src, AudioServer.get_mix_rate()), false, "Radio : décodage")
+			return
+
+
+## Fil de travail : décode tout le morceau et en fait un WAV (16 bits) en mémoire.
+func _decode_job(src: AudioStream, rate: float) -> void:
+	var pb := src.instantiate_playback()
+	pb.start(0.0)
+	var need := int(src.get_length() * rate)
+	var pcm := PackedByteArray()
+	var frames := 0
+	while frames < need:
+		var a := pb.mix_audio(1.0, mini(65536, need - frames))
+		if a.is_empty():
+			break
+		frames += a.size()
+		pcm.append_array(a.to_byte_array())   # flottants 32 bits, gauche / droite
+	pb.stop()
+	# en-tête WAV « IEEE float » : le lecteur WAV de Godot le convertit en 16 bits
+	var h := PackedByteArray()
+	h.resize(44)
+	h.encode_u32(0, 0x46464952)    # RIFF
+	h.encode_u32(4, 36 + pcm.size())
+	h.encode_u32(8, 0x45564157)    # WAVE
+	h.encode_u32(12, 0x20746d66)   # "fmt "
+	h.encode_u32(16, 16)
+	h.encode_u16(20, 3)            # IEEE float
+	h.encode_u16(22, 2)
+	h.encode_u32(24, int(rate))
+	h.encode_u32(28, int(rate) * 8)
+	h.encode_u16(32, 8)
+	h.encode_u16(34, 32)
+	h.encode_u32(36, 0x61746164)   # data
+	h.encode_u32(40, pcm.size())
+	h.append_array(pcm)
+	pcm = PackedByteArray()
+	var w := AudioStreamWAV.load_from_buffer(h, {"compress/mode": 0})
+	if w:
+		w.loop_mode = AudioStreamWAV.LOOP_DISABLED
+	_decode_out = w
+
+
+func _exit_tree() -> void:
+	if _decode_task >= 0:
+		WorkerThreadPool.wait_for_task_completion(_decode_task)
+		_decode_task = -1
+
+
 func _is_playlist(i: int) -> bool:
 	return i >= 0 and STATIONS[i].has("playlist")
 
@@ -282,7 +371,9 @@ func _on_track_finished() -> void:
 		return
 	_pl_index = (_pl_index + 1) % _playlist.size()
 	_pl_started = _clock
-	_load(_loaded)
+	# relancé hors du signal de fin du haut-parleur 0 : lancé depuis son propre signal,
+	# il repartait un bloc audio (~10 ms) avant les trois autres
+	_load.call_deferred(_loaded)
 
 
 ## Titre du morceau en cours (vide si la station n'est pas une playlist).
@@ -444,6 +535,7 @@ func _update_finger_presses() -> void:
 
 func _process(delta: float) -> void:
 	_clock += delta
+	_update_decoding()
 	_update_finger_presses()
 	_show_vol = maxf(_show_vol - delta, 0.0)
 	_tuning = maxf(_tuning - delta, 0.0)
@@ -509,11 +601,11 @@ func _load(what: int) -> void:
 	var pos := 0.0
 	if _is_playlist(what):
 		var now := _playlist_now()
-		_track = now[0]
-		if _track < 0:
-			stream = _static   # dossier vide : grésillement
+		if now[0] < 0 or not _decoded.has(now[0]):
+			stream = _static   # dossier vide, ou morceau pas encore décodé : grésillement
 		else:
-			stream = _playlist[_track]["stream"]
+			_track = now[0]
+			stream = _decoded[_track]
 			pos = now[1]
 	elif what >= 0 and stream:
 		pos = fmod(_clock + _offsets[what], stream.get_length())   # la station continuait

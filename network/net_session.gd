@@ -20,7 +20,7 @@ extends Node
 ##   lâché ne retombe pas forcément pareil chez les deux : celui qui l'a lâché envoie
 ##   ensuite où il s'est posé.
 
-enum HandEvent { GRAB, RELEASE, TOGGLE }
+enum HandEvent { GRAB, RELEASE, TOGGLE, BUTTON }
 
 ## Retard de l'interpolation de la voiture chez le copilote (s).
 const INTERP_DELAY := 0.1
@@ -44,6 +44,8 @@ var _rivals: Rivals
 var _deliveries: DeliveryManager
 var remote_player: Node3D
 var _remote_head: Node3D
+## Yeux (caméra non active) de l'autre joueur : sa bouche (Net.other_head).
+var remote_eyes: Camera3D
 var _avatar: NetAvatar
 var _remote_hand_meshes: Array[Node3D] = []
 var _remote_hands: Array[NetRemoteHand] = []
@@ -565,6 +567,9 @@ func on_hand(index: int, kind: int, path: String, local_xf: Transform3D) -> void
 		HandEvent.TOGGLE:
 			if target and target.has_method("toggle"):
 				target.toggle()
+		HandEvent.BUTTON:
+			if target and target.has_method("vr_button"):
+				target.vr_button()
 	Net.applying_remote = false
 
 
@@ -683,6 +688,7 @@ func _ensure_remote_player() -> void:
 	cam.name = "Eyes"
 	_remote_head.add_child(cam)
 	cam.current = false
+	remote_eyes = cam
 	for i in 3:
 		var hand := NetRemoteHand.new()
 		hand.name = ["LeftHand", "RightHand", "MouseHand"][i]

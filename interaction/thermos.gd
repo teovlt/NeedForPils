@@ -4,7 +4,7 @@ extends VRPickable
 ## dedans en penchant le thermos au-dessus, puis on le boit (ThermosCup) contre la fatigue.
 ##
 ## - Dévisser : en VR, attraper le bouchon avec l'autre main (il reste dans la main,
-##   à l'endroit : c'est la tasse). À la souris : clic gauche sur le bouchon. F / A/X sur
+##   à l'endroit : c'est la tasse). À la souris : clic gauche sur le bouchon. F sur
 ##   le thermos fermé : le bouchon se dévisse et tombe à côté.
 ## - Verser : thermos ouvert penché (goulot vers le bas) : un filet de café coule du bord
 ##   le plus bas du goulot ; au-dessus de la tasse, il la remplit (sinon, il est perdu).
@@ -204,7 +204,7 @@ func get_cup() -> ThermosCup:
 	return null
 
 
-## F / A/X : dévisse ; ouvert, verse dans la tasse à portée, ou revisse.
+## F : dévisse ; ouvert, verse dans la tasse à portée, ou revisse.
 func toggle() -> void:
 	if capped:
 		unscrew(null)

@@ -2,7 +2,10 @@ class_name VRHandInteractor
 extends Node3D
 ## À placer comme enfant d'un XRController3D.
 ## Cherche l'objet VRInteractable le plus proche, le fait s'illuminer,
-## le saisit avec "grip" et l'ouvre/ferme avec A/X (si l'objet a toggle()).
+## le saisit avec "grip". A/X n'agit que sur ce qui a vr_button() : objets à manipuler
+## (briquet, pochettes, paquet, grinder, carnet, feuille, canette fermée) et recalage
+## du pare-soleil et des rétroviseurs. Les pièces de la voiture (portes, manivelles,
+## leviers...) se manœuvrent à la main seulement.
 ## Les objets `grab_with_trigger` (pilules de la pochette) se prennent aussi du bout de
 ## l'index avec la gâchette : ils suivent alors le bout du doigt (`tip_hand`) tant que
 ## la gâchette reste enfoncée, et la gâchette ne sert plus d'accélérateur / de frein.
@@ -19,8 +22,8 @@ const GROUP := "vr_hands"
 ## les mains VR locales et celles de l'autre joueur en partie à deux (NetRemoteHand).
 const TOUCH_GROUP := "touch_hands"
 
-## Saisie (0), lâcher (1) ou action A/X (2) sur un objet : la partie à deux (NetSession)
-## rejoue le geste chez l'autre joueur.
+## Saisie (0), lâcher (1), action souris (2) ou bouton A/X (3) sur un objet : la
+## partie à deux (NetSession) rejoue le geste chez l'autre joueur.
 signal interacted(kind: int, target: VRInteractable)
 ## Pareil pour une prise du bout de l'index (gâchette).
 signal tip_interacted(kind: int, target: VRInteractable)
@@ -321,6 +324,7 @@ func is_left() -> bool:
 	return controller != null and controller.tracker == &"left_hand"
 
 
+## Gâchette pour la conduite (accélérateur à droite, frein à gauche).
 func get_trigger() -> float:
 	if controller == null or not controller.get_has_tracking_data():
 		return 0.0
@@ -412,11 +416,11 @@ func _physics_process(_delta: float) -> void:
 			_release()
 		else:
 			held.grab_update(self)
-			# A / X sur l'objet tenu (allumer le briquet, la cigarette...)
+			# A / X sur l'objet tenu (allumer le briquet, ouvrir la pochette...)
 			var toggle_held := controller.is_button_pressed(toggle_action)
-			if toggle_held and not _toggle_down and held.has_method("toggle"):
-				held.toggle()
-				interacted.emit(2, held)
+			if toggle_held and not _toggle_down and held.has_method("vr_button"):
+				held.vr_button()
+				interacted.emit(3, held)
 				pulse(0.4, 0.05)
 			_toggle_down = toggle_held
 		return
@@ -454,9 +458,9 @@ func _physics_process(_delta: float) -> void:
 				_grab_now(best)
 				return
 		var toggle_now := controller.is_button_pressed(toggle_action)
-		if toggle_now and not _toggle_down and best.has_method("toggle"):
-			best.toggle()
-			interacted.emit(2, best)
+		if toggle_now and not _toggle_down and best.has_method("vr_button"):
+			best.vr_button()
+			interacted.emit(3, best)
 			pulse(0.4, 0.05)
 		_toggle_down = toggle_now
 	else:

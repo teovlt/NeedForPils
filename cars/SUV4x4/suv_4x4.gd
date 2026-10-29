@@ -5,7 +5,8 @@ extends VehicleBody3D
 ## VR : gâchette droite = accélérateur, gâchette gauche = frein,
 ##      grip près d'une pièce = la saisir (volant, portes, levier de vitesse,
 ##      frein à main, comodo, boîte à gants, accoudoir),
-##      A/X près d'une pièce = l'actionner (cran suivant / ouvrir / fermer),
+##      A/X près du pare-soleil ou d'un rétroviseur = le recaler (le reste se fait
+##      à la main : couvercles, zips, languette... d'un geste de l'autre main),
 ##      B/Y = recentrer la vue sur le siège conducteur.
 ## Clavier (test sans casque) : Z/W/↑ accélérer, S/↓ freiner, Q/A/D/←/→ tourner,
 ##      R/N/E = R/N/D, Pg↑/Pg↓ = vitesse précédente/suivante, T = frein à main,
@@ -799,6 +800,9 @@ func _update_drive() -> void:
 ## Flou maxi des vitres latérales et arrière par orage (0-1).
 @export_range(0.0, 1.0) var side_glass_max_wet := 0.65
 var _glass_mats: Array[ShaderMaterial] = []
+## Dans le casque, le flou (relecture de l'image) est impossible : variante sans flou.
+const GLASS_SHADER := preload("res://cars/SUV4x4/car_glass.gdshader")
+const GLASS_SHADER_VR := preload("res://cars/SUV4x4/car_glass_vr.gdshader")
 var _glass_wet := 0.0
 
 
@@ -814,7 +818,7 @@ func _make_glass_clearer() -> void:
 				continue
 			if not done.has(mat):
 				var glass := ShaderMaterial.new()
-				glass.shader = preload("res://cars/SUV4x4/car_glass.gdshader")
+				glass.shader = GLASS_SHADER
 				glass.set_shader_parameter("opacity", glass_opacity)
 				_glass_mats.append(glass)
 				done[mat] = glass
@@ -912,8 +916,11 @@ func _update_weather_effects(delta: float) -> void:
 	if rain > 0.02:
 		target = side_glass_max_wet * clampf(0.3 + 0.7 * rain, 0.0, 1.0)
 	_glass_wet = move_toward(_glass_wet, target, delta * (0.08 if target > _glass_wet else 0.02))
+	var glass_shader := GLASS_SHADER_VR if WindshieldRain.is_xr_view(self) else GLASS_SHADER
 	for g in _glass_mats:
 		g.set_shader_parameter("wet", _glass_wet)
+		if g.shader != glass_shader:
+			g.shader = glass_shader
 		g.set_shader_parameter("light", 1.0 - darkness)
 	if _weather:
 		_weather.set_rain_shelter(global_transform)

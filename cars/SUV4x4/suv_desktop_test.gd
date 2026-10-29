@@ -62,6 +62,9 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_rain(delta)
 		elif autotest_scenario == "balayage":
 			_run_autotest_sweep(delta)
+		elif autotest_scenario == "balayage_vr":
+			WindshieldRain.force_xr = true   # vitres comme dans le casque (sans flou)
+			_run_autotest_sweep(delta)
 		elif autotest_scenario == "menu":
 			_run_autotest_menu(delta)
 		elif autotest_scenario == "lunette":
@@ -182,6 +185,14 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_delivery(delta)
 		elif autotest_scenario == "voix":
 			_run_autotest_voices(delta)
+		elif autotest_scenario == "remettre":
+			_run_autotest_put_back(delta)
+		elif autotest_scenario == "sac_porte":
+			_run_autotest_carry_backpack(delta)
+		elif autotest_scenario == "gestes":
+			_run_autotest_gestures(delta)
+		elif autotest_scenario == "faire_consommer":
+			_run_autotest_feed_other(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -2601,11 +2612,17 @@ func _run_autotest_playlist(delta: float) -> void:
 	var st := func() -> String:
 		var p: AudioStreamPlayer3D = r.speakers[0]
 		var cls: String = p.stream.get_class() if p.stream else "aucun"
-		return "station=%d (%s) écran=« %s » flux=%s lecture=%s pos=%.1f s titre=« %s »" % [r.station, r.STATIONS[r.station]["name"], r._name_lbl.text, cls, p.playing, p.get_playback_position(), r.get_track_title()]
+		var pos := PackedStringArray()
+		for sp in r.speakers:
+			pos.append("%.3f" % (sp as AudioStreamPlayer3D).get_playback_position())
+		return "station=%d (%s) écran=« %s » flux=%s lecture=%s pos=%.1f s titre=« %s » (4 haut-parleurs : %s)" % [r.station, r.STATIONS[r.station]["name"], r._name_lbl.text, cls, p.playing, p.get_playback_position(), r.get_track_title(), ", ".join(pos)]
 	if at.call(0.5):
 		_log("AUTOTEST playlist : %d morceau(x), durée totale %.0f s : %s" % [r._playlist.size(), r._playlist_total, ", ".join(PackedStringArray(r._playlist.map(func(e): return "%s (%.0f s)" % [e["title"], e["length"]])))])
 		r.set_station(0)
 		r.next_station(); r.next_station(); r.next_station(); r.next_station()   # 4 x ▶ -> 5e station
+	if _t < 1.5 and r.station == 4 and not _gl.has("pl_ready") and r._track >= 0:
+		_gl["pl_ready"] = _t
+		_log("AUTOTEST morceau décodé et lancé à t=%.2f s" % _t)
 	if at.call(1.5):
 		_log("AUTOTEST ▶ x4 : " + st.call())
 		_shot("playlist_1_nom")
@@ -2617,8 +2634,9 @@ func _run_autotest_playlist(delta: float) -> void:
 		var now: Array = r._playlist_now()
 		var left: float = r._playlist[now[0]]["length"] - now[1]
 		r._pl_started -= left - 1.5
+		var t_us := Time.get_ticks_usec()
 		r._load(r.station)   # les haut-parleurs repartent à la nouvelle position
-		_log("AUTOTEST saut à 1,5 s de la fin du morceau")
+		_log("AUTOTEST saut à 1,5 s de la fin du morceau (relance des 4 haut-parleurs en %d µs)" % (Time.get_ticks_usec() - t_us))
 	if at.call(5.2):
 		_log("AUTOTEST avant la fin : " + st.call())
 	if at.call(7.5):
@@ -6184,4 +6202,485 @@ func _run_autotest_voices(delta: float) -> void:
 	if at.call(9.5):
 		_log("AUTOTEST GPS approche : historique %s" % str(VoiceLine.history.slice(-3)))
 		DirAccess.remove_absolute(ProjectSettings.globalize_path("res://audio/voice/zz_test_voix.wav"))
+		get_tree().quit()
+
+
+var _rt := {}
+
+
+## Contenu remis dans son contenant : pilule dans la pochette, tête de weed dans le
+## pochon, pincée de tabac dans son sachet, pincée d'herbe moulue dans le grinder.
+## Pochette fermée ou lâcher trop loin : rien ne rentre.
+func _run_autotest_put_back(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = false
+	var base := car.to_global(Vector3(0.0, 1.1, 0.3))
+	if at.call(0.05):
+		$Weather.hour = 13.0
+		var holder := Node3D.new()
+		add_child(holder)
+		var h := VRHandInteractor.new()
+		holder.add_child(h)
+		h.debug_points = [Vector3(0, -100, 0), Vector3(0, -100, 0)]
+		_rt["h"] = h
+		var scenes := ["pill_bag_item", "weed_bag_item", "tobacco_pouch_item", "grinder_item", "papers_item", "filter_box_item"]
+		for i in scenes.size():
+			var it := (load("res://props/items/%s.tscn" % scenes[i]) as PackedScene).instantiate() as RigidBody3D
+			add_child(it)
+			it.freeze = true
+			it.global_transform = Transform3D(car.global_basis, base + car.global_basis.x * (-0.3 + 0.2 * i))
+			_rt[scenes[i]] = it.get_node("Grab")
+	var h: VRHandInteractor = _rt.get("h")
+	if h == null:
+		return
+	cam.global_position = car.to_global(Vector3(0.0, 1.45, 0.05))
+	cam.look_at(base)
+	if at.call(0.5):
+		for k in ["pill_bag_item", "weed_bag_item", "tobacco_pouch_item"]:
+			var b: PillBag = _rt[k]
+			b.open = true
+			b._apply_open(true)
+		var gr: Grinder = _rt["grinder_item"]
+		gr.open = true
+		gr._apply_open(true)
+		gr.ground = 1.0
+		gr._update_contents()
+		gr.refresh_state()
+	if at.call(1.0):
+		var res := []
+		for k in ["pill_bag_item", "weed_bag_item", "tobacco_pouch_item"]:
+			var b: PillBag = _rt[k]
+			var n0 := b.pills_left()
+			# sortie, lâchée au-dessus de la pochette ouverte : elle y retourne
+			h.get_parent().global_position = b._nearest_visible(b.item.global_position).global_position
+			b._taker.set_hand_distance(h, 0.0)
+			b._taker.grab(h)
+			var g: VRPickable = b._taker._held.get(h)
+			var sc := g.item.scene_file_path.get_file()
+			var n1 := b.pills_left()
+			h.get_parent().global_position = b.item.global_transform * Vector3(0, 0.03, 0)
+			b._taker.grab_update(h)
+			b._taker.release(h)
+			await get_tree().process_frame
+			var n2 := b.pills_left()
+			var back := not is_instance_valid(g)
+			# sortie, lâchée à 40 cm : reste dehors
+			h.get_parent().global_position = b._nearest_visible(b.item.global_position).global_position
+			b._taker.set_hand_distance(h, 0.0)
+			b._taker.grab(h)
+			var g2: VRPickable = b._taker._held.get(h)
+			h.get_parent().global_position = b.item.global_position + Vector3.UP * 0.4
+			b._taker.grab_update(h)
+			b._taker.release(h)
+			await get_tree().process_frame
+			var n3 := b.pills_left()
+			# pochette fermée : la remettre au-dessus ne fait rien
+			b.open = false
+			b._apply_open(true)
+			g2.item.global_position = b.item.global_transform * Vector3(0, 0.03, 0)
+			var refused := not b.try_receive(g2)
+			res.append("%s %s : %d -> sortie %d -> remise %d (objet supprimé %s) ; lâchée loin %d ; pochette fermée refuse %s" % [
+					k, sc, n0, n1, n2, back, n3, refused])
+		var gr: Grinder = _rt["grinder_item"]
+		var q0 := gr.ground
+		h.get_parent().global_position = gr.chamber_center()
+		gr._taker.set_hand_distance(h, 0.0)
+		gr._taker.grab(h)
+		var q1 := gr.ground
+		h.get_parent().global_position = gr.chamber_center() + Vector3.UP * 0.05
+		gr._taker.grab_update(h)
+		gr._taker.release(h)
+		res.append("grinder : herbe %.2f -> pincée sortie %.2f -> remise %.2f" % [q0, q1, gr.ground])
+		for k in ["papers_item", "filter_box_item"]:
+			var d: RollDispenser = _rt[k]
+			d.open = true
+			d._apply_open(true)
+			var n0 := d.left()
+			h.get_parent().global_position = d.item.global_transform * Vector3(0, 0.01, 0)
+			var u: VRPickable = d.take_into(h)
+			var n1 := d.left()
+			h.get_parent().global_position = d.item.global_transform * Vector3(0, 0.04, 0)
+			u.grab_update(h)
+			u.release(h)
+			await get_tree().process_frame
+			var back := not is_instance_valid(u)
+			var extra := ""
+			if k == "papers_item":
+				# feuille garnie : ne rentre pas
+				var v: RollingSheet = d.take_into(h)
+				v.tobacco = 0.3
+				v.item.global_position = d.item.global_transform * Vector3(0, 0.04, 0)
+				extra = " ; feuille garnie refusée %s" % (not d.try_receive(v))
+			res.append("%s : %d -> sortie %d -> remise %d (objet supprimé %s)%s" % [k, n0, n1, d.left(), back, extra])
+		for r in res:
+			_log("AUTOTEST remettre : " + r)
+	if at.call(2.5):
+		_shot("remettre")
+		get_tree().quit()
+
+
+var _pk := {}
+
+
+## Sac à dos pris par sa poignée, amené devant le passager avant, un sachet pioché de
+## l'autre main, puis lâché : il retourne à sa place sur la banquette.
+func _run_autotest_carry_backpack(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = false
+	var pack := car.get_node("Backpack") as Backpack
+	if at.call(0.05):
+		$Weather.hour = 13.0
+		for k in ["a", "b"]:
+			var holder := Node3D.new()
+			add_child(holder)
+			var h := VRHandInteractor.new()
+			holder.add_child(h)
+			h.debug_points = [Vector3(0, -100, 0), Vector3(0, -100, 0)]
+			_pk[k] = h
+		_pk["home"] = pack.transform
+		car.get_node("Storage")._ensure_held_collision()
+	var ha: VRHandInteractor = _pk.get("a")
+	var hb: VRHandInteractor = _pk.get("b")
+	if ha == null:
+		return
+	cam.fov = 70.0
+	var front := car.to_global(Vector3(0.0, 1.05, 0.35))
+	if _t < 1.0:
+		cam.global_position = car.to_global(Vector3(-0.05, 1.62, -0.2))
+		cam.look_at(pack.global_transform * Vector3(0, 0.3, 0))
+	else:
+		cam.global_position = car.to_global(Vector3(0.38, 1.3, 0.05))
+		cam.look_at(front)
+	if at.call(0.6):
+		_shot("sac_poignee")
+		var hp := pack.global_transform * Backpack.HANDLE
+		var sach := pack.global_transform * Vector3(0, Backpack.FILL_TOP + 0.05, 0)
+		pack.flap.open()
+		_log("AUTOTEST distances : main sur la poignée -> sac %.3f, rabat %.3f ; main au-dessus des sachets -> sac %.3f" % [
+				pack.carry.get_distance_to(hp), pack.flap.get_distance_to(hp), pack.carry.get_distance_to(sach)])
+		ha.get_parent().global_transform = Transform3D(car.global_basis, hp)
+		pack.carry.grab(ha)
+		_log("AUTOTEST sac saisi=%s (porté %s)" % [pack.carry.is_grabbed(), pack.is_carried()])
+	if pack.carry.is_grabbed() and _t < 4.0:
+		var hp0 := pack.global_transform * Backpack.HANDLE
+		var target := front + car.global_basis.y * 0.42
+		var p := car.to_global(car.to_local(hp0)).lerp(target, clampf((_t - 0.6) / 1.2, 0.0, 1.0))
+		ha.get_parent().global_transform = Transform3D(car.global_basis, p)
+		pack.carry.grab_update(ha)
+	if at.call(2.4):
+		_log("AUTOTEST sac devant : %s (place %s), rabat ouvert=%s, zone sachets active=%s" % [
+				car.to_local(pack.global_position), car.to_local(car.global_transform * (_pk["home"] as Transform3D).origin), pack.flap.is_open(), pack._taker.enabled])
+		_shot("sac_porte")
+		var n0 := pack.bags_left()
+		var b: Node3D = pack.nearest_bag(pack.global_transform * Vector3(0, 0.35, 0))
+		hb.get_parent().global_position = b.global_transform * Vector3(0, 0.05, 0)
+		pack._taker.set_hand_distance(hb, 0.0)
+		pack._taker.grab(hb)
+		var g = pack._taker._held.get(hb)
+		_log("AUTOTEST main B pioche dans le sac porté : %s, %d -> %d sachets" % [g.item.name if g else "rien", n0, pack.bags_left()])
+		pack._taker.release(hb)
+		_pk["bag"] = g
+	if at.call(2.6):
+		# sachet entamé (3 pilules sorties) remis dans le sac, puis repris
+		var b0: Node3D = pack.nearest_bag(pack.global_transform * Vector3(0, 0.35, 0))
+		hb.get_parent().global_position = b0.global_transform * Vector3(0, 0.05, 0)
+		var g: DealerBag = pack.take_bag_into(hb)
+		await get_tree().process_frame   # sachet construit (contenu en différé)
+		var full := g.pills_left()
+		for i in 3:
+			g._last_visible().visible = false   # 3 pilules consommées
+		var left := g.pills_left()
+		# remis dans le sac : lâché au-dessus
+		hb.get_parent().global_position = pack.global_transform * Vector3(0, Backpack.FILL_TOP + 0.08, 0)
+		g.grab_update(hb)
+		g.release(hb)
+		var ok := g.item.is_queued_for_deletion()
+		var slot: Node3D = null
+		for b in pack._slots:
+			if b.visible and b.get_meta("pills") == left and b.get_meta("lot") == full:
+				slot = b
+		var shown := 0
+		if slot:
+			for c in slot.get_children():
+				if c.has_meta("smiley") and c.visible:
+					shown += 1
+		var again: DealerBag = null
+		if slot:
+			slot.visible = false   # repris à la main : même chemin que take_bag_into
+			hb.get_parent().global_position = slot.global_transform * Vector3(0, 0.05, 0)
+			slot.visible = true
+			pack._taker._target = slot
+			again = pack.take_bag_into(hb)
+		await get_tree().process_frame
+		_log("AUTOTEST sachet entamé remis : reçu %s, %d/%d pilules gardées (smileys visibles %d/5) ; repris : %d pilules, lot %d, entamé %s" % [
+				ok, left, full, shown, again.pills_left() if again else -1, again.lot_size if again else -1, again.is_started() if again else false])
+		if again:
+			again.release(hb)
+	if at.call(3.0):
+		var col := 0
+		for s in pack.find_children("HeldCollision", "StaticBody3D", true, false):
+			col += (s as StaticBody3D).collision_layer
+		_log("AUTOTEST collisions du sac pendant le portage : couche %d" % col)
+		pack.carry.release(ha)
+	if at.call(3.6):
+		var home: Transform3D = _pk["home"]
+		var col := 0
+		for s in pack.find_children("HeldCollision", "StaticBody3D", true, false):
+			col = maxi(col, (s as StaticBody3D).collision_layer)
+		_log("AUTOTEST sac lâché : retour à sa place, écart %.4f m, top_level=%s, collisions rétablies=%s" % [
+				pack.transform.origin.distance_to(home.origin), pack.top_level, col == CarStorage.HELD_LAYER])
+		cam.global_position = car.to_global(Vector3(-0.05, 1.62, -0.2))
+		cam.look_at(pack.global_transform * Vector3(0, 0.3, 0))
+	if at.call(3.8):
+		_shot("sac_repose")
+		get_tree().quit()
+
+
+var _gs := {}
+
+
+## Gestes de l'autre main qui remplacent A/X en VR : objet tenu par la main A, la main B
+## pince la partie (zip, couvercle, rabat, languette, feuille) et tire ; briquet allumé
+## tant que la gâchette de la main qui le tient est enfoncée.
+func _run_autotest_gestures(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = false
+	var base := car.to_global(Vector3(0.0, 1.15, 0.35))
+	var names := ["pill_bag_item", "cigarette_pack_item", "papers_item", "filter_box_item", "grinder_item", "beer_can_item", "sheet_item", "lighter_item"]
+	if at.call(0.05):
+		$Weather.hour = 13.0
+		for k in ["a", "b"]:
+			var holder := Node3D.new()
+			add_child(holder)
+			var h := VRHandInteractor.new()
+			holder.add_child(h)
+			h.debug_points = [Vector3(0, -100, 0), Vector3(0, -100, 0)]
+			_gs[k] = h
+		for i in names.size():
+			var it := (load("res://props/items/%s.tscn" % names[i]) as PackedScene).instantiate() as RigidBody3D
+			add_child(it)
+			it.freeze = true
+			it.global_transform = Transform3D(car.global_basis, base + car.global_basis.x * (-0.35 + 0.1 * i))
+			_gs[names[i]] = it.get_node("Grab")
+	var ha: VRHandInteractor = _gs.get("a")
+	var hb: VRHandInteractor = _gs.get("b")
+	if ha == null:
+		return
+	cam.global_position = car.to_global(Vector3(0.0, 1.45, 0.05))
+	cam.look_at(base)
+	if at.call(0.6):
+		var sheet: RollingSheet = _gs["sheet_item"]
+		sheet.weed = 0.5
+		sheet.has_filter = true
+		var res := []
+		for k in names:
+			if k == "lighter_item":
+				continue
+			var g: VRPickable = _gs[k]
+			var handle: VRGestureHandle = null
+			for c in g.item.get_children():
+				if c is VRGestureHandle:
+					handle = c
+			if handle == null:
+				res.append("%s : pas de poignée de geste" % k)
+				continue
+			handle._physics_process(0.0)
+			var free_enabled := handle.enabled
+			ha.get_parent().global_transform = Transform3D(car.global_basis, g.item.global_position)
+			g.grab(ha)
+			handle._physics_process(0.0)
+			var s: Array = handle.segment.call()
+			var p: Vector3 = (s[0] as Vector3).lerp(s[1], 0.5)
+			hb.get_parent().global_position = p
+			var d := handle.get_distance_to(p)
+			var holder_ok := not handle.accepts_hand(ha)
+			var before := _gesture_state(g)
+			handle.grab(hb)
+			hb.get_parent().global_position = p + car.global_basis.y * 0.012
+			handle.grab_update(hb)
+			var mid := _gesture_state(g)
+			hb.get_parent().global_position = p + car.global_basis.y * 0.045 + car.global_basis.z * 0.01
+			handle.grab_update(hb)
+			if is_instance_valid(handle):
+				handle.release(hb)
+			var after := _gesture_state(g) if is_instance_valid(g) else "roulée"
+			res.append("%s : poignée %s (active objet posé %s, tenu %s ; dist %.3f ; main qui tient refusée %s) : %s -> 1,2 cm %s -> tiré %s" % [
+					k, handle.name, free_enabled, handle.enabled if is_instance_valid(handle) else true, d, holder_ok, before, mid, after])
+			if is_instance_valid(g) and g.is_grabbed():
+				g.release(ha)
+		for r in res:
+			_log("AUTOTEST gestes : " + r)
+		# bouton A/X (vr_button) : objets à manipuler oui, pièces de la voiture non
+		var lt: Lighter = _gs["lighter_item"]
+		ha.get_parent().global_transform = Transform3D(car.global_basis, lt.item.global_position)
+		lt.grab(ha)
+		var s0 := lt.lit
+		lt.vr_button()
+		var s1 := lt.lit
+		lt.vr_button()
+		_log("AUTOTEST gestes : briquet tenu %s -> A %s -> A %s" % [s0, s1, lt.lit])
+		var with_a := []
+		var without_a := []
+		for n in get_tree().get_nodes_in_group(VRInteractable.GROUP):
+			var nm := String(n.name) if not (n is VRPickable) else String((n as VRPickable).item.name)
+			if n.has_method("vr_button"):
+				if nm not in with_a:
+					with_a.append(nm)
+			elif n.has_method("toggle") and nm not in without_a:
+				without_a.append(nm)
+		_log("AUTOTEST bouton A actif : %s" % ", ".join(PackedStringArray(with_a)))
+		_log("AUTOTEST bouton A sans effet : %s" % ", ".join(PackedStringArray(without_a)))
+	if at.call(1.4):
+		_shot("gestes")
+		get_tree().quit()
+
+
+func _gesture_state(g: VRPickable) -> String:
+	if g is BeerCan:
+		return "ouverte" if g.opened else "fermée"
+	if g is RollingSheet:
+		return "roulée" if g.rolled else "à plat"
+	return "ouvert" if g.get("open") else "fermé"
+
+
+var _fd := {}
+
+
+## Partie à deux simulée (serveur ENet local, tête de l'autre joueur à la place
+## passager) : pilule, bière, café et cigarette portés à la bouche de l'autre joueur
+## sont consommés (pilule avalée, canette / tasse qui se vident, cigarette qui se
+## consume) sans effet chez le joueur local ; portés à sa propre bouche, l'effet est là.
+func _run_autotest_feed_other(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = false
+	var eye := car.driver_seat.global_position
+	if at.call(0.05):
+		$Weather.hour = 13.0
+		var add = preload("res://world/pills/pill_addiction.gd").new()
+		add.name = "PillAddiction"
+		add.set("car_path", NodePath("../SUV4x4"))
+		add_child(add)
+		add.craving = 0.6
+		_fd["add"] = add
+		var peer := ENetMultiplayerPeer.new()
+		peer.create_server(7795, 1)
+		multiplayer.multiplayer_peer = peer
+		Net.role = Net.Role.DRIVER
+		var sc := GDScript.new()
+		sc.source_code = "extends Node\nvar remote_eyes: Camera3D\n"
+		sc.reload()
+		var sess := Node.new()
+		sess.set_script(sc)
+		add_child(sess)
+		var other := Camera3D.new()
+		car.add_child(other)
+		other.global_transform = Transform3D(car.global_basis, eye + car.global_basis.x * -0.74)
+		sess.set("remote_eyes", other)
+		Net.session = sess
+		_fd["other"] = other
+		var holder := Node3D.new()
+		add_child(holder)
+		var h := VRHandInteractor.new()
+		holder.add_child(h)
+		h.debug_points = [Vector3(0, -100, 0), Vector3(0, -100, 0)]
+		_fd["h"] = h
+		for k in ["pill_smiley_item", "beer_can_item", "thermos_cup_item", "cigarette_item"]:
+			var it := (load("res://props/items/%s.tscn" % k) as PackedScene).instantiate() as RigidBody3D
+			add_child(it)
+			it.freeze = true
+			it.global_position = car.to_global(Vector3(0, 1.0, 0.4))
+			_fd[k] = it.get_node("Grab")
+	var h: VRHandInteractor = _fd.get("h")
+	if h == null:
+		return
+	cam.global_transform = Transform3D(car.global_basis.rotated(car.global_basis.y, PI), eye)
+	var add = _fd["add"]
+	var other: Camera3D = _fd["other"]
+	var other_mouth := other.global_transform * EdiblePickable.MOUTH_OFFSET
+	var my_mouth := cam.global_transform * EdiblePickable.MOUTH_OFFSET
+	if at.call(0.3):
+		_log("AUTOTEST partie à deux simulée : en ligne=%s, tête de l'autre=%s" % [Net.is_online(), Net.other_head() != null])
+		# pilule à la bouche de l'autre joueur
+		var pill: EdiblePickable = _fd["pill_smiley_item"]
+		var n0: int = add.pills_taken
+		h.get_parent().global_position = pill.item.global_position
+		pill.grab(h)
+		h.get_parent().global_position = other_mouth
+		pill.grab_update(h)
+		await get_tree().process_frame
+		_log("AUTOTEST pilule portée à la bouche de l'autre : avalée=%s, pilules du joueur local %d -> %d" % [not is_instance_valid(pill), n0, add.pills_taken])
+		var can: BeerCan = _fd["beer_can_item"]
+		can.opened = true
+		can._apply_open(true)
+		h.get_parent().global_position = can.item.global_position
+		can.grab(h)
+		_fd["a0"] = add.alcohol
+		var cup: ThermosCup = _fd["thermos_cup_item"]
+		cup.fill = 1.0
+	var can: BeerCan = _fd.get("beer_can_item")
+	# canette penchée à la bouche de l'autre (0,3-2,3 s), puis à la sienne (2,5-4,5 s)
+	if is_instance_valid(can) and can.is_grabbed() and _t > 0.3 and _t < 4.5:
+		var target := other_mouth if _t < 2.4 else my_mouth
+		var tilt := Basis(car.global_basis.x, deg_to_rad(60.0)) * car.global_basis
+		var xf := Transform3D(tilt, Vector3.ZERO)
+		xf.origin = target - xf.basis * Vector3(0, BeerCan.HEIGHT, 0.012)
+		h.get_parent().global_transform = xf * can._offset.affine_inverse()
+		can.grab_update(h)
+	if at.call(2.4):
+		_fd["d1"] = can.drunk_amount
+		_fd["a1"] = add.alcohol
+	if at.call(4.5):
+		_log("AUTOTEST bière à la bouche de l'autre : bue %.2f canette, alcool local %.3f -> %.3f ; à sa propre bouche : bue %.2f de plus, alcool local -> %.3f" % [
+				_fd["d1"], _fd["a0"], _fd["a1"], can.drunk_amount - float(_fd["d1"]), add.alcohol])
+		can.release(h)
+		var cup: ThermosCup = _fd["thermos_cup_item"]
+		h.get_parent().global_position = cup.item.global_position
+		cup.grab(h)
+		var f := get_tree().get_first_node_in_group(Fatigue.GROUP)
+		_fd["f0"] = f.fatigue if f else -1.0
+	var cup: ThermosCup = _fd.get("thermos_cup_item")
+	if cup and cup.is_grabbed() and _t > 4.5 and _t < 6.0:
+		var tilt := Basis(car.global_basis.x, deg_to_rad(55.0)) * car.global_basis
+		var xf := Transform3D(tilt, Vector3.ZERO)
+		xf.origin = other_mouth - xf.basis * (cup.item.global_transform.affine_inverse() * cup.rim_center())
+		h.get_parent().global_transform = xf * cup._offset.affine_inverse()
+		cup.grab_update(h)
+	if at.call(6.0):
+		_log("AUTOTEST café à la bouche de l'autre : bu %.2f tasse" % cup.drunk)
+		cup.release(h)
+		var cig: Smokable = _fd["cigarette_item"]
+		h.get_parent().global_position = cig.item.global_position
+		cig.grab(h)
+		cig.light()
+		_fd["c0"] = add.craving
+	var cig: Smokable = _fd.get("cigarette_item")
+	if cig and cig.is_grabbed() and _t > 6.0 and _t < 8.0:
+		var xf := Transform3D(car.global_basis, Vector3.ZERO)
+		xf.origin = other_mouth - (cig.butt_position() - cig.item.global_position)
+		h.get_parent().global_transform = xf * cig._offset.affine_inverse()
+		cig.grab_update(h)
+	if at.call(7.5):
+		_log("AUTOTEST cigarette à la bouche de l'autre : consumée %.3f m, manque local %.2f -> %.2f" % [cig.burnt, _fd["c0"], add.craving])
+		cig.release(h)
+		multiplayer.multiplayer_peer.close()
+		multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
+		Net.role = Net.Role.SOLO
+		Net.session = null
+	if at.call(7.8):
 		get_tree().quit()

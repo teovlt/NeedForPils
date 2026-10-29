@@ -4,11 +4,16 @@ extends Node3D
 ## (props/backpack/backpack.glb : Body, Flap), plein de sachets de pilules smiley prêts
 ## à la livraison (5 à 10 DealerBag).
 ##
-## - Rabat : se soulève à la main (VR : le saisir et le basculer ; souris : tirer) ou A/X
-##   / F en le visant (VRHingeInteractable, couture à l'arrière).
+## - Rabat : se soulève à la main (VR : le saisir et le basculer ; souris : tirer) ou F
+##   en le visant (VRHingeInteractable, couture à l'arrière).
 ## - Ouvert : la main prend le sachet le plus proche (surligné) ; clic gauche à la souris.
 ##   Le sachet s'ouvre et se vide comme la pochette de pilules.
-## - Un sachet lâché au-dessus du sac ouvert y retourne.
+## - Un sachet lâché au-dessus du sac ouvert y retourne, avec ce qu'il lui reste
+##   (entamé ou vide, il ne se remplit pas : on voit moins de smileys dedans).
+## - Le sac lui-même se prend par sa poignée (boucle en haut du dos) ou ses flancs
+##   (VR : grip ; souris : clic gauche) : il suit la main, on peut l'amener devant soi
+##   et y piocher les sachets de l'autre main. Lâché, il retourne se caler à sa place sur
+##   la banquette (pas de physique : il ne s'envole pas).
 ## Les sachets sortis ont un nom stable (le même chez les deux joueurs).
 
 const MODEL := "res://props/backpack/backpack.glb"
@@ -19,14 +24,74 @@ const D := 0.17
 const H := 0.40
 const FILL_TOP := 0.24          # affaires au fond : les sachets sont posés dessus
 const SLOTS := 10
+## Poignée de portage (backpack_build.py), repère du sac.
+const HANDLE := Vector3(0, H - 0.012, -D / 2 - 0.022)
+## Durée (s) du retour à sa place une fois lâché.
+const RETURN_TIME := 0.35
 
 ## Nombre de sachets au départ (tiré à chaque partie).
 @export var bag_range := Vector2i(5, 10)
+## Pilules par sachet plein (tiré pour chaque sachet).
+@export var smiley_range := Vector2i(8, 12)
 
 var flap: VRHingeInteractable
+var carry: Carry
 var _slots: Array[Node3D] = []
 var _taker: SachetTaker
 var _taken := 0
+var _home: Transform3D           # place sur la banquette (repère de la voiture)
+var _return_tween: Tween
+
+
+## Prise du sac lui-même (poignée, flancs) : il suit la main qui le tient.
+class Carry:
+	extends VRInteractable
+	var pack
+	var _active: Node3D
+	var _offset := Transform3D.IDENTITY
+
+	func _ready() -> void:
+		highlight_distance = 0.12
+		grab_distance = 0.07
+		outline_width = 0.004
+		super._ready()
+
+	## Poignée en priorité ; ailleurs, distance à la surface du sac (main plongée dedans
+	## = loin : c'est pour les sachets ou le rabat).
+	func get_distance_to(global_point: Vector3) -> float:
+		var l: Vector3 = pack.global_transform.affine_inverse() * global_point
+		var handle := l.distance_to(HANDLE) - 0.02
+		var half := Vector3(W * 0.5, H * 0.5, D * 0.5)
+		var q := (l - Vector3(0, H * 0.5, 0)).abs() - half
+		var outside := Vector3(maxf(q.x, 0.0), maxf(q.y, 0.0), maxf(q.z, 0.0)).length()
+		var surface := outside if outside > 0.0 else -maxf(q.x, maxf(q.y, q.z))
+		return maxf(minf(handle, surface + 0.02), 0.0)
+
+	func _on_grab_begin(hand: Node3D) -> void:
+		_take(hand)
+
+	func _on_grab_update(hand: Node3D) -> void:
+		if hand == _active:
+			pack.global_transform = _hand_xf(hand) * _offset
+
+	func _on_grab_end(hand: Node3D) -> void:
+		if hand != _active:
+			return
+		if is_grabbed():
+			_take(_grab_hands[-1])   # l'autre main reprend le sac
+			return
+		_active = null
+		pack.put_back()
+
+	func _take(hand: Node3D) -> void:
+		_active = hand
+		pack.lift()
+		_offset = _hand_xf(hand).affine_inverse() * pack.global_transform
+
+	func _hand_xf(hand: Node3D) -> Transform3D:
+		if hand.has_method("visual_transform"):
+			return hand.visual_transform()
+		return hand.global_transform
 
 
 class SachetTaker:
@@ -130,6 +195,9 @@ func _ready() -> void:
 		b.position = Vector3(-0.1 + i * 0.0222, FILL_TOP, randf_range(-0.012, 0.012))
 		b.rotation = Vector3(0, PI * 0.5 + randf_range(-0.12, 0.12), randf_range(-0.12, 0.12))
 		b.visible = i < n
+		var lot := randi_range(smiley_range.x, smiley_range.y)
+		b.set_meta("pills", lot)   # pilules dans ce sachet
+		b.set_meta("lot", lot)     # pilules du lot complet
 		root.add_child(b)
 		_slots.append(b)
 	_taker = SachetTaker.new()
@@ -137,7 +205,43 @@ func _ready() -> void:
 	_taker.pack = self
 	_taker.mesh_root = root
 	add_child(_taker)
+	_home = transform
+	carry = Carry.new()
+	carry.name = "Carry"
+	carry.pack = self
+	carry.mesh_root = body
+	add_child(carry)
 	refresh_state()
+
+
+## Sac pris en main : il quitte la banquette (suit la main dans le monde) ; ses
+## collisions « objet tenu » sont coupées pour ne pas repousser la main qui le tient.
+func lift() -> void:
+	if _return_tween:
+		_return_tween.kill()
+		_return_tween = null
+	if not top_level:
+		top_level = true
+	_set_held_collision(false)
+
+
+## Sac lâché : il retourne en douceur à sa place sur la banquette.
+func put_back() -> void:
+	var from := (get_parent() as Node3D).global_transform.affine_inverse() * global_transform
+	top_level = false
+	transform = from
+	_return_tween = create_tween()
+	_return_tween.tween_property(self, "transform", _home, RETURN_TIME).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	_return_tween.tween_callback(_set_held_collision.bind(true))
+
+
+func is_carried() -> bool:
+	return carry != null and carry.is_grabbed()
+
+
+func _set_held_collision(on: bool) -> void:
+	for b in find_children("HeldCollision", "StaticBody3D", true, false):
+		(b as StaticBody3D).collision_layer = CarStorage.HELD_LAYER if on else 0
 
 
 ## Sachet debout dans le sac (simple maquette : film, zip, quelques smileys).
@@ -169,8 +273,21 @@ func _sachet_visual() -> Node3D:
 		p.scale = Vector3.ONE * 0.8
 		p.position = Vector3(-0.015 + (k % 3) * 0.015, 0.012 + (k / 3) * 0.012, 0)
 		p.rotation = Vector3(PI * 0.5, 0, 0)
+		p.set_meta("smiley", true)
 		n.add_child(p)
 	return n
+
+
+## Smileys visibles dans un sachet du sac, selon ce qu'il lui reste.
+func _show_fill(b: Node3D) -> void:
+	var pills: int = b.get_meta("pills", 0)
+	var lot: int = maxi(b.get_meta("lot", 1), 1)
+	var shown := 0 if pills <= 0 else clampi(ceili(5.0 * pills / lot), 1, 5)
+	var k := 0
+	for c in b.get_children():
+		if c.has_meta("smiley"):
+			(c as Node3D).visible = k < shown
+			k += 1
 
 
 func bags_left() -> int:
@@ -218,6 +335,9 @@ func take_bag_into(hand: Node3D) -> VRPickable:
 		return null
 	node.visible = false
 	var bag := (load(BAG_SCENE) as PackedScene).instantiate() as RigidBody3D
+	var dg := bag.get_node("Grab") as DealerBag
+	dg.preset_count = node.get_meta("pills", -1)   # ce qu'il reste dans ce sachet
+	dg.lot_size = node.get_meta("lot", 0)
 	_taken += 1
 	bag.name = "%s_Bag_%d" % [name, _taken]   # nom stable, le même chez les deux joueurs
 	var storage := get_tree().get_first_node_in_group(CarStorage.GROUP) as Node
@@ -242,6 +362,9 @@ func try_receive(g: VRPickable) -> bool:
 	for b in _slots:
 		if not b.visible:
 			b.visible = true
+			b.set_meta("pills", (g as DealerBag).pills_left())   # entamé : il le reste
+			b.set_meta("lot", (g as DealerBag).lot_size)
+			_show_fill(b)
 			g.item.queue_free()
 			refresh_state()
 			return true

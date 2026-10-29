@@ -88,6 +88,14 @@ func world_seed(salt: String) -> int:
 	return s if s != 0 else 1
 
 
+## Tête de l'autre joueur (caméra non active de son avatar), ou null : sa bouche, pour
+## lui faire fumer / boire / avaler quelque chose (EdiblePickable.mouth_near).
+func other_head() -> Node3D:
+	if session == null or not is_instance_valid(session):
+		return null
+	return session.get("remote_eyes") as Node3D
+
+
 ## L'objet est-il tenu par une main de l'autre joueur ?
 func held_by_remote(it: VRInteractable) -> bool:
 	for h in it._grab_hands:

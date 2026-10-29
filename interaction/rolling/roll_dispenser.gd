@@ -3,10 +3,13 @@ extends VRPickable
 ## Carnet de feuilles à rouler (props/rolling/papers.glb : Body, Stack, Flap) ou boîte de
 ## filtres (props/rolling/filter_box.glb : Body, Lid ; filtres props/rolling/filter.glb).
 ##
-## - A/X (main qui le tient) ou F : ouvre / ferme le rabat.
+## - A/X (VR) ou F (bureau) : ouvre / ferme le rabat ; en VR, tenu d'une main, l'autre
+##   peut aussi le tirer par son bord.
 ## - Ouvert : l'autre main (grip, ou bout de l'index à la gâchette) prend une feuille /
 ##   un filtre (le plus proche de la main, surligné) ; clic gauche à la souris.
 ## - Tenu dans une main : l'autre main n'a accès qu'au contenu.
+## - Une feuille encore vierge (ni herbe, ni tabac, ni filtre) ou un filtre lâché
+##   au-dessus du carnet / de la boîte ouverts y retourne.
 
 const SHEET_SCENE := "res://props/items/sheet_item.tscn"
 const FILTER_SCENE := "res://props/items/filter_item.tscn"
@@ -85,6 +88,7 @@ class UnitTaker:
 
 func _ready() -> void:
 	super._ready()
+	add_to_group(RECEIVERS)
 	rest_up_axis = 1
 	friction = 0.6
 	count = randi_range(count_range.x, count_range.y)
@@ -152,6 +156,14 @@ func _build() -> void:
 	_snap.unit_size = 1.5
 	_snap.volume_db = -8.0
 	item.add_child(_snap)
+	# VR : l'autre main tire le rabat par son bord -> ouvre / ferme
+	var fh := VRGestureHandle.new()
+	fh.name = "FlapHandle"
+	fh.owner_grab = self
+	fh.mesh_root = _flap
+	fh.segment = VRGestureHandle.part_segment(_flap, "bord")
+	fh.action = toggle
+	item.add_child(fh)
 	mesh_root = shell
 	refresh_meshes()
 	_apply_open(true)
@@ -245,6 +257,11 @@ func ray_hit_precise(origin: Vector3, dir: Vector3, max_t: float) -> float:
 	return super.ray_hit_precise(origin, dir, max_t)
 
 
+## A/X en VR : comme F.
+func vr_button() -> void:
+	toggle()
+
+
 func toggle() -> void:
 	open = not open
 	_apply_open(false)
@@ -272,6 +289,35 @@ func _update_units() -> void:
 	if _stack:
 		_stack.scale = Vector3(1, maxf(float(count) / _max, 0.04), 1)
 		_stack.visible = count > 0
+
+
+## Feuille vierge / filtre lâché au-dessus du carnet / de la boîte ouverts : il y retourne.
+func try_receive(g: VRPickable) -> bool:
+	if not open or item == null or g.item == null or g.item == item:
+		return false
+	var l := item.global_transform.affine_inverse() * g.item.global_position
+	if absf(l.x) > 0.06 or absf(l.z) > 0.05 or l.y < -0.01 or l.y > 0.15:
+		return false
+	if style == "papers":
+		var sheet := g as RollingSheet
+		if sheet == null or sheet.rolled or sheet.has_filter or sheet.filling() > 0.0 or count >= _max:
+			return false
+		count += 1
+		_update_units()
+	else:
+		if not (g is RollItem) or g.kind != "filter":
+			return false
+		var slot: Node3D = null
+		for u in _units:
+			if not u.visible:
+				slot = u
+				break
+		if slot == null:
+			return false
+		slot.visible = true
+	g.item.queue_free()
+	refresh_state()
+	return true
 
 
 ## Sort une feuille / un filtre dans la main ; renvoie son Grab.

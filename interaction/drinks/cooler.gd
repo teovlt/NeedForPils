@@ -4,7 +4,7 @@ extends Node3D
 ## des canettes de bière (BeerCan) dans la glace.
 ##
 ## - Couvercle : se soulève à la main (VR : le saisir et le basculer ; souris : tirer) ou
-##   A/X / F en le visant (VRHingeInteractable, charnière à l'arrière).
+##   F en le visant (VRHingeInteractable, charnière à l'arrière).
 ## - Ouverte : la main prend la canette la plus proche (surlignée) ; clic gauche à la
 ##   souris.
 ## - Une canette encore fermée lâchée au-dessus de la glacière ouverte y retourne.

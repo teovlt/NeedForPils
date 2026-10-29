@@ -3,7 +3,7 @@ class_name VRWindowCrank
 extends VRInteractable
 ## Manivelle de lève-vitre : on la saisit par le bouton (grip en VR, clic gauche
 ## maintenu à la souris) et on la fait tourner autour de son axe pour baisser ou
-## remonter la vitre. A/X ou F : la vitre descend ou remonte d'elle-même (la manivelle
+## remonter la vitre. F : la vitre descend ou remonte d'elle-même (la manivelle
 ## tourne avec). Quand la vitre est assez baissée, le rétroviseur extérieur associé
 ## devient attrapable (`mirror`).
 ##

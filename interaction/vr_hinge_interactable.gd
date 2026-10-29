@@ -2,7 +2,7 @@ class_name VRHingeInteractable
 extends VRInteractable
 ## Pièce montée sur charnière (porte, boîte à gants, accoudoir...).
 ## Le noeud tourne autour de `hinge_axis` (exprimé dans l'espace du parent),
-## en suivant la main qui la tient. Bouton A/X près de la pièce = ouvrir/fermer.
+## en suivant la main qui la tient. F en la visant (souris) = ouvrir/fermer.
 
 signal opened
 signal closed

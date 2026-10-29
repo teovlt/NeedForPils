@@ -4,13 +4,14 @@ extends VRPickable
 ## un nombre aléatoire de cigarettes (3 à 20) tiré à chaque partie.
 ##
 ## - S'attrape et se range comme les autres objets (placé au hasard par CarStorage).
-## - A/X (VR) ou F (bureau) en le visant (ou en le tenant) : ouvre / ferme le couvercle.
+## - A/X (VR) ou F (bureau) en le visant ou en le tenant : ouvre / ferme le couvercle.
+##   En VR, tenu d'une main, l'autre peut aussi le soulever par son bord avant.
 ## - Ouvert : main sur les cigarettes (VR) ou clic gauche en les visant (bureau) ->
 ##   une cigarette sort dans la main (Smokable : à allumer au briquet et à fumer).
 ##   La cigarette visée (la plus proche de la main) est la seule surlignée ; c'est elle
 ##   qui sort. En VR, grip ou gâchette (bout de l'index).
-## - Tenu dans une main (VR) : cette main l'ouvre / le ferme avec A/X ; l'autre main ne
-##   peut plus attraper le paquet lui-même, seulement les cigarettes.
+## - Tenu dans une main (VR) : l'autre main ne peut plus attraper le paquet lui-même,
+##   seulement le couvercle et les cigarettes.
 ## - Les cigarettes visibles dans le paquet diminuent à mesure qu'on les prend.
 ## Repère : paquet debout, X largeur, Y hauteur (couvercle en haut), Z épaisseur
 ## (face avant vers +Z, charnière du couvercle à l'arrière).
@@ -88,7 +89,7 @@ class Taker:
 			g.release(hand)
 		pack.refresh_state()
 
-	## A/X ou F : sur la cigarette qu'on vient de sortir (l'allumer), sinon le couvercle.
+	## F : sur la cigarette qu'on vient de sortir (l'allumer), sinon le couvercle.
 	func toggle() -> void:
 		for h in _held:
 			var g = _held[h]
@@ -204,6 +205,14 @@ func _build() -> void:
 	item.add_child(_snap)
 	for mi in model.find_children("*", "Label3D", true, false):
 		mi.set_meta("_vr_outline", true)
+	# VR : l'autre main tire le couvercle par son bord avant -> ouvre / ferme
+	var lh := VRGestureHandle.new()
+	lh.name = "LidHandle"
+	lh.owner_grab = self
+	lh.mesh_root = _lid
+	lh.segment = VRGestureHandle.part_segment(_lid, "bord")
+	lh.action = toggle
+	item.add_child(lh)
 	mesh_root = shell
 	refresh_meshes()
 	_apply_open(true)
@@ -312,6 +321,11 @@ func cigarettes_left() -> int:
 		if c.visible:
 			n += 1
 	return n
+
+
+## A/X en VR : comme F.
+func vr_button() -> void:
+	toggle()
 
 
 func toggle() -> void:

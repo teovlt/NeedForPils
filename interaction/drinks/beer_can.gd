@@ -3,15 +3,17 @@ extends VRPickable
 ## Canette de bière 33 cl (props/cooler/beer_can.glb : Can, Tab, Hole), sortie de la
 ## glacière (Cooler).
 ##
-## - A/X (en la tenant) ou F : ouvre la canette (la languette se soulève, « pschitt »,
-##   un peu de mousse). Ouverte, A/X ou F fait boire la canette d'une traite (sans casque).
+## - A/X (VR) ou F (bureau) en la tenant, ou l'autre main qui soulève la languette (VR) :
+##   ouvre la canette (« pschitt », un peu de mousse). Ouverte, F la fait boire d'une
+##   traite (sans casque) ; en VR, on la porte à la bouche.
 ## - Boire : ouverte et tenue, l'ouverture portée à la bouche (même bouche que les
 ##   pilules, les cigarettes et le café) et la canette un peu penchée : gorgées. Chaque
 ##   gorgée rend bourré, calme le manque et fatigue (PillAddiction.drink_beer,
 ##   Fatigue.drink_beer). Une canette entière se boit en une dizaine de secondes.
 ## - Penchée ailleurs qu'à la bouche, elle se renverse. Vide, elle sonne creux.
 ## - Fermée et lâchée au-dessus de la glacière ouverte, elle y retourne.
-## Partie à deux : seul celui qui boit en ressent les effets.
+## Partie à deux : seul celui qui boit en ressent les effets ; on peut faire boire
+## l'autre joueur en portant la canette à sa bouche.
 
 const HEIGHT := 0.122
 const MOUTH_RADIUS := 0.09
@@ -93,6 +95,18 @@ func _setup() -> void:
 	_foam.mesh = q
 	_foam.position = Vector3(0, HEIGHT, 0.012)
 	item.add_child(_foam)
+	if _tab:
+		# VR : l'autre main pince la languette et la soulève -> ouverte
+		var th := VRGestureHandle.new()
+		th.name = "TabHandle"
+		th.owner_grab = self
+		th.mesh_root = _tab
+		th.segment = VRGestureHandle.part_segment(_tab, "centre")
+		th.radius = 0.01
+		th.pull_distance = 0.015
+		th.available = func() -> bool: return not opened
+		th.action = toggle
+		item.add_child(th)
 	_apply_open(true)
 	refresh_meshes()
 
@@ -100,6 +114,12 @@ func _setup() -> void:
 ## Ouverture de la canette (monde).
 func mouth_point() -> Vector3:
 	return item.global_transform * Vector3(0, HEIGHT, 0.012)
+
+
+## A/X en VR : ouvre seulement (on boit en la portant à la bouche).
+func vr_button() -> void:
+	if not opened:
+		toggle()
 
 
 func toggle() -> void:
@@ -135,9 +155,10 @@ func _process(delta: float) -> void:
 		rate = drink_rate * 1.5
 		remote = remote or _auto_remote
 	elif is_grabbed():
-		var mouth = EdiblePickable.mouth_position(get_tree(), self)
-		if mouth != null and mouth_point().distance_to(mouth) < MOUTH_RADIUS and up < 0.97:
+		var m := EdiblePickable.mouth_near(get_tree(), mouth_point(), MOUTH_RADIUS)
+		if not m.is_empty() and up < 0.97:
 			rate = drink_rate * lerpf(0.4, 1.0, clampf((0.95 - up) / 0.6, 0.0, 1.0))
+			remote = not m[2]   # à la bouche de l'autre joueur : c'est lui qui boit
 	if rate > 0.0:
 		var q := minf(rate * delta, fill)
 		fill -= q

@@ -15,11 +15,18 @@ import math, os, sys
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "animals"))
-from animals_build import Model, box
+from animals_build import Model, box as _box
 
 W, D, H = 0.31, 0.17, 0.40      # largeur (X), épaisseur (Z), hauteur (Y)
 N = 12                          # facettes du contour arrondi
 WALL = 0.012
+
+
+def box(center, size):
+    """Pavé aux vraies dimensions (le box() d'animals_build réduit largeur et hauteur
+    d'un facteur 1/√2 : section carrée tournée de 45°)."""
+    k = math.sqrt(2.0)
+    return _box(center, (size[0] * k, size[1] * k, size[2]))
 
 
 def ring(y, w, d, n=N):
@@ -109,7 +116,11 @@ def backpack():
     for sx in (-1, 1):
         straps += box((sx * 0.07, 0.22, -D / 2 - 0.012), (0.05, 0.34, 0.012))
         straps += box((sx * 0.07, 0.05, -D / 2 - 0.02), (0.05, 0.03, 0.02))
-    handle = box((0, H + 0.012, -D * 0.25), (0.08, 0.012, 0.018))
+    # poignée de portage : boucle en haut du dos, sous la couture du rabat (on attrape le
+    # sac par là ; backpack.gd : HANDLE)
+    handle = (box((0, H - 0.012, -D / 2 - 0.022), (0.09, 0.014, 0.012)) +
+              box((-0.04, H - 0.016, -D / 2 - 0.011), (0.012, 0.012, 0.022)) +
+              box((0.04, H - 0.016, -D / 2 - 0.011), (0.012, 0.012, 0.022)))
     m.part("Body", (0, 0, 0), {cloth: outer + bottom + rim + pocket, inside: inner, dark: straps + handle, zip_: zips})
     # rabat : couvercle arrondi un peu plus grand que l'ouverture
     fr0 = ring(H, W * 0.97, D * 0.95)

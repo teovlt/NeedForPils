@@ -11,7 +11,7 @@ extends VRPickable
 ## - Dans le contact : la saisir puis tourner (VR : tourner le poignet, démultiplié par
 ##   `twist_gain` ; souris : glisser vers la droite / la gauche). Elle passe devant le
 ##   volant quand la main est dessus. En position 0, tirer la main de 5 cm vers soi la sort.
-##   A/X ou F : démarrer / couper le moteur.
+##   F : démarrer / couper le moteur.
 ## - Trousseau : chaque élément est un pendule (intégration de Verlet dans le monde),
 ##   donc il réagit au poids, aux accélérations, aux virages et aux bosses. Les
 ##   breloques ne passent pas à travers le tableau de bord. Posée à plat, le trousseau
@@ -249,7 +249,7 @@ func _hand_twist_ref(hand: Node3D, ign) -> Vector3:
 	return v.normalized()
 
 
-## A/X ou F : dans le contact, démarre ou coupe le moteur. Ailleurs (pare-soleil
+## F : dans le contact, démarre ou coupe le moteur. Ailleurs (pare-soleil
 ## rabattu, rangement, siège...), la clé file toute seule dans le contact (pratique
 ## pour tester sans casque) ; un second appui démarre.
 func toggle() -> void:

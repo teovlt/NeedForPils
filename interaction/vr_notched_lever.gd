@@ -2,7 +2,7 @@ class_name VRNotchedLever
 extends VRHingeInteractable
 ## Levier à crans (levier de vitesse, comodo...).
 ## Pendant la saisie, il suit la main et "clique" sur le cran le plus proche ;
-## relâché, il se cale sur ce cran. A/X près du levier = cran suivant.
+## relâché, il se cale sur ce cran. F en visant le levier (souris) = cran suivant.
 ## `push_by_touch` (comodos) : en VR, on le pousse aussi avec le doigt ou la main, sans
 ## le saisir : la main qui arrive contre lui le fait tourner devant elle (vers le haut
 ## ou le bas) ; dès qu'elle le quitte, il se cale sur le cran le plus proche.

@@ -1,21 +1,35 @@
 class_name DealerBag
 extends PillBag
 ## Petit sachet à zip de pilules smiley « prêt à la livraison », rangé dans le sac à dos
-## (Backpack). C'est la pochette des pilules (PillBag : grande ouverture arrondie, la
-## main qui le tient l'ouvre avec A/X, l'autre main n'y prend que les pilules, pilule
-## visée surlignée, nom stable en partie à deux) en modèle réduit, avec seulement des
-## smileys et une étiquette jaune « :) x10 » sur le dessus.
+## (Backpack). C'est la pochette des pilules (PillBag : grande ouverture arrondie, A/X
+## ou geste de l'autre main pour l'ouvrir, l'autre main n'y prend que les pilules,
+## pilule visée surlignée, nom stable en partie à deux) en modèle réduit, avec seulement
+## des smileys et une étiquette jaune « :) x10 » (taille du lot) sur le dessus.
+## Un sachet entamé garde ce qui lui reste, même remis dans le sac (preset_count) :
+## is_started() le dit (une livraison payée pourra valoir moins).
 
 const SCALE := 0.5               # le modèle de la pochette, à moitié
 const SMILEY_ONLY_MODEL := "res://props/pill_smiley.glb"
 
 ## Pilules par sachet (tiré à chaque sachet).
 @export var smiley_range := Vector2i(8, 12)
+## Pilules dedans à la création (>= 0 : imposé par le sac, sachet déjà entamé) ;
+## -1 = tiré dans smiley_range.
+var preset_count := -1
+## Pilules du lot complet (étiquette) ; 0 = pill_count.
+var lot_size := 0
 
 
 func _ready() -> void:
-	pill_count = randi_range(smiley_range.x, smiley_range.y)
+	pill_count = preset_count if preset_count >= 0 else randi_range(smiley_range.x, smiley_range.y)
+	if lot_size <= 0:
+		lot_size = pill_count
 	super._ready()
+
+
+## Sachet entamé (des pilules en ont été sorties).
+func is_started() -> bool:
+	return pills_left() < lot_size
 
 
 func _build() -> void:
@@ -26,7 +40,7 @@ func _build() -> void:
 	if model:
 		# étiquette jaune « :) x10 » sur le dessus (lot prêt à livrer)
 		var l := Label3D.new()
-		l.text = ":) x%d" % pill_count
+		l.text = ":) x%d" % lot_size
 		l.font_size = 48
 		l.pixel_size = 0.0003
 		l.modulate = Color(1.0, 0.85, 0.1)

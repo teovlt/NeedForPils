@@ -10,8 +10,8 @@ extends Node3D
 ##   à la souris), on le tire en travers du corps et on l'enfonce dans la boucle, à
 ##   droite du siège : « clac », la ceinture est mise. Lâché ailleurs, il s'enroule et
 ##   revient en place.
-## - Bouton rouge de la boucle (saisir la boucle, ou A/X / F dessus) : la ceinture se
-##   déboucle et s'enroule. A/X ou F sur le pêne : il va se boucler tout seul.
+## - Bouton rouge de la boucle (saisir la boucle, ou F dessus) : la ceinture se
+##   déboucle et s'enroule. F sur le pêne : il va se boucler tout seul.
 ##   Clavier : B.
 ## - Non bouclée : voyant rouge au combiné ; si on roule (> 10 km/h), carillon (« ding »
 ##   toutes les 1,4 s) puis, au bout de 20 s, bip rapide continu, comme dans une vraie

@@ -19,7 +19,7 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "animals"))
 sys.path.insert(0, os.path.join(HERE, ".."))
-from animals_build import Model, box
+from animals_build import Model, box as _box
 from thermos_build import lathe
 
 RNG = np.random.default_rng(5)
@@ -27,6 +27,14 @@ RNG = np.random.default_rng(5)
 W, D, BODY_H, LID_H = 0.40, 0.27, 0.24, 0.045   # glacière
 T = 0.022                                        # épaisseur des parois
 CAN_R, CAN_H = 0.033, 0.122                      # canette
+
+
+def box(center, size):
+    """Pavé aux vraies dimensions. Le box() d'animals_build est une section carrée
+    tournée de 45° (coins sur le cercle) : largeur et hauteur réduites d'un facteur
+    1/√2, ce qui laissait les parois de la glacière écartées les unes des autres."""
+    k = math.sqrt(2.0)
+    return _box(center, (size[0] * k, size[1] * k, size[2]))
 
 
 def cooler():
@@ -47,10 +55,11 @@ def cooler():
              box((0, T + ih / 2, -idp / 2 + 0.001), (iw, ih, 0.002)) +
              box((iw / 2 - 0.001, T + ih / 2, 0), (0.002, ih, idp)) +
              box((-iw / 2 + 0.001, T + ih / 2, 0), (0.002, ih, idp)))
-    rim = (box((0, BODY_H - 0.004, D / 2 - T / 2), (W + 0.002, 0.008, T + 0.002)) +
-           box((0, BODY_H - 0.004, -D / 2 + T / 2), (W + 0.002, 0.008, T + 0.002)) +
-           box((W / 2 - T / 2, BODY_H - 0.004, 0), (T + 0.002, 0.008, D - 2 * T)) +
-           box((-W / 2 + T / 2, BODY_H - 0.004, 0), (T + 0.002, 0.008, D - 2 * T)))
+    # rebord : dépasse de 1 mm le haut des parois (faces confondues = scintillement)
+    rim = (box((0, BODY_H - 0.003, D / 2 - T / 2), (W + 0.002, 0.008, T + 0.002)) +
+           box((0, BODY_H - 0.003, -D / 2 + T / 2), (W + 0.002, 0.008, T + 0.002)) +
+           box((W / 2 - T / 2, BODY_H - 0.003, 0), (T + 0.002, 0.008, D - 2 * T)) +
+           box((-W / 2 + T / 2, BODY_H - 0.003, 0), (T + 0.002, 0.008, D - 2 * T)))
     # bande blanche sur la face avant, pieds et poignées
     band = box((0, BODY_H * 0.62, D / 2 + 0.001), (W * 0.82, 0.03, 0.002))
     feet = []
@@ -73,11 +82,14 @@ def cooler():
         c = box((x, T + 0.006 + RNG.uniform(0, 0.012), z), (s, s * 0.8, s))
         cubes += [tuple(tuple(v) for v in t) for t in c]
     m.part("Body", (0, 0, 0), {blue: outer, white: liner + rim + band, grey: feet + handles + plug, ice: cubes})
-    # couvercle : dessus bombé blanc, panneau bleu, joint gris dessous
-    lid = (box((0, BODY_H + LID_H * 0.45, 0), (W + 0.008, LID_H * 0.9, D + 0.008)) +
-           box((0, BODY_H + LID_H * 0.95, 0), (W - 0.03, LID_H * 0.12, D - 0.03)))
-    panel = box((0, BODY_H + LID_H + 0.001, 0.01), (W * 0.6, 0.002, D * 0.45))
-    seal = box((0, BODY_H + 0.002, 0), (W - 2 * T + 0.004, 0.004, D - 2 * T + 0.004))
+    # couvercle : dessus bombé blanc, panneau bleu, joint gris dessous. Posé 2 mm
+    # au-dessus du haut de la caisse, le joint dépasse de 1,5 mm sous le couvercle :
+    # aucune face confondue (elles scintillaient, le moteur hésitant entre les deux).
+    y0 = BODY_H + 0.002
+    lid = (box((0, y0 + LID_H * 0.45, 0), (W + 0.008, LID_H * 0.9, D + 0.008)) +
+           box((0, y0 + LID_H * 0.96, 0), (W - 0.03, LID_H * 0.12, D - 0.03)))
+    panel = box((0, y0 + LID_H * 1.02 + 0.001, 0.01), (W * 0.6, 0.002, D * 0.45))
+    seal = box((0, y0 + 0.0005, 0), (W - 2 * T + 0.004, 0.004, D - 2 * T + 0.004))
     m.part("Lid", (0, BODY_H, -D / 2), {white: lid, blue: panel, grey: seal})
     return m
 

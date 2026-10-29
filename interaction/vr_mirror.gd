@@ -110,6 +110,11 @@ func toggle() -> void:
 	auto_adjust()
 
 
+## A/X en VR : réglage automatique (recale la glace).
+func vr_button() -> void:
+	auto_adjust()
+
+
 func _apply_rotation() -> void:
 	basis = _base_basis * Basis(Vector3.UP, _yaw) * Basis(Vector3.RIGHT, _pitch)
 
