@@ -43,7 +43,7 @@ var _animals: AnimalManager
 var _rivals: Rivals
 var remote_player: Node3D
 var _remote_head: Node3D
-var _remote_body: Node3D
+var _avatar: NetAvatar
 var _remote_hand_meshes: Array[Node3D] = []
 var _remote_hands: Array[NetRemoteHand] = []
 var _remote_head_local := Transform3D.IDENTITY
@@ -579,11 +579,6 @@ func _update_remote_hands() -> void:
 		return
 	var cxf := car.global_transform
 	_remote_head.global_transform = cxf * _remote_head_local
-	# corps : sous la tête, tourné comme elle mais toujours droit
-	var fwd := (cxf.basis.inverse() * _remote_head.global_basis.z)
-	fwd.y = 0.0
-	var body_basis := Basis.looking_at(-fwd.normalized() if fwd.length() > 0.01 else Vector3.FORWARD, Vector3.UP)
-	_remote_body.global_transform = cxf * Transform3D(body_basis, _remote_head_local.origin + Vector3(0, -0.42, 0.04))
 	for i in 5:
 		var proxy := _remote_hands[i]
 		var local = _remote_hand_local[i if i < 3 else i - 3]
@@ -611,6 +606,16 @@ func _update_remote_hands() -> void:
 				Net.remote_camera = proxy.camera
 				proxy.held.grab_update(proxy)
 				Net.applying_remote = false
+	# corps assis : bras vers les mains affichées (mains VR), sinon posées sur les cuisses
+	var hands: Array = [null, null]
+	for i in 2:
+		var shown := _remote_hand_meshes[i]
+		if shown.visible and _remote_touch[i] != null and (_remote_touch[i] as Array).size() > 3 and not (_remote_touch[i][3] as Array).is_empty():
+			hands[i] = shown.global_position
+	var seat := car.driver_seat.position
+	if Net.is_driver():
+		seat.x = -seat.x   # l'autre joueur est le copilote, côté passager
+	_avatar.pose(cxf, seat, _remote_head.global_transform, hands, get_physics_process_delta_time())
 
 
 # --- Avatar de l'autre joueur ---------------------------------------------------------
@@ -655,40 +660,15 @@ func _ensure_remote_player() -> void:
 	remote_player = Node3D.new()
 	remote_player.name = "RemotePlayer"
 	add_child(remote_player)
-	var skin := _mat(Color(0.85, 0.66, 0.52))
-	var cloth := _mat(Color(0.18, 0.32, 0.55) if Net.is_copilot() else Color(0.55, 0.22, 0.18))
-	_remote_head = Node3D.new()
-	_remote_head.name = "Head"
-	_remote_head.top_level = true
-	remote_player.add_child(_remote_head)
-	var head := MeshInstance3D.new()
-	var sphere := SphereMesh.new()
-	sphere.radius = 0.095
-	sphere.height = 0.22
-	head.mesh = sphere
-	head.material_override = skin
-	head.position = Vector3(0, 0.0, 0.03)
-	_remote_head.add_child(head)
-	var glasses := MeshInstance3D.new()
-	var gbox := BoxMesh.new()
-	gbox.size = Vector3(0.16, 0.04, 0.03)
-	glasses.mesh = gbox
-	glasses.material_override = _mat(Color(0.05, 0.05, 0.06))
-	glasses.position = Vector3(0, 0.01, -0.07)
-	_remote_head.add_child(glasses)
+	# corps assis simple ; haut rouge pour le conducteur, bleu pour le copilote
+	_avatar = NetAvatar.new(Color(0.55, 0.22, 0.18) if Net.is_copilot() else Color(0.18, 0.32, 0.55))
+	_avatar.name = "Avatar"
+	remote_player.add_child(_avatar)
+	_remote_head = _avatar.head
 	var cam := Camera3D.new()
 	cam.name = "Eyes"
 	_remote_head.add_child(cam)
 	cam.current = false
-	_remote_body = MeshInstance3D.new()
-	_remote_body.name = "Body"
-	_remote_body.top_level = true
-	var torso := CapsuleMesh.new()
-	torso.radius = 0.17
-	torso.height = 0.62
-	(_remote_body as MeshInstance3D).mesh = torso
-	(_remote_body as MeshInstance3D).material_override = cloth
-	remote_player.add_child(_remote_body)
 	for i in 3:
 		var hand := NetRemoteHand.new()
 		hand.name = ["LeftHand", "RightHand", "MouseHand"][i]
