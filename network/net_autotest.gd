@@ -36,6 +36,18 @@ func _physics_process(delta: float) -> void:
 		_once("gauche_fin", 11.0, func(): _key(KEY_Q, false))
 		_once("neutre", 12.5, func(): _key(KEY_N, true); _key(KEY_N, false))
 		_finger_presses(car)
+	if Net.is_driver():
+		_once("main_vue", 15.0, func():
+			var shown = session._remote_hand_meshes[1] if session._remote_hand_meshes.size() > 1 else null
+			if shown:
+				print("NETTEST conducteur voit la main droite du copilote : modèle %s, visible=%s, à (%.2f, %.2f, %.2f) dans la voiture" % [
+					shown.name, shown.visible, car.to_local(shown.global_position).x, car.to_local(shown.global_position).y, car.to_local(shown.global_position).z]))
+	else:
+		_once("main_vue_c", 15.0, func():
+			var h = _done.get("main")
+			if h and h._xr_hand:
+				var p := car.to_local((h._xr_hand as Node3D).global_position)
+				print("NETTEST copilote sa main droite affichée à (%.2f, %.2f, %.2f)" % [p.x, p.y, p.z]))
 	for at in [13.2, 14.4, 15.0, 15.8]:
 		_once("toucher%.1f" % at, at, func():
 			print("NETTEST %s t=%.1f radio=%s klaxon=%s" % ["conducteur" if Net.is_driver() else "copilote", at,
@@ -115,8 +127,12 @@ func _once(key: String, at: float, f: Callable) -> void:
 ## marche de la radio (13,5 s) puis se pose sur le klaxon (14,6 à 15,4 s).
 func _finger_presses(car: SUV4x4) -> void:
 	_once("main_vr", 13.0, func():
-		var holder := Node3D.new()
-		add_child(holder)
+		# manette sans suivi (tracker inventé) portant la main XR Tools, comme le joueur
+		var holder := XRController3D.new()
+		holder.tracker = &"test_right"
+		car.add_child(holder)
+		holder.position = Vector3(-0.2, 1.1, 0.4)
+		holder.add_child((load("res://addons/godot-xr-tools/hands/scenes/lowpoly/right_hand_low.tscn") as PackedScene).instantiate())
 		var h := VRHandInteractor.new()
 		h.name = "TestRightHand"
 		holder.add_child(h)

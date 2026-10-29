@@ -390,6 +390,7 @@ script = ExtResource("8_zone")
 zone_name = "Support GPS"
 size = Vector3(0.15, 0.1, 0.1)
 exact_snap = true
+only_items = PackedStringArray("GPS")
 random_fill = false
 
 [node name="GPS" parent="Storage/GPSMount" instance=ExtResource("14_gps")]

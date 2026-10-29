@@ -162,7 +162,7 @@ func _place_loose(item: RigidBody3D, rng: RandomNumberGenerator, taken: Array) -
 
 func receive(item: RigidBody3D, velocity: Vector3) -> void:
 	for z in _zones:
-		if z.accepts(item.global_position):
+		if z.accepts(item.global_position) and z.accepts_item(item):
 			z.store(item)
 			return
 	if cabin.has_point(to_local(item.global_position)):

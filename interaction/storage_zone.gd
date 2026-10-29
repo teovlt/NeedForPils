@@ -15,6 +15,9 @@ extends Node3D
 @export var exact_snap := false
 ## Marge (m) autour de la boîte pour accepter un objet relâché.
 @export var accept_margin := 0.07
+## Seuls ces objets (nom du RigidBody3D) peuvent y être posés ; vide = tous. Le support
+## du GPS ne prend que le GPS (les autres objets s'y collaient contre le pare-brise).
+@export var only_items := PackedStringArray()
 ## Peut recevoir des objets lors du rangement aléatoire de début de partie
 ## (faux pour le support du GPS, qui garde son objet).
 @export var random_fill := true
@@ -102,6 +105,10 @@ func accepts(world_pos: Vector3) -> bool:
 		return p.length() < size.length() * 0.5 + accept_margin
 	var m := accept_margin
 	return absf(p.x) <= size.x * 0.5 + m and absf(p.z) <= size.z * 0.5 + m and p.y >= -m and p.y <= size.y + m * 2.0
+
+
+func accepts_item(item: RigidBody3D) -> bool:
+	return only_items.is_empty() or String(item.name) in only_items
 
 
 func store(item: RigidBody3D) -> void:

@@ -236,6 +236,17 @@ func _snap_to(it: VRInteractable) -> void:
 	_xr_hand.add_pose_override(self, 10, _grip_pose)
 
 
+## Main affichée (modèle XR Tools) pour la partie à deux : [transformation (monde),
+## grip, gâchette, poing refermé sur une commande], ou [] sans main affichée.
+func visual_state() -> Array:
+	if _xr_hand == null or not is_instance_valid(_xr_hand):
+		return []
+	var tree := _xr_hand.get_node_or_null("AnimationTree") as AnimationTree
+	var grip: float = tree.get("parameters/Grip/blend_amount") if tree else 0.0
+	var trig: float = tree.get("parameters/Trigger/blend_amount") if tree else 0.0
+	return [(_xr_hand as Node3D).global_transform, grip, trig, _snap_target != null]
+
+
 func _unsnap() -> void:
 	if _snap_target == null:
 		return
