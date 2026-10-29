@@ -39,12 +39,18 @@ const PLAYLIST_EXT := ["mp3", "ogg", "wav"]
 ## Largeur de l'écran pour le titre défilant (caractères).
 const TITLE_CHARS := 13
 const STATIC_FILE := "res://audio/radio/static.wav"
-## Haut-parleurs : [porte, position dans le repère de la porte, côté (1 = gauche : face vers -X)]
+## Haut-parleurs : [porte, position dans le repère de la porte, côté (1 = gauche : face vers
+## -X), taille de la grille]. Grille plaquée sur le panneau intérieur (x = ±0,85 dans la
+## voiture), là où on la voit depuis les sièges : à l'avant entre le vide-poche et
+## l'accoudoir, bien en arrière du tableau de bord (avant, ils étaient dans son
+## épaisseur, invisibles, et le son sortait de derrière lui) ; à l'arrière au-dessus de
+## l'accoudoir, au milieu de la portière (plus bas, l'accoudoir les cachait). Le son sort de la
+## grille et suit la portière quand on l'ouvre.
 const SPEAKERS := [
-	["Doors/DoorFL", Vector3(-0.10, 0.26, -0.16), 1.0],
-	["Doors/DoorFR", Vector3(0.10, 0.26, -0.16), -1.0],
-	["Doors/DoorRL", Vector3(-0.10, 0.20, -0.145), 1.0],
-	["Doors/DoorRR", Vector3(0.10, 0.20, -0.145), -1.0],
+	["Doors/DoorFL", Vector3(-0.10, 0.43, -0.395), 1.0, 0.75],
+	["Doors/DoorFR", Vector3(0.10, 0.43, -0.395), -1.0, 0.75],
+	["Doors/DoorRL", Vector3(-0.10, 0.37, -0.475), 1.0, 0.75],
+	["Doors/DoorRR", Vector3(0.10, 0.37, -0.475), -1.0, 0.75],
 ]
 const KNOB_POS := Vector3(-0.068, 0.0, 0.014)
 const KNOB_SWEEP_DEG := 300.0
@@ -141,7 +147,7 @@ func _ready() -> void:
 		var xf := Transform3D(Basis(Vector3.UP.cross(z), Vector3.UP, z), sp[1])
 		var g2 := grille_src.duplicate() as Node3D
 		g2.name = "SpeakerGrille"
-		g2.transform = xf
+		g2.transform = xf.scaled_local(Vector3.ONE * float(sp[3]))
 		door.add_child(g2)
 		var p := AudioStreamPlayer3D.new()
 		p.name = "RadioSpeaker"

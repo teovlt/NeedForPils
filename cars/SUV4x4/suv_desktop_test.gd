@@ -174,6 +174,8 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_pouch_view(delta)
 		elif autotest_scenario == "glaciere":
 			_run_autotest_cooler(delta)
+		elif autotest_scenario == "enceintes":
+			_run_autotest_speakers(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -5618,4 +5620,75 @@ func _run_autotest_cooler(delta: float) -> void:
 		cooler.lid.toggle()
 	if at.call(12.4):
 		_log("AUTOTEST couvercle refermé=%s, zone canettes active=%s" % [not cooler.lid.is_open(), cooler._taker.enabled])
+		get_tree().quit()
+
+
+# --- Haut-parleurs de portières : visibles depuis les sièges avant, son au même endroit --
+
+func _run_autotest_speakers(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = false
+	var radio := car.get_node("Radio")
+	var eye_d := car.to_local(car.driver_seat.global_position)
+	var eye_p := Vector3(-eye_d.x, eye_d.y, eye_d.z)
+	if at.call(0.1):
+		$Weather.hour = 13.0
+		car.get_node("Storage")._ensure_held_collision()
+		var sp := get_world_3d().direct_space_state
+		# repérage : quelles places de la porte avant gauche se voient depuis les deux sièges
+		var rows := []
+		for z in [0.82, 0.72, 0.64, 0.58, 0.52]:
+			for y in [0.72, 0.8, 0.88]:
+				var tgt := car.to_global(Vector3(0.835, y, z))
+				var seen := []
+				for e in [eye_d, eye_p]:
+					var q := PhysicsRayQueryParameters3D.create(car.to_global(e), tgt, CarStorage.HELD_LAYER)
+					var r := sp.intersect_ray(q)
+					seen.append("oui" if r.is_empty() or (r.position as Vector3).distance_to(tgt) < 0.03 else "non(%s)" % (r.collider.get_parent().name))
+				rows.append("z=%.2f y=%.2f %s" % [z, y, "/".join(seen)])
+		_log("AUTOTEST porte gauche, vu du conducteur / du passager :\n   " + "\n   ".join(rows))
+		var surf := []
+		for side in [1.0, -1.0]:
+			for z in [0.66, 0.58, 0.5, -0.3, -0.4, -0.5, -0.6, -0.7]:
+				for y in [0.72, 0.8, 0.88, 0.94, 1.0, 1.06]:
+					var q := PhysicsRayQueryParameters3D.create(car.to_global(Vector3(0.3 * side, y, z)), car.to_global(Vector3(1.3 * side, y, z)), CarStorage.HELD_LAYER)
+					var r := sp.intersect_ray(q)
+					surf.append("(%.0f,%.2f,%.2f)->%s %s" % [side, y, z, ("%.3f" % car.to_local(r.position).x) if r else "-", r.collider.get_parent().name if r else ""])
+		_log("AUTOTEST surface intérieure des portières (côté, y, z) -> x :\n   " + "\n   ".join(surf))
+		var eye_rl := Vector3(0.42, 1.35, -0.62)
+		var eye_rr := Vector3(-0.42, 1.35, -0.62)
+		for p in radio.speakers:
+			var gp: Vector3 = (p as Node3D).global_position
+			var vis := []
+			for e in [eye_d, eye_p, eye_rl, eye_rr]:
+				var q := PhysicsRayQueryParameters3D.create(car.to_global(e), gp, CarStorage.HELD_LAYER)
+				var r := sp.intersect_ray(q)
+				vis.append("visible" if r.is_empty() or (r.position as Vector3).distance_to(gp) < 0.04 else "caché par %s" % r.collider.get_parent().name)
+			_log("AUTOTEST haut-parleur %s à %s (vu du conducteur / passager / arrière gauche / arrière droit) : %s" % [p.get_parent().name, car.to_local(gp), " / ".join(vis)])
+	cam.fov = 70.0
+	if _t < 1.5:
+		cam.global_position = car.to_global(eye_d)
+		cam.look_at(car.to_global(Vector3(0.84, 0.95, 0.6)))
+	elif _t < 3.0:
+		cam.global_position = car.to_global(eye_d)
+		cam.look_at(car.to_global(Vector3(-0.84, 0.95, 0.6)))
+	else:
+		cam.global_position = car.to_global(Vector3(0.3, 1.3, -0.75))
+		cam.look_at(car.to_global(Vector3(0.84, 0.95, -0.58)))
+	if at.call(1.2):
+		_shot("enceinte_avant_gauche")
+	if at.call(2.7):
+		_shot("enceinte_avant_droite")
+	if at.call(4.2):
+		_shot("enceinte_arriere_gauche")
+	if _t > 4.3:
+		var cool := car.get_node("Cooler") as Node3D
+		cam.global_position = cool.global_transform * Vector3(-0.45, 0.15, 0.0)
+		cam.look_at(cool.global_transform * Vector3(0, 0.12, 0))
+	if at.call(5.0):
+		_shot("glaciere_cote")
 		get_tree().quit()
