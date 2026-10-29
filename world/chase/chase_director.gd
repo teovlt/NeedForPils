@@ -461,6 +461,9 @@ func _end(title: String, line: String) -> void:
 	var pills := _addiction.pills_taken if _addiction else 0
 	var assim := roundi((_addiction.assimilation if _addiction else 0.0) * 100.0)
 	var stats := "%s\n%.1f km parcourus  ·  %d Pils  ·  assimilation %d %%" % [line, km, pills, assim]
+	var deliveries := get_tree().get_first_node_in_group(DeliveryManager.GROUP) as DeliveryManager
+	if deliveries and deliveries.delivered + deliveries.missed > 0:
+		stats += "  ·  %d livraison%s" % [deliveries.delivered, "s" if deliveries.delivered > 1 else ""]
 	_fade_curtain(0.85, 1.0)
 	_show(title, stats + "\n\nEspace / A : rejouer")
 

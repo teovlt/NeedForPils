@@ -4,6 +4,9 @@ extends Node3D
 ## caravanes (« rednecks »), motel malfamé. Tout est construit par code en low poly
 ## abîmé (formes simples, couleurs passées, rouille, tags), avec des collisions sur
 ## les bâtiments et les gros objets.
+## Sert aussi aux lieux du bord de la route (RoadGenerator._build_lot, sans voiture),
+## avec en plus la station-service, et un point de livraison (DeliveryDrop : boîte aux
+## lettres ou carton) sur le parking quand `drop_id` est donné.
 ##
 ## Repère : X le long de la route (sens de circulation), Z vers l'extérieur (le lieu
 ## s'étend de z = 0, à 6 m de l'axe de la route, jusqu'à z = depth). L'entrée rejoint
@@ -14,8 +17,21 @@ var site_type := "superette"
 var depth := 27.0
 var length := 38.0
 var car: Node3D
+## Graine du tirage (lieux du bord de la route) ; 0 = graine de la partie / au hasard.
+var seed_value := 0
+## Identifiant de livraison du point de livraison de ce lieu (vide = aucun).
+var drop_id := ""
+## Points de livraison possibles notés par chaque lieu : [position, cap en degrés, type].
+var drop_points: Array = []
 
-var _mats := {}
+static var _mats := {}
+## Pièces fixes du lieu, sans un nœud par pièce : forme unitaire (partagée) mise à
+## l'échelle, matériau, couleur ; dessinées en quelques MultiMesh (_flush_parts).
+## Un lieu se construit ainsi en quelques ms : pas d'à-coup quand la route en crée un
+## en cours de route.
+var _parts := {}   # forme#matériau -> [maillage, matériau, Array[Transform3D], Array[Color]]
+static var _unit_meshes := {}
+static var _vc_material: StandardMaterial3D
 var _body: StaticBody3D
 var _rng := RandomNumberGenerator.new()
 var _neon: Array[Label3D] = []      # lettres qui clignotent (motel)
@@ -35,7 +51,9 @@ const LINE := Color(0.78, 0.76, 0.66)
 
 
 func build() -> void:
-	if Net.world_seed("site") != 0:
+	if seed_value != 0:
+		_rng.seed = seed_value
+	elif Net.world_seed("site") != 0:
 		_rng.seed = Net.world_seed("site")   # partie à deux : le même lieu chez les deux
 	else:
 		_rng.randomize()
@@ -47,8 +65,19 @@ func build() -> void:
 		"aire": _build_rest_area()
 		"camp": _build_camp()
 		"motel": _build_motel()
-	_merge_static()
-	print("Lieu de départ : ", site_type)
+		"station": _build_station()
+	_flush_parts()
+	if drop_id != "" and not drop_points.is_empty():
+		var dp: Array = drop_points[_rng.randi() % drop_points.size()]
+		var d := DeliveryDrop.new()
+		d.name = "Drop"
+		d.kind = dp[2]
+		d.target_id = drop_id
+		d.position = dp[0]
+		d.rotation_degrees.y = dp[1]
+		add_child(d)
+	if car:
+		print("Lieu de départ : ", site_type)
 
 
 func _process(delta: float) -> void:
@@ -66,37 +95,28 @@ func _process(delta: float) -> void:
 		_fire.light_energy = 1.6 + 0.6 * sin(_t * 13.0) * sin(_t * 7.1) + randf() * 0.3
 
 
-## Fusionne les centaines de petites pièces fixes en un maillage par matériau
-## (quelques appels de rendu au lieu de centaines, important en VR). Les pièces
-## qui clignotent restent à part.
-func _merge_static() -> void:
-	var keep := {}
-	for f in _flicker:
-		keep[f[0]] = true
-	var tools := {}
-	var parts: Array[Node] = []
-	for mi in find_children("*", "MeshInstance3D", true, false):
-		if keep.has(mi):
-			continue
-		var m: Material = (mi as MeshInstance3D).material_override
-		if not tools.has(m):
-			var st := SurfaceTool.new()
-			st.begin(Mesh.PRIMITIVE_TRIANGLES)
-			tools[m] = st
-		var xf := global_transform.affine_inverse() * (mi as Node3D).global_transform
-		(tools[m] as SurfaceTool).append_from((mi as MeshInstance3D).mesh, 0, xf)
-		parts.append(mi)
-	var am := ArrayMesh.new()
-	for m in tools:
-		(tools[m] as SurfaceTool).commit(am)
-		am.surface_set_material(am.get_surface_count() - 1, m)
-	var merged := MeshInstance3D.new()
-	merged.name = "SiteMesh"
-	merged.mesh = am
-	add_child(merged)
-	for n in parts:
-		n.get_parent().remove_child(n)
-		n.free()
+## Dessine les pièces notées : un MultiMesh par forme et par matériau (quelques
+## appels de rendu au lieu de centaines, important en VR). Les pièces qui clignotent
+## sont de vrais nœuds à part (_flicker).
+func _flush_parts() -> void:
+	for key in _parts:
+		var e: Array = _parts[key]
+		var xfs: Array = e[2]
+		var cols: Array = e[3]
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.use_colors = true
+		mm.mesh = e[0]
+		mm.instance_count = xfs.size()
+		for k in xfs.size():
+			mm.set_instance_transform(k, xfs[k])
+			mm.set_instance_color(k, cols[k])
+		var mmi := MultiMeshInstance3D.new()
+		mmi.name = "SiteParts"
+		mmi.multimesh = mm
+		mmi.material_override = e[1]
+		add_child(mmi)
+	_parts.clear()
 
 
 # --- Briques --------------------------------------------------------------------
@@ -117,51 +137,111 @@ func _mat(c: Color, emissive := 0.0, rough := 0.95) -> StandardMaterial3D:
 	return _mats[key]
 
 
+func _unit_mesh(key: String) -> Mesh:
+	if not _unit_meshes.has(key):
+		var a := key.split(":")
+		match a[0]:
+			"box":
+				_unit_meshes[key] = BoxMesh.new()
+			"cyl":
+				var cm := CylinderMesh.new()
+				cm.height = 1.0
+				cm.bottom_radius = 1.0
+				cm.top_radius = float(a[2])
+				cm.radial_segments = int(a[1])
+				cm.rings = 1
+				_unit_meshes[key] = cm
+			"ball":
+				var sm := SphereMesh.new()
+				sm.radius = 1.0
+				sm.height = 2.0 * float(a[1])
+				sm.radial_segments = 7
+				sm.rings = 4
+				_unit_meshes[key] = sm
+	return _unit_meshes[key]
+
+
+## Note une pièce : forme unitaire `shape`, transformation (échelle comprise), couleur.
+## Sans matériau donné : matériau commun à couleur par instance (opaque) ou matériau
+## de la couleur (transparent).
+func _add(shape: String, xf: Transform3D, c: Color, mat: Material = null) -> void:
+	var col := Color(1, 1, 1)
+	if mat == null:
+		if c.a < 1.0:
+			mat = _mat(c)
+		else:
+			if _vc_material == null:
+				_vc_material = StandardMaterial3D.new()
+				_vc_material.vertex_color_use_as_albedo = true
+				_vc_material.vertex_color_is_srgb = true
+				_vc_material.roughness = 0.95
+			mat = _vc_material
+			col = c
+	var key := "%s#%d" % [shape, mat.get_instance_id()]
+	if not _parts.has(key):
+		_parts[key] = [_unit_mesh(shape), mat, [], []]
+	(_parts[key][2] as Array).append(xf)
+	(_parts[key][3] as Array).append(col)
+
+
+## Repère d'un nœud porteur (épave, lampadaire, chariot...) dans le repère du lieu.
+func _local_xf(parent: Node3D) -> Transform3D:
+	var t := Transform3D.IDENTITY
+	var n: Node = parent
+	while n != null and n != self and n is Node3D:
+		t = (n as Node3D).transform * t
+		n = n.get_parent()
+	return t
+
+
+func _xf(pos: Vector3, rot: Vector3, parent: Node3D) -> Transform3D:
+	var xf := Transform3D(Basis.from_euler(rot * (PI / 180.0)), pos)
+	return _local_xf(parent) * xf if parent else xf
+
+
 ## Boîte (taille, centre, rotation en degrés) ; `solid` ajoute une collision.
-func box(size: Vector3, pos: Vector3, c: Color, rot := Vector3.ZERO, solid := false, parent: Node3D = null) -> MeshInstance3D:
-	var mi := MeshInstance3D.new()
-	var bm := BoxMesh.new()
-	bm.size = size
-	mi.mesh = bm
-	mi.material_override = _mat(c)
-	mi.position = pos
-	mi.rotation_degrees = rot
-	(parent if parent else self).add_child(mi)
+func box(size: Vector3, pos: Vector3, c: Color, rot := Vector3.ZERO, solid := false, parent: Node3D = null) -> void:
+	var xf := _xf(pos, rot, parent)
+	_add("box", Transform3D(xf.basis * Basis.from_scale(size), xf.origin), c)
 	if solid:
-		_collider(size, mi.transform if parent == null else parent.transform * mi.transform)
-	return mi
+		_collider(size, xf)
 
 
-func cyl(r: float, h: float, pos: Vector3, c: Color, rot := Vector3.ZERO, solid := false, sides := 10, r_top := -1.0, parent: Node3D = null) -> MeshInstance3D:
+## Boîte lumineuse (enseigne, vitrine, ampoule) ; `flicker` : vrai nœud qui clignote.
+func glow_box(size: Vector3, pos: Vector3, c: Color, energy: float, rot := Vector3.ZERO, parent: Node3D = null, flicker := false) -> void:
+	var xf := _xf(pos, rot, parent)
+	var sxf := Transform3D(xf.basis * Basis.from_scale(size), xf.origin)
+	if not flicker:
+		_add("box", sxf, c, _mat(c, energy))
+		return
 	var mi := MeshInstance3D.new()
-	var cm := CylinderMesh.new()
-	cm.top_radius = r if r_top < 0.0 else r_top
-	cm.bottom_radius = r
-	cm.height = h
-	cm.radial_segments = sides
-	cm.rings = 1
-	mi.mesh = cm
-	mi.material_override = _mat(c)
-	mi.position = pos
-	mi.rotation_degrees = rot
-	(parent if parent else self).add_child(mi)
-	if solid:
-		_collider(Vector3(r * 1.8, h, r * 1.8), mi.transform if parent == null else parent.transform * mi.transform)
-	return mi
-
-
-func blob(r: float, pos: Vector3, c: Color, squash := 0.8) -> MeshInstance3D:
-	var mi := MeshInstance3D.new()
-	var sm := SphereMesh.new()
-	sm.radius = r
-	sm.height = r * 2.0 * squash
-	sm.radial_segments = 7
-	sm.rings = 4
-	mi.mesh = sm
-	mi.material_override = _mat(c)
-	mi.position = pos
+	mi.mesh = _unit_mesh("box")
+	mi.material_override = _mat(c, energy)
+	mi.transform = sxf
 	add_child(mi)
-	return mi
+	_flicker.append([mi, null])
+
+
+func _cyl_xf(r: float, h: float, pos: Vector3, rot: Vector3, sides: int, r_top: float, parent: Node3D) -> Array:
+	var xf := _xf(pos, rot, parent)
+	var ratio := 1.0 if r_top < 0.0 else r_top / maxf(r, 0.0001)
+	return [xf, "cyl:%d:%.2f" % [sides, ratio], Transform3D(xf.basis * Basis.from_scale(Vector3(r, h, r)), xf.origin)]
+
+
+func cyl(r: float, h: float, pos: Vector3, c: Color, rot := Vector3.ZERO, solid := false, sides := 10, r_top := -1.0, parent: Node3D = null) -> void:
+	var a := _cyl_xf(r, h, pos, rot, sides, r_top, parent)
+	_add(a[1], a[2], c)
+	if solid:
+		_collider(Vector3(r * 1.8, h, r * 1.8), a[0])
+
+
+func glow_cyl(r: float, h: float, pos: Vector3, c: Color, energy: float, sides := 10, r_top := -1.0) -> void:
+	var a := _cyl_xf(r, h, pos, Vector3.ZERO, sides, r_top, null)
+	_add(a[1], a[2], c, _mat(c, energy))
+
+
+func blob(r: float, pos: Vector3, c: Color, squash := 0.8) -> void:
+	_add("ball:%.2f" % squash, Transform3D(Basis.from_scale(Vector3.ONE * r), pos), c)
 
 
 func _collider(size: Vector3, xf: Transform3D) -> void:
@@ -266,11 +346,10 @@ func wreck_car(p: Vector3, yaw: float, c: Color, blocks := false) -> void:
 	_collider(Vector3(1.8, 1.3, 4.4), n.transform * Transform3D(Basis(), Vector3(0, 0.65, 0)))
 
 
-func barrel(p: Vector3, c: Color, tilt := Vector3.ZERO) -> MeshInstance3D:
-	var b := cyl(0.29, 0.88, p + Vector3(0, 0.44, 0), c, tilt, true, 10)
+func barrel(p: Vector3, c: Color, tilt := Vector3.ZERO) -> void:
+	cyl(0.29, 0.88, p + Vector3(0, 0.44, 0), c, tilt, true, 10)
 	cyl(0.3, 0.04, p + Vector3(0, 0.25, 0), c.darkened(0.3), tilt, false, 10)
 	cyl(0.3, 0.04, p + Vector3(0, 0.62, 0), c.darkened(0.3), tilt, false, 10)
-	return b
 
 
 func tire(p: Vector3, flat := true) -> void:
@@ -288,13 +367,9 @@ func lamp_post(p: Vector3, broken: bool, tilt := 0.0) -> void:
 	add_child(n)
 	cyl(0.08, 6.0, Vector3(0, 3.0, 0), Color(0.35, 0.36, 0.36), Vector3.ZERO, false, 8, -1.0, n)
 	box(Vector3(1.4, 0.08, 0.1), Vector3(0.6, 5.95, 0), Color(0.35, 0.36, 0.36), Vector3.ZERO, false, n)
-	var head := box(Vector3(0.5, 0.15, 0.3), Vector3(1.2, 5.85, 0), Color(0.25, 0.25, 0.25), Vector3.ZERO, false, n)
+	box(Vector3(0.5, 0.15, 0.3), Vector3(1.2, 5.85, 0), Color(0.25, 0.25, 0.25), Vector3(0, 0, -35.0 if broken else 0.0), false, n)
 	if not broken:
-		var bulb := box(Vector3(0.4, 0.04, 0.22), Vector3(1.2, 5.76, 0), Color(1.0, 0.85, 0.55), Vector3.ZERO, false, n)
-		bulb.material_override = _mat(Color(1.0, 0.8, 0.5), 2.5)
-		_flicker.append([bulb, null])
-	else:
-		head.rotation_degrees.z = -35.0
+		glow_box(Vector3(0.4, 0.04, 0.22), Vector3(1.2, 5.76, 0), Color(1.0, 0.8, 0.5), 2.5, Vector3.ZERO, n, true)
 	_collider(Vector3(0.3, 6.0, 0.3), n.transform * Transform3D(Basis(), Vector3(0, 3.0, 0)))
 
 
@@ -393,6 +468,9 @@ func _build_superette() -> void:
 		box(Vector3(1.2, 0.14, 0.8), Vector3(bx0 - 0.8, 0.07 + i * 0.15, bz + 1.0), WOOD, Vector3(0, _rng.randf_range(-10, 10), 0))
 	lamp_post(Vector3(-hl + 2.0, 0, 2.0), false)
 	lamp_post(Vector3(hl * 0.5, 0, 3.0), true, 9.0)
+	# livraison : carton devant la porte, ou boîte aux lettres à l'entrée du parking
+	drop_points.append([Vector3(door_x - 2.2, 0, bz - 0.9), 180.0, "carton"])
+	drop_points.append([Vector3(-hl + 6.0, 0, -0.6), 0.0, "mailbox"])
 	place_car(Vector3(-3.0, 0, 7.5), Vector3(0.75, 0, -1.0))
 
 
@@ -466,6 +544,8 @@ func _build_rest_area() -> void:
 	label("PILS = LIBERTÉ", ip + Vector3(0.2, 1.45, -0.07), Color(1.0, 0.35, 0.75), 26, Vector3(0, 180, 6))
 	lamp_post(Vector3(-2.0, 0, depth - 1.0), true, -6.0)
 	wreck_car(Vector3(hl - 6.0, 0, 6.5), 95.0, Color(0.5, 0.48, 0.3))
+	drop_points.append([bp + Vector3(1.1, 0, -0.6), 200.0, "carton"])
+	drop_points.append([Vector3(0.0, 0, 3.4), 0.0, "mailbox"])
 	place_car(Vector3(-9.0, 0, 4.5), Vector3(1.0, 0, -0.15))
 
 
@@ -492,8 +572,7 @@ func _build_camp() -> void:
 	barrel(Vector3(3.2, 0, depth - 2.6), Color(0.6, 0.15, 0.1), Vector3(80, 30, 0))
 	var fire_p := Vector3(0.5, 0, 12.0)
 	barrel(fire_p, RUST.darkened(0.2))
-	var flame := cyl(0.24, 0.5, fire_p + Vector3(0, 1.1, 0), Color(1.0, 0.5, 0.1), Vector3.ZERO, false, 7, 0.02)
-	flame.material_override = _mat(Color(1.0, 0.45, 0.08), 4.0)
+	glow_cyl(0.24, 0.5, fire_p + Vector3(0, 1.1, 0), Color(1.0, 0.45, 0.08), 4.0, 7, 0.02)
 	_fire = OmniLight3D.new()
 	_fire.light_color = Color(1.0, 0.55, 0.2)
 	_fire.omni_range = 6.0
@@ -535,6 +614,8 @@ func _build_camp() -> void:
 	box(Vector3(1.2, 0.5, 0.04), Vector3(-hl + 3.5, 1.35, 0.5), PLYWOOD, Vector3(0, 0, -4))
 	label("PROPRIÉTÉ PRIVÉE", Vector3(-hl + 3.5, 1.4, 0.47), Color(0.75, 0.1, 0.05), 22, Vector3(0, 180, -4))
 	label("DÉGAGE", Vector3(-hl + 3.5, 1.24, 0.47), Color(0.75, 0.1, 0.05), 28, Vector3(0, 180, -4))
+	drop_points.append([Vector3(-hl + 6.0, 0, -0.6), 0.0, "mailbox"])
+	drop_points.append([fire_p + Vector3(2.0, 0, -1.5), 160.0, "carton"])
 	place_car(Vector3(-hl + 8.0, 0, 7.0), Vector3(0.35, 0, -1.0))
 
 
@@ -638,13 +719,10 @@ func _build_motel() -> void:
 		if i == 2:
 			box(Vector3(1.3, 1.0, 0.06), Vector3(rx + 1.3, 1.5, bz - 0.07), PLYWOOD)   # vitre cassée condamnée
 		box(Vector3(0.6, 0.4, 0.4), Vector3(rx + 1.3, 0.5, bz - 0.25), Color(0.7, 0.7, 0.68), Vector3.ZERO, true)
-		var lamp := box(Vector3(0.18, 0.18, 0.12), Vector3(rx - 0.75, 2.35, bz - 0.08), Color(1.0, 0.85, 0.5))
 		if i % 3 == 1:
-			lamp.material_override = _mat(Color(0.3, 0.28, 0.24))
+			box(Vector3(0.18, 0.18, 0.12), Vector3(rx - 0.75, 2.35, bz - 0.08), Color(0.3, 0.28, 0.24))
 		else:
-			lamp.material_override = _mat(Color(1.0, 0.82, 0.5), 3.0)
-			if i % 3 == 2:
-				_flicker.append([lamp, null])
+			glow_box(Vector3(0.18, 0.18, 0.12), Vector3(rx - 0.75, 2.35, bz - 0.08), Color(1.0, 0.82, 0.5), 3.0, Vector3.ZERO, null, i % 3 == 2)
 	# accueil (petite aile vers la route)
 	var ox := hl - 5.0
 	box(Vector3(7.0, 3.1, 9.0), Vector3(ox, 1.55, bz - 1.0), wall.darkened(0.08), Vector3.ZERO, true)
@@ -653,8 +731,7 @@ func _build_motel() -> void:
 	var office := label("RÉCEPTION", Vector3(ox - 0.5, 2.65, bz - 5.6), Color(0.35, 0.9, 1.0), 44, Vector3(0, 180, 0), true)
 	_neon.append(office)
 	box(Vector3(0.9, 1.8, 0.7), Vector3(ox + 2.6, 0.9, bz - 6.0), Color(0.2, 0.25, 0.6), Vector3.ZERO, true)   # distributeur
-	var vend := box(Vector3(0.7, 1.2, 0.02), Vector3(ox + 2.6, 1.1, bz - 6.36), Color(0.8, 0.9, 1.0))
-	vend.material_override = _mat(Color(0.7, 0.85, 1.0), 1.5)
+	glow_box(Vector3(0.7, 1.2, 0.02), Vector3(ox + 2.6, 1.1, bz - 6.36), Color(0.7, 0.85, 1.0), 1.5)
 	box(Vector3(1.0, 1.3, 0.8), Vector3(ox - 3.0, 0.65, bz - 6.0), Color(0.85, 0.86, 0.87), Vector3.ZERO, true)   # machine à glaçons
 	label("ICE", Vector3(ox - 3.0, 0.9, bz - 6.42), Color(0.2, 0.45, 0.9), 34, Vector3(0, 180, 0))
 	# grande enseigne au bord de la route, néons fatigués
@@ -681,4 +758,135 @@ func _build_motel() -> void:
 		if _rng.randf() < 0.7:
 			box(Vector3(0.12, 0.01, 4.5), Vector3(x0 + 0.0 + i * 3.6, -0.02, bz - 5.0), Color(LINE, 0.5))
 	lamp_post(Vector3(6.0, 0, 2.5), false, 4.0)
+	drop_points.append([sp + Vector3(3.0, 0, -1.1), 0.0, "mailbox"])
+	drop_points.append([Vector3(ox - 4.6, 0, bz - 6.0), 180.0, "carton"])
 	place_car(Vector3(x0 + 13.0, 0, bz - 5.2), Vector3(0.5, 0, -1.0))
+
+
+# --- Station-service (lieux du bord de la route) --------------------------------
+
+func _build_station() -> void:
+	var hl := length * 0.5
+	ground(-hl, hl, -1.7, depth, ASPHALT)
+	stains(-hl, hl, 0.0, depth - 9.0, 40, ASPHALT)
+	weeds(-hl, hl, -1.5, depth, 25)
+	litter(-hl, hl, 0.0, depth - 2.0, 25)
+	var white := Color(0.86, 0.86, 0.84)
+	var red := Color(0.72, 0.1, 0.08)
+	var grey := Color(0.5, 0.5, 0.5)
+	# terre-plein d'herbe au milieu de la façade (deux entrées)
+	box(Vector3(12.0, 0.16, 1.2), Vector3(1.0, -0.02, 0.6), Color(0.33, 0.42, 0.2), Vector3.ZERO, true)
+	for dz in [0.0, 1.2]:
+		box(Vector3(12.0, 0.18, 0.12), Vector3(1.0, -0.01, dz), Color(0.62, 0.62, 0.6))
+	weeds(-5.0, 7.0, 0.1, 1.1, 14)
+	# auvent sur quatre piliers, éclairé par-dessous
+	var cx := -4.0
+	var cz := 10.0
+	box(Vector3(17.0, 0.7, 9.5), Vector3(cx, 5.15, cz), white)
+	box(Vector3(17.1, 0.28, 9.6), Vector3(cx, 4.95, cz), red)   # bandeau rouge
+	for f in [[Vector3(cx, 5.2, cz - 4.82), Vector3(0, 180, 0)], [Vector3(cx, 5.2, cz + 4.82), Vector3.ZERO]]:
+		label("CARBU 24", f[0], red.darkened(0.2), 120, f[1])
+	label("CARBU 24", Vector3(cx - 8.57, 5.2, cz), red.darkened(0.2), 110, Vector3(0, -90, 0))
+	for i in 4:
+		glow_box(Vector3(2.6, 0.04, 0.9), Vector3(cx - 5.4 + i * 3.6, 4.78, cz), Color(1.0, 0.96, 0.88), 2.2, Vector3.ZERO, null, i == 2)
+	var under := OmniLight3D.new()
+	under.light_color = Color(1.0, 0.95, 0.85)
+	under.light_energy = 1.2
+	under.omni_range = 11.0
+	under.position = Vector3(cx, 4.2, cz)
+	add_child(under)
+	# îlots, piliers et pompes (une sous housse, hors service)
+	var fuels := [["SP95", Color(0.15, 0.6, 0.2)], ["GAZOLE", Color(0.95, 0.75, 0.1)], ["SP98", Color(0.1, 0.45, 0.8)], ["E85", Color(0.4, 0.7, 0.3)]]
+	var k := 0
+	for iz in [cz - 2.0, cz + 2.0]:
+		box(Vector3(9.0, 0.2, 1.2), Vector3(cx, 0.1, iz), Color(0.62, 0.62, 0.6), Vector3.ZERO, true)
+		box(Vector3(9.1, 0.06, 1.3), Vector3(cx, 0.21, iz), Color(0.95, 0.75, 0.1))   # bordure jaune
+		for px in [cx - 5.6, cx + 5.6]:
+			box(Vector3(0.4, 4.6, 0.4), Vector3(px, 2.5, iz), white, Vector3.ZERO, true)
+			box(Vector3(0.44, 0.6, 0.44), Vector3(px, 0.5, iz), red)
+		for dx in [-2.2, 2.2]:
+			var pp := Vector3(cx + dx, 0.2, iz)
+			var fuel: Array = fuels[k % fuels.size()]
+			box(Vector3(0.75, 1.55, 0.5), pp + Vector3(0, 0.78, 0), white.darkened(0.05), Vector3.ZERO, true)
+			box(Vector3(0.78, 0.35, 0.53), pp + Vector3(0, 1.72, 0), fuel[1])
+			for side in [-1.0, 1.0]:
+				glow_box(Vector3(0.42, 0.22, 0.02), pp + Vector3(0, 1.2, side * 0.26), Color(0.04, 0.07, 0.05), 0.3)
+				label(fuel[0], pp + Vector3(0, 1.72, side * 0.28), Color(1, 1, 1), 34, Vector3(0, 0 if side > 0 else 180, 0))
+				var price := label("%d,%02d" % [1 + k % 2, _rng.randi_range(10, 99)], pp + Vector3(0, 1.2, side * 0.275), Color(1.0, 0.55, 0.1), 30, Vector3(0, 0 if side > 0 else 180, 0), true)
+				price.modulate = Color(1.0, 0.5, 0.1)
+				# pistolet et tuyau qui pend
+				cyl(0.02, 0.9, pp + Vector3(0.3, 0.75, side * 0.3), Color(0.08, 0.08, 0.08), Vector3(12 * side, 0, 0), false, 5)
+				box(Vector3(0.06, 0.18, 0.1), pp + Vector3(0.3, 1.25, side * 0.29), fuel[1].darkened(0.2))
+			if k == 3:
+				box(Vector3(0.85, 1.9, 0.6), pp + Vector3(0, 1.0, 0), Color(0.06, 0.06, 0.07), Vector3(0, 0, 3))   # housse noire
+				label("HORS SERVICE", pp + Vector3(0, 1.3, -0.31), Color(0.9, 0.9, 0.9), 22, Vector3(0, 180, 0))
+			k += 1
+	# boutique au fond
+	var sx0 := 1.5
+	var sx1 := hl - 2.0
+	var sw := sx1 - sx0
+	var scx := (sx0 + sx1) * 0.5
+	var sz0 := depth - 9.0
+	var wall := Color(0.8, 0.78, 0.72)
+	box(Vector3(sw, 3.6, 8.0), Vector3(scx, 1.8, sz0 + 4.0), wall, Vector3.ZERO, true)
+	box(Vector3(sw + 0.3, 0.9, 8.3), Vector3(scx, 3.95, sz0 + 4.0), red)   # bandeau
+	label("BOUTIQUE · CAFÉ · TABAC", Vector3(scx, 3.95, sz0 - 0.17), Color(1, 1, 1), 70, Vector3(0, 180, 0))
+	box(Vector3(sw, 0.6, 0.06), Vector3(scx, 0.3, sz0 - 0.03), wall.darkened(0.35))
+	# vitrine éclairée, rayons en ombre chinoise, porte vitrée
+	var door_x := scx - 2.0
+	glow_box(Vector3(sw - 2.0, 2.2, 0.04), Vector3(scx, 1.75, sz0 - 0.02), Color(1.0, 0.9, 0.65), 0.9)
+	for i in int((sw - 3.0) / 1.6):
+		var rx := sx0 + 1.6 + i * 1.6
+		if absf(rx - door_x) < 1.2:
+			continue
+		box(Vector3(1.2, 1.4, 0.02), Vector3(rx, 1.35, sz0 - 0.05), Color(0.25, 0.2, 0.18))
+		box(Vector3(0.08, 2.2, 0.06), Vector3(rx + 0.8, 1.75, sz0 - 0.05), grey)   # montant
+	box(Vector3(1.6, 2.3, 0.05), Vector3(door_x, 1.15, sz0 - 0.06), Color(0.6, 0.75, 0.8, 0.45))
+	box(Vector3(0.06, 0.5, 0.06), Vector3(door_x + 0.55, 1.1, sz0 - 0.1), grey)
+	var open_sign := label("OUVERT 24/24", Vector3(door_x + 2.4, 2.45, sz0 - 0.08), Color(0.3, 1.0, 0.4), 40, Vector3(0, 180, 0), true)
+	_neon.append(open_sign)
+	label("PAS DE PILS ICI", Vector3(door_x, 2.05, sz0 - 0.1), Color(0.85, 0.1, 0.1), 20, Vector3(0, 180, 0))
+	# glacière à glaçons, bouteilles de gaz en cage, présentoir, poubelle
+	box(Vector3(1.5, 1.05, 0.75), Vector3(door_x + 2.2, 0.53, sz0 - 0.6), Color(0.88, 0.9, 0.92), Vector3.ZERO, true)
+	label("GLACE", Vector3(door_x + 2.2, 0.75, sz0 - 0.99), Color(0.2, 0.4, 0.85), 40, Vector3(0, 180, 0))
+	var cage := Vector3(sx1 - 1.6, 0, sz0 - 0.7)
+	box(Vector3(2.0, 1.4, 0.9), cage + Vector3(0, 0.7, 0), Color(0.4, 0.42, 0.44, 0.35), Vector3.ZERO, true)
+	for i in 6:
+		cyl(0.16, 0.6, cage + Vector3(-0.75 + (i % 3) * 0.5, 0.3 + (i / 3) * 0.62, (i % 2) * 0.1 - 0.05), [Color(0.15, 0.3, 0.7), Color(0.9, 0.45, 0.1)][i % 2], Vector3.ZERO, false, 8)
+	cyl(0.3, 0.9, Vector3(door_x - 1.5, 0.45, sz0 - 0.5), Color(0.2, 0.25, 0.22), Vector3.ZERO, true, 10)
+	# station de gonflage, pneus, benne, épave garée sur le côté
+	var air := Vector3(-hl + 3.5, 0, 6.0)
+	box(Vector3(0.5, 1.3, 0.4), air + Vector3(0, 0.65, 0), Color(0.15, 0.35, 0.7), Vector3.ZERO, true)
+	label("AIR · EAU", air + Vector3(0, 1.1, -0.21), Color(1, 1, 1), 26, Vector3(0, 180, 0))
+	cyl(0.015, 1.2, air + Vector3(0.3, 0.5, -0.2), Color(0.05, 0.05, 0.05), Vector3(70, 30, 0), false, 5)
+	for i in 4:
+		tire(Vector3(sx1 + 0.9, i * 0.24, sz0 + 1.0), true)
+	box(Vector3(2.0, 1.4, 1.3), Vector3(sx1 + 1.0, 0.7, sz0 + 4.0), Color(0.18, 0.3, 0.45), Vector3(0, 90, 0), true)
+	for i in 3:
+		trash_bag(Vector3(sx1 + _rng.randf_range(0.3, 1.8), 0, sz0 + _rng.randf_range(5.3, 6.5)))
+	wreck_car(Vector3(hl - 5.0, 0, 6.0), 92.0, Color(0.55, 0.12, 0.1), _rng.randf() < 0.5)
+	for i in 5:
+		box(Vector3(0.12, 0.01, 4.6), Vector3(sx0 + 2.0 + i * 3.0, -0.02, sz0 - 4.0), Color(LINE, 0.7))
+	# totem des prix au bord de la route (vu par ceux qui arrivent)
+	var tp := Vector3(-hl + 2.5, 0, 0.4)
+	cyl(0.14, 6.6, tp + Vector3(0, 3.3, 0), grey, Vector3.ZERO, true, 8)
+	box(Vector3(0.35, 3.4, 1.7), tp + Vector3(0, 4.9, 0), white)
+	box(Vector3(0.37, 0.9, 1.72), tp + Vector3(0, 6.2, 0), red)
+	for side in [-1.0, 1.0]:
+		var rot := Vector3(0, -90 * side, 0)
+		var fx := tp + Vector3(-0.19 * side, 0, 0)
+		label("CARBU", fx + Vector3(0, 6.35, 0), Color(1, 1, 1), 70, rot)
+		label("24/24", fx + Vector3(0, 6.0, 0), Color(1.0, 0.85, 0.3), 46, rot)
+		for r in 3:
+			var fuel: Array = fuels[r]
+			label(fuel[0], fx + Vector3(0, 5.3 - r * 0.62, -0.42 * side), Color(0.15, 0.15, 0.15), 40, rot)
+			var digits := "%d,%02d" % [1 + (r % 2), _rng.randi_range(10, 99)]
+			if r == 1:
+				digits = digits.substr(0, 3) + " "   # chiffre tombé
+			label(digits, fx + Vector3(0, 5.3 - r * 0.62, 0.38 * side), Color(1.0, 0.5, 0.1), 52, rot, true)
+	lamp_post(Vector3(-2.0, 0, 2.2), false)
+	lamp_post(Vector3(hl - 3.0, 0, 2.4), _rng.randf() < 0.5, 5.0)
+	# livraison : boîte aux lettres juste après l'entrée, ou carton près de la porte
+	drop_points.append([Vector3(-hl + 6.0, 0, 2.6), 0.0, "mailbox"])
+	drop_points.append([Vector3(door_x + 3.8, 0, sz0 - 0.9), 180.0, "carton"])
+	place_car(Vector3(cx, 0, cz), Vector3(1, 0, 0))

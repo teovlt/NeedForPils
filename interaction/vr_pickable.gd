@@ -131,6 +131,8 @@ func _on_grab_end(hand: Node3D) -> void:
 		return
 	_active_hand = null
 	item.top_level = false
+	# partie à deux : lâcher rejoué pour l'autre joueur (les points de livraison l'ignorent)
+	item.set_meta("net_remote", Net.applying_remote)
 	# lâché sur un objet qui le prend (tête dans le grinder, pincée / filtre sur une
 	# feuille à rouler...) : c'est lui qui s'en occupe
 	for r in get_tree().get_nodes_in_group(RECEIVERS):

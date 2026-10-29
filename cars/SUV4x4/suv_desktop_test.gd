@@ -178,6 +178,8 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_speakers(delta)
 		elif autotest_scenario == "sac_a_dos":
 			_run_autotest_backpack(delta)
+		elif autotest_scenario == "livraison":
+			_run_autotest_delivery(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -924,7 +926,6 @@ func _run_autotest_nature(delta: float) -> void:
 	if at.call(0.05):
 		w.hour = 11.0
 		w.set_weather("degage", true)
-		road.debug_timings = true
 		car.handbrake_lever.set_angle_deg(0.0, true)
 		car.gear_lever.set_notch(2, true)
 	var fwd := car.global_basis.z
@@ -5793,3 +5794,326 @@ func _run_autotest_backpack(delta: float) -> void:
 	if at.call(6.3):
 		_log("AUTOTEST rabat refermé=%s, zone sachets active=%s" % [not pack.flap.is_open(), pack._taker.enabled])
 		get_tree().quit()
+
+
+# --- Livraison : carton au bord de la route, boîte aux lettres, lieu (station...) --------
+
+var _lv := {"phase": 0}
+
+
+func _lv_log(msg: String) -> void:
+	_log("AUTOTEST [%.1f s] %s" % [_t, msg])
+
+
+func _lv_shot(n: String) -> void:
+	_lv["pending_shot"] = n
+	_lv["shot_frames"] = 4
+	_lv["shot_cam"] = [cam.global_transform, cam.fov]
+	_lv_apply_cam.call_deferred()
+
+
+func _lv_apply_cam() -> void:
+	if _lv.has("pending_shot"):
+		cam.global_transform = _lv["shot_cam"][0]
+		cam.fov = _lv["shot_cam"][1]
+
+
+## Sort un sachet du sac à dos dans la main `h` (renvoie le DealerBag).
+func _lv_take(h: VRHandInteractor) -> DealerBag:
+	var pack := car.get_node("Backpack") as Backpack
+	if not pack.flap.is_open():
+		pack.flap.toggle()
+		pack.refresh_state()
+	var b: Node3D = pack.nearest_bag(pack.global_transform * Vector3(0, 0.3, 0))
+	if b == null:
+		return null
+	h.get_parent().global_position = b.global_transform * Vector3(0, 0.05, 0)
+	pack._taker.set_hand_distance(h, 0.0)
+	pack._taker.grab(h)
+	return pack._taker._held.get(h)
+
+
+## Place le sachet tenu (main `h`) à `pos` (monde), sans le bloquer sur l'habitacle.
+func _lv_hold_at(h: VRHandInteractor, bag: DealerBag, pos: Vector3) -> void:
+	var pack := car.get_node("Backpack") as Backpack
+	bag.item.global_position = pos
+	bag._prev_ok = false
+	h.get_parent().global_transform = Transform3D(car.global_basis, pos) * bag._offset.affine_inverse()
+	pack._taker.grab_update(h)
+
+
+## Conduite : suit la voie à `lat` m de l'axe à `kmh` km/h ; s'arrête si `stop_s` > 0 et atteint.
+func _lv_drive(road: RoadGenerator, lat: float, kmh_target: float, stop_s := -1.0) -> float:
+	var fwd: Vector3 = car.global_basis.z
+	var here := road.sample_road(car.global_position)
+	var info := road.sample_road(car.global_position + fwd * 8.0)
+	if info["found"]:
+		var target: Vector3 = info["point"] + info["right"] * lat + info["dir"] * 4.0
+		var to_t := target - car.global_position
+		to_t.y = 0.0
+		_steer(clampf(fwd.cross(to_t.normalized()).y * 2.5, -1.0, 1.0))
+	var kmh: float = car.forward_speed * 3.6
+	var cs: float = here["s"] if here["found"] else 0.0
+	if stop_s > 0.0 and cs >= stop_s:
+		car.throttle_input = 0.0
+		car.brake_input = 1.0
+	else:
+		car.throttle_input = clampf((kmh_target - kmh) * 0.12, 0.0, 0.8)
+		car.brake_input = clampf((kmh - kmh_target - 4.0) * 0.1, 0.0, 1.0)
+	return cs
+
+
+## Pose la voiture sur la route à l'abscisse s, à `lat` m de l'axe, à l'arrêt.
+func _lv_place(road: RoadGenerator, s: float, lat: float) -> bool:
+	var smp := road.sample_at_s(s)
+	if not smp["found"]:
+		return false
+	var xf := Transform3D(Basis(-(smp["right"] as Vector3), Vector3.UP, smp["dir"]), (smp["point"] as Vector3) + (smp["right"] as Vector3) * lat + Vector3.UP * 0.6)
+	car.global_transform = xf
+	PhysicsServer3D.body_set_state(car.get_rid(), PhysicsServer3D.BODY_STATE_TRANSFORM, xf)
+	car.linear_velocity = Vector3.ZERO
+	car.angular_velocity = Vector3.ZERO
+	return true
+
+
+func _run_autotest_delivery(delta: float) -> void:
+	var road: RoadGenerator = $RoadGenerator
+	var dm := road.get_node("Deliveries") as DeliveryManager
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	$Weather.random_events = false
+	$FallingTrees.enabled = false
+	car.external_input = true
+	cam.fov = 65.0
+	if _lv.has("pending_shot"):
+		# la caméra reste figée quelques images (l'image lue a du retard sur le rendu)
+		_lv["shot_frames"] = int(_lv["shot_frames"]) - 1
+		if _lv["shot_frames"] <= 0:
+			_shot(_lv["pending_shot"])
+			_lv.erase("pending_shot")
+		else:
+			_lv_apply_cam.call_deferred()
+	var ph: int = _lv["phase"]
+	if at.call(0.05):
+		$Weather.hour = 13.0
+		$Weather.set_weather("degage", true)
+		dm._delay = 9999.0   # pas d'adresse automatique pendant le test
+		var holder := Node3D.new()
+		add_child(holder)
+		var h := VRHandInteractor.new()
+		holder.add_child(h)
+		h.debug_points = [Vector3(0, -100, 0), Vector3(0, -100, 0)]
+		_lv["hand"] = h
+		# type du premier lieu du bord de la route (réglage nfp/test_lot)
+		var want := str(ProjectSettings.get_setting("nfp/test_lot", "station"))
+		var lot: Dictionary = road._lot_plans[0]
+		var size: Vector2 = road.LOT_SIZES[want] if road.LOT_SIZES.has(want) else road.SITE_SIZES[want]
+		lot["type"] = want
+		lot["depth"] = size.x
+		lot["length"] = size.y
+		lot["s1"] = float(lot["s0"]) + size.y
+		_lv["lot"] = lot
+		_lv_log("lieux prévus : %s ; sachets %d" % [str(road.get_lots().map(func(l): return "%s %d-%d" % [l["type"], l["s0"], l["s1"]])), dm._bags_left()])
+	var h: VRHandInteractor = _lv.get("hand")
+	if h == null:
+		return
+	var here := road.sample_road(car.global_position)
+	var cs: float = here["s"] if here.get("found", false) else 0.0
+	match ph:
+		0:   # carton à droite, 60 m devant
+			if _t < 0.5:
+				car.brake_input = 1.0
+				return
+			dm.target = {"id": "road:900", "kind": "carton", "s": cs + 60.0, "lateral": 4.85, "qty": 1, "done": 0, "place": "route"}
+			_lv["s"] = cs + 60.0
+			_lv["phase"] = 1
+			_lv["t"] = _t
+		1:
+			var stop: float = _lv["s"] - 1.0
+			_lv_drive(road, 1.75, 30.0, stop)
+			_inside = false
+			if dm._drop and not _lv.has("drop1"):
+				_lv["drop1"] = dm._drop
+			var drop: DeliveryDrop = _lv.get("drop1")
+			if drop and not _lv.has("shot1") and _t - _lv["t"] > 1.0:
+				_lv["shot1"] = true
+				cam.global_position = drop.global_transform * Vector3(2.5, 2.2, 5.5)
+				cam.look_at(drop.global_position + Vector3.UP * 0.8)
+				_lv_shot("livraison_1_carton")
+				_lv_log("carton posé à %.1f m de l'axe, actif=%s ; GPS %s" % [road.sample_road(drop.global_position)["lateral"], drop.active, str(dm.gps_info())])
+			elif _lv.has("shot1") and not _lv.has("gps") and _t - _lv["t"] > 1.6:
+				_lv["gps"] = true
+				var gps := car.find_child("GPS", true, false) as Node3D
+				var scr := gps.find_child("Display", true, false) as Node3D
+				cam.global_position = scr.global_transform * Vector3(0, 0, 0.16)
+				cam.look_at(scr.global_position)
+				_lv_shot("livraison_2_gps")
+			elif _lv.has("gps"):
+				_cabin_cam(Vector3(0.0, 3.0, -7.0), Vector3(0.0, 1.0, 10.0))
+			if cs >= stop and absf(car.forward_speed) < 0.3 and not _lv.has("bag1"):
+				_lv["bag1"] = _lv_take(h)
+				_lv["t"] = _t
+			if _lv.has("bag1") and _t - _lv["t"] > 0.3 and not _lv.has("thrown1"):
+				_lv["thrown1"] = true
+				var bag: DealerBag = _lv["bag1"]
+				var p0 := car.to_global(Vector3(-1.15, 1.35, 0.3))   # par la vitre du passager
+				_lv_hold_at(h, bag, p0)
+				var target := drop.global_transform * Vector3(0, 0.45, 0)
+				var tf := 0.6
+				bag.hand_velocity = (target - p0) / tf + Vector3(0, 4.9 * tf, 0)
+				(car.get_node("Backpack") as Backpack)._taker.release(h)
+				_lv_log("sachet %s lancé vers le carton (%.1f m)" % [bag.item.name, p0.distance_to(target)])
+			if _lv.has("thrown1") and _t - _lv["t"] > 2.2 and not _lv.has("done1"):
+				_lv["done1"] = true
+				var bag: DealerBag = _lv["bag1"]
+				cam.global_position = drop.global_transform * Vector3(0.6, 1.6, 1.6)
+				cam.look_at(drop.global_position + Vector3.UP * 0.2)
+				_lv_shot("livraison_3_dans_le_carton")
+				_lv_log("livraisons=%d ratées=%d ; sachet dans le carton=%s, livraison en cours=%s" % [dm.delivered, dm.missed, bag.item.get_parent() == drop, str(dm.target)])
+				_lv["phase"] = 2
+		2:   # boîte aux lettres à gauche : on se rabat sur l'autre voie
+			car.brake_input = 0.0
+			dm.target = {"id": "road:901", "kind": "mailbox", "s": cs + 45.0, "lateral": -4.55, "qty": 2, "done": 0, "place": "route"}
+			_lv["s"] = cs + 45.0
+			_lv["phase"] = 3
+			_lv["t"] = _t
+		3:
+			var stop2: float = _lv["s"] - 1.6
+			_lv_drive(road, -3.25, 12.0, stop2)
+			_cabin_cam(Vector3(1.5, 2.6, -6.0), Vector3(0.0, 1.0, 8.0))
+			if dm._drop and not _lv.has("drop2"):
+				_lv["drop2"] = dm._drop
+			var drop2: DeliveryDrop = _lv.get("drop2")
+			if drop2 == null:
+				return
+			if cs >= stop2 and absf(car.forward_speed) < 0.2 and not _lv.has("bag2"):
+				var mouth := drop2.global_transform * Vector3(0, 1.21, 0.24)
+				var eye := car.driver_seat.global_position
+				_lv_log("arrêt devant la boîte : bouche à %.2f m de l'œil du conducteur (%.2f m latéral)" % [eye.distance_to(mouth), car.to_local(mouth).x - car.to_local(eye).x])
+				cam.global_position = eye + car.global_basis.z * -0.15 + car.global_basis.x * -0.1
+				cam.look_at(mouth)
+				_lv_shot("livraison_4_boite_depuis_le_volant")
+				_lv["bag2"] = _lv_take(h)
+				_lv["t"] = _t
+			if _lv.has("bag2") and not _lv.has("in2"):
+				var bag2: DealerBag = _lv["bag2"]
+				var mouth2 := drop2.global_transform * Vector3(0, 1.21, 0.24)
+				var k := clampf((_t - _lv["t"]) / 0.8, 0.0, 1.0)
+				var start := car.to_global(Vector3(0.5, 1.25, 0.25))
+				_lv_hold_at(h, bag2, start.lerp(mouth2 + (drop2.global_basis.z * 0.12), k))
+				cam.global_position = drop2.global_transform * Vector3(0.9, 1.75, -0.9)
+				cam.look_at(mouth2)
+				if k >= 1.0:
+					_lv["in2"] = true
+					_lv_shot("livraison_5_porte_ouverte")
+					(car.get_node("Backpack") as Backpack)._taker.release(h)
+					_lv_log("1er sachet glissé : livraison en cours %s, restant affiché %d" % [str(dm.target), drop2.remaining])
+					_lv["t"] = _t
+			if _lv.has("in2") and not _lv.has("bag3") and _t - _lv["t"] > 1.4:
+				_lv["bag3"] = _lv_take(h)
+				_lv["t3"] = _t
+			if _lv.has("bag3") and not _lv.has("in3"):
+				var bag3: DealerBag = _lv["bag3"]
+				var mouth3 := drop2.global_transform * Vector3(0, 1.21, 0.24)
+				var k3 := clampf((_t - _lv["t3"]) / 0.6, 0.0, 1.0)
+				_lv_hold_at(h, bag3, car.to_global(Vector3(0.5, 1.25, 0.25)).lerp(mouth3 + drop2.global_basis.z * 0.12, k3))
+				if k3 >= 1.0:
+					_lv["in3"] = true
+					(car.get_node("Backpack") as Backpack)._taker.release(h)
+					_lv["t"] = _t
+			if _lv.has("in3") and _t - _lv["t"] > 1.0 and not _lv.has("done3"):
+				_lv["done3"] = true
+				cam.global_position = drop2.global_transform * Vector3(0.9, 1.6, -0.9)
+				cam.look_at(drop2.global_transform * Vector3(0, 1.2, 0))
+				_lv_shot("livraison_6_drapeau_leve")
+				_lv_log("livraisons=%d ; livraison en cours=%s ; sachets restants %d" % [dm.delivered, str(dm.target), dm._bags_left()])
+				_lv["phase"] = 4
+				_lv["t"] = _t
+		4:   # lieu du bord de la route : on y va (téléportations successives)
+			var lot: Dictionary = _lv["lot"]
+			dm.target = {"id": "lot:%d" % lot["id"], "kind": "", "s": float(lot["s0"]) + float(lot["length"]) * 0.5,
+				"lateral": 6.0 + float(lot["depth"]) * 0.4, "qty": 1, "done": 0, "place": lot["type"]}
+			var goal := float(lot["s0"]) - 25.0
+			if cs < goal - 5.0:
+				if _t - _lv["t"] > 0.4:
+					_lv["t"] = _t
+					_lv_place(road, minf(cs + 200.0, goal), 1.75)
+				car.brake_input = 1.0
+				return
+			_lv["phase"] = 5
+			_lv["t"] = _t
+		5:
+			car.brake_input = 1.0
+			var site := road.find_child("Lot%d" % _lv["lot"]["id"], true, false) as Node3D
+			if site == null:
+				if _t - _lv["t"] > 3.0 and not _lv.has("nolot"):
+					_lv["nolot"] = true
+					_lv_log("ÉCHEC : lieu pas construit")
+					get_tree().quit()
+				return
+			var dep: float = site.get("depth")
+			var slen: float = site.get("length")
+			var sx := site.global_transform
+			if not _lv.has("lot_log"):
+				_lv["lot_log"] = true
+				var d3 := site.find_child("Drop", true, false) as DeliveryDrop
+				_lv["drop3"] = d3
+				_lv_log("lieu %s construit ; point de livraison %s (%s) actif=%s ; GPS %s" % [site.get("site_type"), d3 != null, d3.kind if d3 else "-", d3.active if d3 else false, str(dm.gps_info())])
+				var ray := PhysicsRayQueryParameters3D.create(sx * Vector3(0, 3, dep * 0.4), sx * Vector3(0, -3, dep * 0.4))
+				var hit := get_world_3d().direct_space_state.intersect_ray(ray)
+				_lv_log("sol du lieu : %s ; route y=%.2f" % [("%s y=%.2f" % [hit["collider"].name, hit["position"].y]) if hit else "rien", sx.origin.y])
+			var tl: float = _t - float(_lv["t"])
+			if tl < 1.4:
+				cam.global_position = sx * Vector3(-slen * 0.15, 15.0, -16.0)
+				cam.look_at(sx * Vector3(0, 0, dep * 0.45))
+				if tl > 1.2 and not _lv.has("ls1"):
+					_lv["ls1"] = true
+					_lv_shot("livraison_7_lieu_%s_vue" % site.get("site_type"))
+				return
+			if tl < 2.4:
+				cam.global_position = sx * Vector3(-slen * 0.5 - 12.0, 1.8, -4.8)
+				cam.look_at(sx * Vector3(-slen * 0.1, 2.5, dep * 0.4))
+				if tl > 2.2 and not _lv.has("ls2"):
+					_lv["ls2"] = true
+					_lv_shot("livraison_8_lieu_%s_route" % site.get("site_type"))
+				return
+			if tl < 3.4:
+				cam.global_position = sx * Vector3(slen * 0.35, 3.0, 2.0)
+				cam.look_at(sx * Vector3(-slen * 0.1, 1.5, dep * 0.5))
+				if tl > 3.2 and not _lv.has("ls3"):
+					_lv["ls3"] = true
+					_lv_shot("livraison_9_lieu_%s_parking" % site.get("site_type"))
+				return
+			var d3: DeliveryDrop = _lv.get("drop3")
+			if d3 == null:
+				_lv_log("ÉCHEC : pas de point de livraison")
+				get_tree().quit()
+				return
+			if not _lv.has("bag4"):
+				_lv["bag4"] = _lv_take(h)
+				_lv["t4"] = _t
+				return
+			if not _lv.has("in4"):
+				var bag4: DealerBag = _lv["bag4"]
+				var mouth4 := d3._mouth()
+				_lv_hold_at(h, bag4, mouth4 + (d3.global_basis.z * 0.12 if d3.kind == "mailbox" else Vector3.UP * 0.2))
+				cam.global_position = d3.global_transform * Vector3(1.5, 2.0, 2.5)
+				cam.look_at(d3.global_transform * Vector3(0, 0.8, 0))
+				if _t - _lv["t4"] > 0.4:
+					_lv["in4"] = true
+					_lv_shot("livraison_10_lieu_point")
+					(car.get_node("Backpack") as Backpack)._taker.release(h)
+					_lv["t4"] = _t
+				return
+			if _t - _lv["t4"] > 1.2 and not _lv.has("done4"):
+				_lv["done4"] = true
+				_lv_log("livraisons=%d ratées=%d ; livraison en cours=%s" % [dm.delivered, dm.missed, str(dm.target)])
+				dm._delay = 0.0
+				_lv["t"] = _t
+				_lv["phase"] = 6
+		6:
+			car.brake_input = 1.0
+			if _t - _lv["t"] > 1.0:
+				_lv_log("adresse suivante choisie : %s ; GPS %s" % [str(dm.target), str(dm.gps_info())])
+				get_tree().quit()

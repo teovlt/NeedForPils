@@ -3,7 +3,9 @@ extends Node3D
 ## sens de la marche (flèche de la voiture en bas de l'écran), zoom qui s'élargit avec
 ## la vitesse, prochain virage en haut (« ↰ 250 m »), vitesse et heure en bas, police et
 ## concurrents en points sur la carte. Allumé avec le contact (écran de démarrage),
-## couleurs de nuit quand il fait sombre.
+## couleurs de nuit quand il fait sombre. Livraison en cours (DeliveryManager) : point
+## rose sur la carte (au bord de l'écran si elle est plus loin) et encadré avec la
+## distance par la route, le côté et le nombre de sachets.
 ##
 ## La carte est dessinée en 2D dans un SubViewport (rafraîchi `refresh_rate` fois par
 ## seconde) affiché sur un rectangle posé sur la vitre du modèle (gps.glb, face +Z).
@@ -138,6 +140,57 @@ func _draw_map() -> void:
 	if turn[0] != 0:
 		text = "%s   virage à %s" % [_fmt_dist(turn[1]), "gauche" if turn[0] < 0 else "droite"]
 	_draw_bars(font, kmh, text, turn[0], night)
+	_draw_delivery(font, inv)
+
+
+## Livraison en cours : repère sur la carte et encadré « LIVRAISON 650 m ».
+func _draw_delivery(font: Font, inv: Transform3D) -> void:
+	var dm := get_tree().get_first_node_in_group(DeliveryManager.GROUP) as DeliveryManager
+	if dm == null:
+		return
+	var info := dm.gps_info()
+	if info.is_empty():
+		return
+	var pink := Color(1.0, 0.25, 0.7)
+	# encadré en bas à gauche, au-dessus du bandeau de la vitesse
+	var dist := float(info["dist"])
+	var txt := "LIVRAISON  "
+	if dist > 15.0:
+		txt += _fmt_dist(dist)
+	elif dist > -15.0:
+		txt += "ICI"
+	else:
+		txt += "DERRIÈRE"
+	var detail := ""
+	if info["place"] != "route":
+		detail = {"station": "station-service", "motel": "motel", "superette": "supérette", "aire": "aire de repos", "camp": "camp"}.get(info["place"], "")
+	else:
+		detail = ("boîte aux lettres" if info["kind"] == "mailbox" else "carton") + (" à gauche" if float(info["side"]) < 0.0 else " à droite")
+	if int(info["left"]) > 1:
+		detail += "  ·  x%d" % int(info["left"])
+	var r := Rect2(6, SIZE.y - 40 - 50, 178, 46)
+	_map.draw_rect(r, Color(0.12, 0.02, 0.08, 0.82))
+	_map.draw_rect(Rect2(r.position, Vector2(6, r.size.y)), pink)
+	_map.draw_string(font, r.position + Vector2(12, 20), txt, HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 14, 18, pink.lightened(0.35))
+	_map.draw_string(font, r.position + Vector2(12, 39), detail, HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 14, 14, Color(1, 1, 1, 0.9))
+	# repère sur la carte (au bord de l'écran si l'adresse est plus loin)
+	if info["pos"] == null:
+		return
+	var blink := fmod(_t * 2.0, 1.0) < 0.7
+	var l := inv * (info["pos"] as Vector3)
+	var p := CAR_PX + Vector2(-l.x, -l.z) / _mpp
+	var inside := Rect2(Vector2(10, 70), Vector2(SIZE) - Vector2(20, 116)).has_point(p)
+	if inside:
+		# épingle : goutte rose et petit colis blanc
+		_map.draw_colored_polygon(PackedVector2Array([p, p + Vector2(-7, -12), p + Vector2(7, -12)]), pink.darkened(0.2))
+		_map.draw_circle(p + Vector2(0, -17), 11.0, Color(0, 0, 0, 0.45))
+		_map.draw_circle(p + Vector2(0, -17), 9.0, pink if blink else pink.lightened(0.3))
+		_map.draw_rect(Rect2(p + Vector2(-4.5, -21.5), Vector2(9, 9)), Color(1, 1, 1))
+		_map.draw_line(p + Vector2(0, -21.5), p + Vector2(0, -12.5), pink, 1.5)
+	else:
+		p = p.clamp(Vector2(10, 54), Vector2(SIZE) - Vector2(10, 48))
+		_map.draw_circle(p, 7.0, Color(0, 0, 0, 0.5))
+		_map.draw_circle(p, 5.5, pink)
 
 
 ## Police (rouge et bleu qui clignotent) et camping-car des concurrents (orange).

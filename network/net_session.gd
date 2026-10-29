@@ -41,6 +41,7 @@ var _director: ChaseDirector
 var _trees: FallingTreeManager
 var _animals: AnimalManager
 var _rivals: Rivals
+var _deliveries: DeliveryManager
 var remote_player: Node3D
 var _remote_head: Node3D
 var _avatar: NetAvatar
@@ -80,6 +81,7 @@ func _ready() -> void:
 	_director = main.get_node_or_null("ChaseDirector") as ChaseDirector
 	_trees = main.get_node_or_null("FallingTrees") as FallingTreeManager
 	_animals = main.get_node_or_null("RoadGenerator/Animals") as AnimalManager
+	_deliveries = main.get_node_or_null("RoadGenerator/Deliveries") as DeliveryManager
 	_rivals = _director._rivals if _director else null
 	if Net.is_copilot():
 		# le copilote applique la position reçue avant que le reste de la scène bouge
@@ -135,6 +137,8 @@ func _setup_copilot() -> void:
 		_trees.enabled = false   # les arbres viennent du conducteur
 	if _animals:
 		_animals.net_puppet = true
+	if _deliveries:
+		_deliveries.net_puppet = true   # les adresses viennent du conducteur
 	var pills := get_parent().get_node_or_null("Pills")
 	if pills:
 		pills.process_mode = Node.PROCESS_MODE_DISABLED   # pilules sur la route : pas encore recopiées
@@ -385,6 +389,8 @@ func _world_state() -> Dictionary:
 	var addiction := car.get_addiction()
 	if addiction:
 		st["paused"] = addiction.paused
+	if _deliveries:
+		st["deliv"] = _deliveries.net_state()
 	return st
 
 
@@ -410,6 +416,14 @@ func on_world(st: Dictionary) -> void:
 	var addiction := car.get_addiction()
 	if addiction and st.has("paused"):
 		addiction.paused = st["paused"]
+	if _deliveries and st.has("deliv"):
+		_deliveries.net_apply(st["deliv"])
+
+
+## L'autre joueur a livré un sachet.
+func on_delivered(target_id: String, bag_name: String) -> void:
+	if _deliveries:
+		_deliveries.net_delivered(target_id, bag_name)
 
 
 # --- Mains locales -> autre joueur ----------------------------------------------------

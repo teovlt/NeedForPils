@@ -412,3 +412,9 @@ func rx_restart_request() -> void:
 @rpc("authority", "reliable", "call_remote", 2)
 func rx_rivals_fx(kind: String, data: Array) -> void:
 	_to_session(&"on_rivals_fx", [kind, data])
+
+
+## Sachet livré par l'un des joueurs (point de livraison, nom stable du sachet).
+@rpc("any_peer", "reliable", "call_remote", 2)
+func rx_delivered(target_id: String, bag_name: String) -> void:
+	_to_session(&"on_delivered", [target_id, bag_name])
