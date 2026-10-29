@@ -130,7 +130,7 @@ func find_or_host() -> void:
 	state = State.SEARCHING
 	_timer = SEARCH_TIME + randf() * 0.5   # deux clics simultanés : l'un finit avant
 	_announce_timer = 0.0
-	_status("Recherche d'une partie sur le réseau...")
+	_status("Recherche d'une partie sur le réseau...", "reseau_recherche")
 
 
 func cancel() -> void:
@@ -159,19 +159,19 @@ func _start_host() -> void:
 	_udp_send = PacketPeerUDP.new()
 	_udp_send.set_broadcast_enabled(true)
 	_announce_timer = 0.0
-	_status("En attente de l'autre joueur...\n(il doit cliquer sur JOUER À DEUX)")
+	_status("En attente de l'autre joueur...\n(il doit cliquer sur JOUER À DEUX)", "reseau_attente")
 
 
 func _start_join(ip: String) -> void:
 	_close_udp()
 	var peer := ENetMultiplayerPeer.new()
 	if peer.create_client(ip, GAME_PORT) != OK:
-		_fail("Impossible de rejoindre %s" % ip)
+		_fail("Impossible de rejoindre %s" % ip, "reseau_echec_rejoindre")
 		return
 	multiplayer.multiplayer_peer = peer
 	role = Role.COPILOT
 	state = State.JOINING
-	_status("Partie trouvée (%s), connexion..." % ip)
+	_status("Partie trouvée (%s), connexion..." % ip, "reseau_trouvee")
 
 
 func _process(delta: float) -> void:
@@ -237,17 +237,20 @@ func _close_udp() -> void:
 	_udp_send = null
 
 
-func _status(text: String) -> void:
+## Message d'état du réseau (menu principal) et sa voix (VoiceLine, canal « menu »).
+func _status(text: String, voice := "") -> void:
 	print("Réseau : ", text.replace("\n", " "))
 	status_changed.emit(text)
+	if voice != "":
+		VoiceLine.play(self, voice, "menu")
 
 
-func _fail(reason: String) -> void:
+func _fail(reason: String, voice := "") -> void:
 	if state == State.IDLE:
 		return   # déjà traité (déconnexion signalée deux fois)
 	var was_in_game := state == State.IN_GAME
 	cancel()
-	_status(reason)
+	_status(reason, voice)
 	last_message = reason
 	connection_lost.emit(reason)
 	if was_in_game:
@@ -263,7 +266,7 @@ func _on_peer_connected(id: int) -> void:
 		return
 	_close_udp()
 	state = State.IN_LOBBY
-	_status("Joueur trouvé ! Tu conduis.")
+	_status("Joueur trouvé ! Tu conduis.", "reseau_conducteur")
 	lobby_complete.emit()
 	game_seed = randi() % 2000000000 + 1
 	get_tree().create_timer(1.0).timeout.connect(func():
@@ -273,14 +276,14 @@ func _on_peer_connected(id: int) -> void:
 
 func _on_connected_to_server() -> void:
 	state = State.IN_LOBBY
-	_status("Connecté ! Tu es copilote.")
+	_status("Connecté ! Tu es copilote.", "reseau_copilote")
 	lobby_complete.emit()
 
 
 # Les signaux du réseau arrivent pendant que la connexion se met à jour : la fermer
 # tout de suite fait planter Godot, on attend la fin de l'image (call_deferred).
 func _on_connection_failed() -> void:
-	_fail.call_deferred("Connexion impossible.")
+	_fail.call_deferred("Connexion impossible.", "reseau_echec")
 
 
 func _on_peer_disconnected(_id: int) -> void:
@@ -292,11 +295,11 @@ func _on_peer_disconnected(_id: int) -> void:
 			session.call("on_remote_left")
 		return
 	if state != State.IDLE:
-		_fail.call_deferred("L'autre joueur est parti.")
+		_fail.call_deferred("L'autre joueur est parti.", "reseau_parti")
 
 
 func _on_server_disconnected() -> void:
-	_fail.call_deferred("Le conducteur a quitté la partie.")
+	_fail.call_deferred("Le conducteur a quitté la partie.", "reseau_conducteur_parti")
 
 
 func _check_command_line() -> void:

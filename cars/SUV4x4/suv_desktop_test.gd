@@ -180,6 +180,8 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_backpack(delta)
 		elif autotest_scenario == "livraison":
 			_run_autotest_delivery(delta)
+		elif autotest_scenario == "voix":
+			_run_autotest_voices(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -6117,3 +6119,69 @@ func _run_autotest_delivery(delta: float) -> void:
 			if _t - _lv["t"] > 1.0:
 				_lv_log("adresse suivante choisie : %s ; GPS %s" % [str(dm.target), str(dm.gps_info())])
 				get_tree().quit()
+
+
+# --- Voix des textes (VoiceLine) : narrateur, livraisons, réseau, GPS ----------------
+
+var _vx := {}
+
+
+func _run_autotest_voices(delta: float) -> void:
+	var road: RoadGenerator = $RoadGenerator
+	var dm := road.get_node("Deliveries") as DeliveryManager
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = false
+	var here := road.sample_road(car.global_position)
+	var cs: float = here["s"] if here.get("found", false) else 0.0
+	if at.call(0.1):
+		dm._delay = 9999.0
+		var d := ChaseDirector.new()
+		d.name = "ChaseDirector"
+		add_child(d)
+		_vx["d"] = d
+		# une « vraie » réplique de 1,2 s (son de test, fichier non importé)
+		var wav := AudioStreamWAV.new()
+		wav.format = AudioStreamWAV.FORMAT_16_BITS
+		wav.mix_rate = 22050
+		var data := PackedByteArray()
+		data.resize(22050 * 12 / 10 * 2)
+		for k in 22050 * 12 / 10:
+			data.encode_s16(k * 2, int(sin(k * 0.12) * 6000.0))
+		wav.data = data
+		wav.save_to_wav("res://audio/voice/zz_test_voix.wav")
+		_log("AUTOTEST placeholder police_semee : existe=%s enregistrée=%s ; zz_test_voix enregistrée=%s (%.2f s)" % [VoiceLine.stream("police_semee") != null, VoiceLine.has_recording("police_semee"), VoiceLine.has_recording("zz_test_voix"), VoiceLine.length("zz_test_voix")])
+	var d: ChaseDirector = _vx.get("d")
+	if d == null:
+		return
+	if at.call(0.6):
+		d._say("SEMÉE !", "La police a perdu ta trace... pour l'instant.", 1.0, "police_semee")
+		var p := d.get_node_or_null("Voice_police_semee")
+		_log("AUTOTEST narrateur : lecteur=%s, en cours=%s, texte=%s / %s, net=%s" % [p != null, VoiceLine.is_playing("narrateur"), d._title.text if d._title else "?", d._sub.text if d._sub else "?", str(d.net_text().slice(5))])
+	if at.call(2.2):
+		d.show_text_with_voice = false
+		d._say("TEST", "Réplique enregistrée : le texte s'efface", 0.5, "zz_test_voix")
+		_vx["t_say"] = _t
+	if at.call(2.4):
+		_log("AUTOTEST voix enregistrée, texte masqué : visible=%.1f, voix=%s" % [d._text_target, VoiceLine.is_playing("narrateur")])
+	if _vx.has("t_say") and not _vx.has("co_end") and not d._co_running:
+		_vx["co_end"] = true
+		_log("AUTOTEST message tenu %.2f s (voix 1,2 s, durée demandée 0,5 s)" % (_t - _vx["t_say"]))
+	if at.call(4.0):
+		d.show_text_with_voice = true
+		dm.target = {"id": "road:950", "kind": "carton", "s": cs + 500.0, "lateral": 4.85, "qty": 1, "done": 0, "place": "route"}
+		dm._finish(true)
+		Net._status("Recherche d'une partie sur le réseau...", "reseau_recherche")
+	if at.call(4.5):
+		_log("AUTOTEST livraison et réseau : historique %s" % str(VoiceLine.history))
+		dm.target = {"id": "road:951", "kind": "mailbox", "s": cs + 300.0, "lateral": -4.55, "qty": 1, "done": 0, "place": "route"}
+	if at.call(8.0):
+		_log("AUTOTEST GPS nouvelle adresse : historique %s" % str(VoiceLine.history.slice(-3)))
+		dm.target = {"id": "road:951", "kind": "mailbox", "s": cs + 100.0, "lateral": -4.55, "qty": 1, "done": 0, "place": "route"}
+	if at.call(9.5):
+		_log("AUTOTEST GPS approche : historique %s" % str(VoiceLine.history.slice(-3)))
+		DirAccess.remove_absolute(ProjectSettings.globalize_path("res://audio/voice/zz_test_voix.wav"))
+		get_tree().quit()

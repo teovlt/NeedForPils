@@ -120,6 +120,7 @@ func open() -> void:
 		return
 	is_open = true
 	_ui.setup(Net.is_online(), Net.is_driver())
+	VoiceLine.play(self, ("pause_deux_conducteur" if Net.is_driver() else "pause_deux_copilote") if Net.is_online() else "pause_solo", "menu")
 	# devant les yeux, accroché au siège (il suit la voiture si elle roule)
 	var fwd := -cam.global_basis.z
 	var flat := Vector3(fwd.x, 0.0, fwd.z)
@@ -142,6 +143,7 @@ func open() -> void:
 
 
 func close() -> void:
+	VoiceLine.stop("menu")
 	if not is_open:
 		return
 	is_open = false

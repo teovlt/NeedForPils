@@ -203,7 +203,7 @@ func _count(id: String) -> void:
 	if int(target["done"]) >= int(target["qty"]):
 		_finish(true)
 	else:
-		_say("ENCORE UN !", "Le client en veut %d. Lance le suivant." % int(target["qty"]), 2.0)
+		_say("ENCORE UN !", "Le client en veut %d. Lance le suivant." % int(target["qty"]), 2.0, "livraison_encore")
 
 
 func _finish(ok: bool) -> void:
@@ -211,10 +211,11 @@ func _finish(ok: bool) -> void:
 		delivered += 1
 		var left := _bags_left()
 		var sub := "Prochaine adresse sur le GPS." if left > 0 else "Le sac est vide. Plus rien à livrer."
-		_say("LIVRÉ !", "%d livraison%s · %s" % [delivered, "s" if delivered > 1 else "", sub], 2.8)
+		_say("LIVRÉ !", "%d livraison%s · %s" % [delivered, "s" if delivered > 1 else "", sub], 2.8,
+			"livraison_ok" if left > 0 else "livraison_ok_sac_vide")
 	else:
 		missed += 1
-		_say("LIVRAISON RATÉE", "Le client attendra. Prochaine adresse sur le GPS.", 2.8)
+		_say("LIVRAISON RATÉE", "Le client attendra. Prochaine adresse sur le GPS.", 2.8, "livraison_ratee")
 	if _drop and is_instance_valid(_drop):
 		_drop.set_active(false)
 	target = {}
@@ -222,12 +223,14 @@ func _finish(ok: bool) -> void:
 	_delay = next_delay
 
 
-func _say(title: String, sub: String, duration: float) -> void:
+func _say(title: String, sub: String, duration: float, voice := "") -> void:
 	var director: Node = null
 	if get_tree().current_scene:
 		director = get_tree().current_scene.get_node_or_null("ChaseDirector")
 	if director and not director.get("game_over"):
-		director.call("_say", title, sub, duration)
+		director.call("_say", title, sub, duration, voice)
+	elif director == null:
+		VoiceLine.play(self, voice)   # scène sans ChaseDirector (tests) : la voix seule
 	print("Livraison : ", title, " — ", sub)
 
 

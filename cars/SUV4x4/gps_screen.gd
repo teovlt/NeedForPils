@@ -6,6 +6,9 @@ extends Node3D
 ## couleurs de nuit quand il fait sombre. Livraison en cours (DeliveryManager) : point
 ## rose sur la carte (au bord de l'écran si elle est plus loin) et encadré avec la
 ## distance par la route, le côté et le nombre de sachets.
+## Voix du GPS (VoiceLine, sortie par l'écran) : virage serré annoncé une fois vers
+## 350 m, nouvelle adresse de livraison (réplique propre au lieu si elle est
+## enregistrée, sinon générique), puis « livraison dans 150 m ».
 ##
 ## La carte est dessinée en 2D dans un SubViewport (rafraîchi `refresh_rate` fois par
 ## seconde) affiché sur un rectangle posé sur la vitre du modèle (gps.glb, face +Z).
@@ -25,6 +28,10 @@ const BOOT_TIME := 1.6
 ## (les virages de la route font au plus ~45° sur 100 m).
 @export var turn_angle_deg := 30.0
 @export var announce_range := 900.0
+## Voix : virage annoncé à cette distance (m), approche de la livraison à celle-ci.
+@export var voice_turn_distance := 350.0
+@export var voice_delivery_close := 150.0
+@export var voice_db := 0.0
 
 var _viewport: SubViewport
 var _map: Control
@@ -33,6 +40,10 @@ var _on := false
 var _boot := 0.0
 var _mpp := 0.7               # mètres par pixel (lissé)
 var _t := 0.0
+var _voice_timer := 0.0
+var _said_turn_s := -INF
+var _said_target := ""
+var _said_close := ""
 
 
 func _ready() -> void:
@@ -70,11 +81,52 @@ func _process(delta: float) -> void:
 		_boot = BOOT_TIME
 	_on = on
 	_boot = maxf(_boot - delta, 0.0)
+	_voice_timer -= delta
+	if _voice_timer <= 0.0:
+		_voice_timer = 0.5
+		_update_voice()
 	_timer -= delta
 	if _timer <= 0.0:
 		_timer = 1.0 / refresh_rate
 		_map.queue_redraw()
 		_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
+
+
+## Annonces vocales (deux fois par seconde).
+func _update_voice() -> void:
+	if not _on or _boot > 0.0:
+		return
+	var car := _car()
+	var road := _road()
+	if car == null or road == null:
+		return
+	var here := road.sample_road(car.global_position)
+	if not here["found"]:
+		return
+	var s: float = here["s"]
+	# livraison : nouvelle adresse, puis approche (après les textes du narrateur)
+	var dm := get_tree().get_first_node_in_group(DeliveryManager.GROUP) as DeliveryManager
+	if dm and not VoiceLine.is_playing("narrateur"):
+		var info := dm.gps_info()
+		var id: String = dm.target.get("id", "")
+		if id != "" and id != _said_target:
+			_said_target = id
+			var specific := "gps_livraison_" + String(info["place"])
+			if info["place"] == "route":
+				specific = "gps_livraison_%s_%s" % ["boite" if info["kind"] == "mailbox" else "carton", "gauche" if float(info["side"]) < 0.0 else "droite"]
+			VoiceLine.play(self, VoiceLine.first_recorded([specific, "gps_livraison_nouvelle"]), "gps", voice_db, true)
+			return
+		if id != "" and id != _said_close and float(info["dist"]) < voice_delivery_close and float(info["dist"]) > -10.0:
+			_said_close = id
+			VoiceLine.play(self, "gps_livraison_proche", "gps", voice_db, true)
+			return
+	# virage serré
+	var turn := _next_turn(s)
+	if turn[0] != 0 and turn[1] < voice_turn_distance and turn[1] > 40.0:
+		var turn_s: float = s + turn[1]
+		if absf(turn_s - _said_turn_s) > 200.0 and not VoiceLine.is_playing("gps"):
+			_said_turn_s = turn_s
+			VoiceLine.play(self, "gps_virage_gauche" if turn[0] < 0 else "gps_virage_droite", "gps", voice_db, true)
 
 
 func _car() -> Node3D:

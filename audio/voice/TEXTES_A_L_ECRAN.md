@@ -1,14 +1,17 @@
 # Textes affichés à l'écran (à remplacer par des voix)
 
 Recensement de tous les textes que le joueur voit, pour les remplacer petit à petit
-par des enregistrements. Chaque ligne a un **identifiant** : c'est aussi le nom de
-fichier proposé (`audio/voice/<identifiant>.wav`). Quand une réplique est enregistrée,
-cocher la case et la reporter dans `A_ENREGISTRER.md`.
+par des enregistrements. Chaque ligne cochable a un **identifiant** : c'est le nom du
+fichier de la voix, `audio/voice/<identifiant>.wav`. **Les voix sont branchées** : ces
+fichiers existent déjà (silence de 0,5 s) et sont joués au moment du texte ; il suffit
+de les écraser par l'enregistrement. Les répliques à dire sont dans `A_ENREGISTRER.md`
+(cocher là-bas).
 
 Les passages entre accolades sont calculés pendant la partie (`{n}` = un nombre) :
 soit on enregistre une version par valeur utile, soit on garde le chiffre à l'écran.
 
-Lignes indiquées : état du code au commit a1a6c90 (branche `fix`).
+Lignes indiquées : état du code au commit a1a6c90 (branche `fix`), avant le
+branchement des voix (les numéros ont pu bouger de quelques lignes).
 
 ---
 
@@ -17,8 +20,9 @@ Lignes indiquées : état du code au commit a1a6c90 (branche `fix`).
 Ce sont les seuls vrais « sous-titres » du jeu : un titre et une phrase collés à la
 caméra (`ChaseDirector._say` / `_show`, `world/chase/chase_director.gd`), lisibles en VR
 et en mode bureau, recopiés chez le copilote en partie à deux. Tous passent par
-`_say(titre, phrase, durée)` : c'est l'endroit unique où brancher les voix (jouer
-`audio/voice/<identifiant>.wav` s'il existe, avec ou sans le texte).
+`_say(titre, phrase, durée, voix)`, qui joue `audio/voice/<identifiant>` et garde le
+texte au moins le temps de la réplique (ou le masque si `show_text_with_voice` est
+décoché et que la voix est enregistrée).
 
 ### 1.1 Introduction cinématique (désactivée : `play_intro = false`)
 
@@ -59,10 +63,8 @@ et en mode bureau, recopiés chez le copilote en partie à deux. Tous passent pa
 | [ ] | `rivaux_debut` | LES CONCURRENTS ! | Le camping-car veut ta came. Ils vont tirer : sème-les. | Première apparition du camping-car | `chase_director.gd:406` |
 | [ ] | `rivaux_retour` | ILS SONT REVENUS | Le camping-car est derrière toi. | Apparitions suivantes | `chase_director.gd:408` |
 | [ ] | `rivaux_semes` | SEMÉS ! | Le camping-car a disparu du rétro. | Camping-car semé | `chase_director.gd:413` |
-| [ ] | `rivaux_tir_{n}` | ON TE TIRE DESSUS ! | Encore {n} balle(s) et c'est fini. | 1re balle reçue, puis quand il en reste 2 ou 1 | `chase_director.gd:421` |
+| [ ] | `rivaux_tir_premier` · `rivaux_tir_2` · `rivaux_tir_1` | ON TE TIRE DESSUS ! | Encore {n} balle(s) et c'est fini. | 1re balle reçue, puis quand il en reste 2 ou 1 | `chase_director.gd:421` |
 
-> `rivaux_tir_{n}` : en pratique `rivaux_tir_premier` (1re balle, {n} = nombre max − 1),
-> `rivaux_tir_2` et `rivaux_tir_1`.
 
 ### 1.4 Livraisons (`world/delivery/delivery_manager.gd`, affichées via `_say`)
 
@@ -89,7 +91,8 @@ et en mode bureau, recopiés chez le copilote en partie à deux. Tous passent pa
 
 ## 2. Menus et réseau (panneaux visés à la manette)
 
-À garder écrits (boutons) ; les messages d'état peuvent avoir une voix en plus.
+Les boutons restent écrits ; les messages d'état et de pause ont une voix en plus
+(jouée par `Net._status` / `Net._fail` et `PauseMenu.open`).
 
 | Fait | Identifiant | Texte | Quand | Où |
 |---|---|---|---|---|
@@ -125,21 +128,18 @@ et en mode bureau, recopiés chez le copilote en partie à deux. Tous passent pa
 Ils font partie du monde : on les garde écrits. Seul le GPS est un bon candidat pour
 une voix (guidage façon GPS).
 
-### 4.1 GPS (`cars/SUV4x4/gps_screen.gd`) — candidat à une voix
+### 4.1 GPS (`cars/SUV4x4/gps_screen.gd`) — voix branchée (`_update_voice`)
 
-| Fait | Identifiant | Texte | Quand | Où |
+L'écran reste tel quel ; la voix sort du GPS pour les annonces utiles, sans lire
+l'écran en continu.
+
+| Fait | Identifiant | Texte à l'écran | Voix | Où |
 |---|---|---|---|---|
-| — | | ROUTE LIBRE / navigation | Démarrage de l'écran (contact mis) | l. 101-102 |
-| — | | Recherche du signal... | Voiture loin de la route | l. 115 |
-| [ ] | `gps_tout_droit` | Tout droit | Pas de virage annoncé | l. 139 |
-| [ ] | `gps_virage_gauche` / `gps_virage_droite` | {distance}   virage à gauche / droite | Virage serré à moins de 900 m | l. 141 |
-| [ ] | `gps_livraison` | LIVRAISON {distance} / ICI / DERRIÈRE | Encadré de la livraison en cours | l. 157-163 |
-| [ ] | `gps_livraison_lieu` | station-service · motel · supérette · aire de repos · camp · boîte aux lettres à gauche/droite · carton à gauche/droite · x{n} | Détail sous la distance | l. 165-171 |
-| — | | {n} km/h · heure | Bandeau du bas | l. 229-232 |
-
-> Pour une voix GPS, il suffirait d'annoncer une fois chaque nouvelle adresse
-> (« Nouvelle livraison : boîte aux lettres à gauche, dans 600 mètres ») et
-> l'approche (« Livraison dans 100 mètres »), plutôt que lire l'écran en continu.
+| — | | ROUTE LIBRE / navigation | (démarrage de l'écran, pas de voix) | l. 101-102 |
+| — | | Recherche du signal... / Tout droit / {n} km/h / heure | (pas de voix) | l. 115, 139, 229-232 |
+| [ ] | `gps_virage_gauche` · `gps_virage_droite` | {distance}   virage à gauche / droite | Une fois par virage serré, à moins de 350 m | l. 141 |
+| [ ] | `gps_livraison_nouvelle` (+ variantes `gps_livraison_boite_gauche/droite`, `gps_livraison_carton_gauche/droite`, `gps_livraison_station/motel/superette/aire/camp`) | LIVRAISON {distance} + détail du lieu | Nouvelle adresse : variante du lieu si enregistrée, sinon la générique | l. 157-171 |
+| [ ] | `gps_livraison_proche` | LIVRAISON {distance} / ICI | À 150 m de l'adresse | idem |
 
 ### 4.2 Autres écrans et étiquettes (garder écrits)
 
