@@ -7,7 +7,7 @@ extends Node3D
 
 @export var autotest := false
 ## Scénario du test automatique : "objets" (rangements) ou "arbres".
-@export_enum("objets", "arbres", "aleatoire", "phares", "retros", "portes", "boite", "combine", "essuie", "plafonnier", "nature", "pluie", "balayage", "menu", "lunette", "moteur", "klaxon", "vitres", "ceinture", "cle", "depart", "pare_soleil", "cle_f", "physique", "eclairage", "radio", "radio_nuit", "radio_pwr", "ambiance", "rangements", "ceintures", "vitesses", "sapins", "balises", "playlist", "animaux", "pochette", "lieu", "police", "manque", "zoo", "balade", "klaxon_animaux", "police_vue", "pochette_places", "briquet", "glisser") var autotest_scenario := "objets"
+@export_enum("objets", "arbres", "aleatoire", "phares", "retros", "portes", "boite", "combine", "essuie", "plafonnier", "nature", "pluie", "balayage", "menu", "lunette", "moteur", "klaxon", "vitres", "ceinture", "cle", "depart", "pare_soleil", "cle_f", "physique", "eclairage", "radio", "radio_nuit", "radio_pwr", "ambiance", "rangements", "ceintures", "vitesses", "sapins", "balises", "playlist", "animaux", "pochette", "lieu", "police", "manque", "zoo", "balade", "klaxon_animaux", "police_vue", "pochette_places", "briquet", "glisser", "mains_bloquees") var autotest_scenario := "objets"
 
 @onready var car: SUV4x4 = $SUV4x4
 @onready var cam: Camera3D = $Camera3D
@@ -166,6 +166,8 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_bag_two_hands(delta)
 		elif autotest_scenario == "mains":
 			_run_autotest_hands(delta)
+		elif autotest_scenario == "mains_bloquees":
+			_run_autotest_hands_stuck(delta)
 		elif autotest_scenario == "rouler":
 			_run_autotest_roll(delta)
 		elif autotest_scenario == "sachet_tabac":
@@ -5071,6 +5073,63 @@ func _run_autotest_bag_two_hands(delta: float) -> void:
 		bag._taker.release(hb)
 	if at.call(4.6):
 		get_tree().quit()
+
+
+# --- Mains VR affichées qui restaient coincées dans l'habitacle -------------------------
+# La vraie main passe dans une paroi (tableau de bord, console, volant), en tournant le
+# poignet, puis revient dans le vide : la main affichée doit la rejoindre vite.
+
+## [nom, points de passage (repère voiture), poignet tourné pendant le geste]
+const STUCK_MOVES := [
+	["tableau de bord puis retour", [Vector3(-0.25, 1.12, 0.3), Vector3(-0.25, 1.0, 1.0), Vector3(-0.25, 1.05, 0.95), Vector3(-0.2, 1.15, 0.25)], true],
+	["à travers la console", [Vector3(0.3, 1.0, 0.1), Vector3(-0.3, 0.85, 0.1), Vector3(-0.35, 1.1, 0.1)], false],
+	["à travers le volant", [Vector3(0.45, 1.25, 0.3), Vector3(0.45, 1.0, 0.75), Vector3(0.45, 1.25, 0.25)], true],
+	["sous le siège puis remontée", [Vector3(-0.45, 1.0, 0.1), Vector3(-0.45, 0.6, 0.1), Vector3(-0.45, 1.15, 0.1)], false],
+]
+var _hs := {}
+
+
+func _run_autotest_hands_stuck(delta: float) -> void:
+	_t += delta
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = false
+	if not _hs.has("c"):
+		var ctrl := XRController3D.new()
+		ctrl.tracker = &"right_hand"
+		add_child(ctrl)
+		ctrl.add_child((load("res://addons/godot-xr-tools/hands/scenes/lowpoly/right_hand_low.tscn") as PackedScene).instantiate())
+		var hi := VRHandInteractor.new()
+		ctrl.add_child(hi)
+		hi.debug_points = [Vector3(0, -100, 0)]
+		_hs["c"] = ctrl
+		_hs["h"] = hi
+	if _t < 0.5:
+		return
+	var i := int((_t - 0.5) / 3.0)
+	if i >= STUCK_MOVES.size():
+		get_tree().quit()
+		return
+	var mv: Array = STUCK_MOVES[i]
+	var pts: Array = mv[1]
+	var ph := fmod(_t - 0.5, 3.0)
+	var ctrl: XRController3D = _hs["c"]
+	var hi: VRHandInteractor = _hs["h"]
+	# 0-1,6 s : le geste (de point en point) ; ensuite la main reste au dernier point
+	var k := clampf(ph / 1.6, 0.0, 1.0) * (pts.size() - 1)
+	var j := mini(int(k), pts.size() - 2)
+	var p: Vector3 = (pts[j] as Vector3).lerp(pts[j + 1], k - j)
+	var twist := sin(clampf(ph / 1.6, 0.0, 1.0) * PI * 3.0) * 0.9 if mv[2] else 0.0
+	var hb := car.global_basis * Basis.from_euler(Vector3(deg_to_rad(-20.0), PI, twist))
+	ctrl.global_transform = Transform3D(hb, car.to_global(p))
+	var gap := hi.visual_transform().origin.distance_to(ctrl.global_position)
+	if ph > 1.6:
+		_hs["max_after"] = maxf(_hs.get("max_after", 0.0), gap if ph > 2.0 else 0.0)
+	var log_at := func(x: float) -> bool: return ph - delta < x and ph >= x
+	if log_at.call(1.7):
+		_log("AUTOTEST %-28s : main revenue dans le vide, écart main affichée %.3f m" % [mv[0], gap])
+	if log_at.call(2.9):
+		_log("AUTOTEST %-28s : 1,3 s plus tard, écart %.3f m (libre à la vraie main=%s)" % [mv[0], gap, hi._hand_free(hb, ctrl.global_position)])
 
 
 # --- Mains VR affichées : butent sur l'habitacle, s'accrochent aux commandes ---------
