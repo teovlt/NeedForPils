@@ -34,6 +34,11 @@ var _lag_local := Transform3D.IDENTITY
 var _lag_ready := false
 var _prev_local := Vector3.ZERO
 var _prev_ok := false
+## Retard de l'objet sur la main (bloqué par une paroi) à l'image précédente (m).
+var _lag := 0.0
+## Vitesse mini (m/s) à laquelle l'objet resté en arrière rejoint la main : il glisse
+## jusqu'à elle au lieu de s'y téléporter dès que le chemin est libre.
+const CATCH_UP_SPEED := 3.0
 
 
 func _ready() -> void:
@@ -104,7 +109,14 @@ func _on_grab_update(hand: Node3D) -> void:
 			_prev_local = storage.to_local(item.global_position)
 			_prev_ok = true
 		if _collides_while_held(xf):
+			var target := xf.origin
+			if _lag > 0.02:
+				var from := storage.to_global(_prev_local)
+				xf.origin = from + (target - from).limit_length(maxf(CATCH_UP_SPEED * dt, _lag * 0.3))
 			xf = storage.constrain_held(self, xf, _prev_local)
+			_lag = xf.origin.distance_to(target)
+		else:
+			_lag = 0.0
 		_prev_local = storage.to_local(xf.origin)
 	hand_velocity = hand_velocity.lerp((xf.origin - _last_pos) / maxf(dt, 0.001), 0.5)
 	_last_pos = xf.origin
@@ -152,6 +164,7 @@ func _take(hand: Node3D) -> void:
 	_last_pos = item.global_position
 	_lag_ready = false
 	_prev_ok = false
+	_lag = 0.0
 	hand_velocity = Vector3.ZERO
 
 

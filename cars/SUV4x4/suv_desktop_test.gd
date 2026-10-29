@@ -7,7 +7,7 @@ extends Node3D
 
 @export var autotest := false
 ## Scénario du test automatique : "objets" (rangements) ou "arbres".
-@export_enum("objets", "arbres", "aleatoire", "phares", "retros", "portes", "boite", "combine", "essuie", "plafonnier", "nature", "pluie", "balayage", "menu", "lunette", "moteur", "klaxon", "vitres", "ceinture", "cle", "depart", "pare_soleil", "cle_f", "physique", "eclairage", "radio", "radio_nuit", "radio_pwr", "ambiance", "rangements", "ceintures", "vitesses", "sapins", "balises", "playlist", "animaux", "pochette", "lieu", "police", "manque", "zoo", "balade", "klaxon_animaux", "police_vue", "pochette_places", "briquet") var autotest_scenario := "objets"
+@export_enum("objets", "arbres", "aleatoire", "phares", "retros", "portes", "boite", "combine", "essuie", "plafonnier", "nature", "pluie", "balayage", "menu", "lunette", "moteur", "klaxon", "vitres", "ceinture", "cle", "depart", "pare_soleil", "cle_f", "physique", "eclairage", "radio", "radio_nuit", "radio_pwr", "ambiance", "rangements", "ceintures", "vitesses", "sapins", "balises", "playlist", "animaux", "pochette", "lieu", "police", "manque", "zoo", "balade", "klaxon_animaux", "police_vue", "pochette_places", "briquet", "glisser") var autotest_scenario := "objets"
 
 @onready var car: SUV4x4 = $SUV4x4
 @onready var cam: Camera3D = $Camera3D
@@ -146,6 +146,8 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_cig_pack(delta)
 		elif autotest_scenario == "traverser":
 			_run_autotest_no_clip(delta)
+		elif autotest_scenario == "glisser":
+			_run_autotest_slide(delta)
 		elif autotest_scenario == "concurrents":
 			_run_autotest_rivals(delta)
 		elif autotest_scenario == "portee":
@@ -4299,6 +4301,83 @@ func _run_autotest_no_clip(delta: float) -> void:
 		if i == 6 or i == 7:
 			g.release(hand)
 			_log("AUTOTEST   lâché -> rangé dans %s" % it.get_parent().name)
+
+
+# --- Glisser : objet tenu poussé contre une surface puis main déplacée de côté ----------
+# Il doit glisser le long de la surface (et non rester collé), puis revenir dans la main
+# sans se téléporter quand la main ressort dans le vide.
+
+## [nom, départ, enfoncé dans la surface, glissé (toujours enfoncé), ressorti dans le vide]
+const SLIDE_MOVES := [
+	["tableau de bord", Vector3(-0.3, 1.1, 0.3), Vector3(-0.3, 1.0, 1.0), Vector3(0.15, 1.05, 1.0), Vector3(0.0, 1.2, 0.2)],
+	["assise passager", Vector3(-0.45, 1.1, 0.05), Vector3(-0.45, 0.5, 0.05), Vector3(-0.45, 0.5, 0.35), Vector3(-0.4, 1.15, 0.0)],
+]
+var _sl := {}
+
+
+func _run_autotest_slide(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = false
+	if t0 == 0.0:
+		_sl["hand"] = Node3D.new()
+		add_child(_sl["hand"])
+	if _t < 0.5:
+		return
+	var i := int((_t - 0.5) / 2.4)
+	if i >= SLIDE_MOVES.size():
+		get_tree().quit()
+		return
+	var mv: Array = SLIDE_MOVES[i]
+	var hand: Node3D = _sl["hand"]
+	var it := _car_item("Phone")
+	var g := it.get_node("Grab") as VRPickable
+	var ph := fmod(_t - 0.5, 2.4)
+	if not _sl.has("m%d" % i):
+		_sl["m%d" % i] = true
+		if g.is_grabbed():
+			g.release(hand)
+		hand.global_transform = Transform3D(car.global_basis, car.to_global(mv[1]))
+		var z := it.get_parent() as StorageZone
+		if z: z.on_item_taken(it)
+		ItemPhysics.stop(it)
+		it.global_transform = hand.global_transform
+		g.grab(hand)
+		_sl["prev"] = it.global_position
+		_sl["jump"] = 0.0
+	# 0-0,6 s : enfoncé ; 0,6-1,4 s : glissé (en tournant un peu le poignet) ; 1,4-1,9 s : ressorti
+	var p: Vector3
+	var twist := 0.0
+	if ph < 0.6:
+		p = (mv[1] as Vector3).lerp(mv[2], ph / 0.6)
+	elif ph < 1.4:
+		var k := (ph - 0.6) / 0.8
+		p = (mv[2] as Vector3).lerp(mv[3], k)
+		twist = sin(k * PI) * 0.5
+	elif ph < 1.9:
+		p = (mv[3] as Vector3).lerp(mv[4], (ph - 1.4) / 0.5)
+	else:
+		p = mv[4]
+	if ph < 2.2:
+		hand.global_transform = Transform3D(car.global_basis * Basis(Vector3.UP, twist), car.to_global(p))
+		g.grab_update(hand)
+		var jump: float = it.global_position.distance_to(_sl["prev"])
+		if ph > 1.4:
+			_sl["jump"] = maxf(_sl["jump"], jump)
+		_sl["prev"] = it.global_position
+	var log_at := func(x: float) -> bool: return t0 - 0.5 - i * 2.4 < x and ph >= x
+	if log_at.call(0.59):
+		_sl["pushed"] = car.to_local(it.global_position)
+	if log_at.call(1.39):
+		var a: Vector3 = _sl["pushed"]
+		var b := car.to_local(it.global_position)
+		var want: Vector3 = (mv[3] as Vector3) - (mv[2] as Vector3)
+		var along := (b - a).dot(want.normalized())
+		_log("AUTOTEST glisser %-16s : objet enfoncé %s puis %s ; a glissé de %.2f m sur %.2f m demandés" % [mv[0], a.snapped(Vector3.ONE * 0.01), b.snapped(Vector3.ONE * 0.01), along, want.length()])
+	if log_at.call(2.15):
+		_log("AUTOTEST glisser %-16s : ressorti, écart main-objet %.3f m, plus grand saut en une image %.3f m" % [mv[0], it.global_position.distance_to(hand.global_position), _sl["jump"]])
 
 
 ## Objet de la voiture (RigidBody3D) par son nom (le modèle du paquet de cigarettes

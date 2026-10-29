@@ -402,7 +402,7 @@ static func lying_basis(grab: VRPickable, long_dir: Vector3, up: Vector3) -> Bas
 ## L'objet (sa boîte) est déplacé par un balayage contre les vrais maillages de la
 ## voiture (tableau de bord, levier de vitesse, frein à main, sièges, portières, vitres,
 ## toit...), copiés en formes de collision sur une couche à part (HELD_LAYER). Bloqué, il
-## glisse le long de la surface. Ces formes suivent les pièces mobiles : portière ouverte
+## glisse le long de la surface (normale du contact), même s'il la touche déjà. Ces formes suivent les pièces mobiles : portière ouverte
 ## ou vitre baissée, l'objet peut sortir par l'ouverture ; couvercle ouvert, il peut
 ## entrer dans le compartiment.
 func constrain_held(grab: VRPickable, xf: Transform3D, prev: Vector3) -> Transform3D:
@@ -434,25 +434,45 @@ func constrain_held(grab: VRPickable, xf: Transform3D, prev: Vector3) -> Transfo
 	var step := motion / steps
 	for _k in steps:
 		if stuck:
-			# déjà en contact (objet tout juste attrapé, rotation contre une paroi) : il
-			# peut seulement s'éloigner de la surface touchée
+			# déjà en contact (objet tout juste attrapé, poignet tourné contre une paroi) :
+			# on le dégage de quelques millimètres le long de la normale, puis il avance
+			# et glisse normalement (avant, il ne pouvait que s'éloigner : il restait collé)
 			q.transform = Transform3D(xf.basis, pos + offset)
 			var info := space.get_rest_info(q)
 			if info.is_empty():
 				stuck = false
 			else:
-				var away: Vector3 = (pos + offset) - (info["point"] as Vector3)
-				if step.dot(away) > 0.0:
-					pos += step
-					stuck = hit.call(pos)
-					continue
-				var col := info.get("collider_id", 0) as int
-				var o := instance_from_id(col) as Node if col else null
-				last_held_blocker = ("%s/%s (contact)" % [o.get_parent().get_parent().name, o.get_parent().name]) if o and o.get_parent() and o.get_parent().get_parent() else "contact"
-				break
+				var n := _contact_normal(info, pos + offset, step)
+				var out := pos
+				for _j in 4:
+					out += n * 0.003
+					if not hit.call(out):
+						pos = out
+						stuck = false
+						break
+				if stuck:
+					if step.dot(n) > 0.0:
+						pos += step   # il s'éloigne de la surface : permis
+						stuck = hit.call(pos)
+						continue
+					_note_blocker(info, " (contact)")
+					break
 		if not hit.call(pos + step):
 			pos += step
 			continue
+		# bloqué : il glisse le long de la surface touchée (sa normale), puis, dans un coin,
+		# composante par composante
+		q.transform = Transform3D(xf.basis, pos + step + offset)
+		var touch := space.get_rest_info(q)
+		if not touch.is_empty():
+			var n2 := _contact_normal(touch, pos + offset, step)
+			var slide := step - n2 * step.dot(n2)
+			# seulement contre une surface dans laquelle la main pousse vraiment (normale
+			# douteuse sinon : de glissement en glissement, il partait ailleurs)
+			if slide.length_squared() > 1e-12 and step.dot(n2) < -0.1 * step.length() \
+					and not hit.call(pos + slide):
+				pos += slide
+				continue
 		var moved := false
 		for a in 3:
 			var part := Vector3.ZERO
@@ -469,6 +489,29 @@ func constrain_held(grab: VRPickable, xf: Transform3D, prev: Vector3) -> Transfo
 				if par: last_held_blocker = str(par.name) + "/" + last_held_blocker
 			break
 	return Transform3D(xf.basis, pos)
+
+
+## Normale de la surface touchée, tournée vers l'objet : les formes de la voiture sont
+## des maillages à double face, leur normale peut pointer des deux côtés. `center` est
+## une position libre de l'objet (avant le pas qui touche), `step` le mouvement tenté.
+static func _contact_normal(info: Dictionary, center: Vector3, step: Vector3) -> Vector3:
+	var n: Vector3 = info.get("normal", Vector3.ZERO)
+	var to_center := center - (info.get("point", center) as Vector3)
+	if n.length_squared() < 1e-8:
+		n = to_center if to_center.length_squared() > 1e-8 else -step
+	n = n.normalized()
+	if n.dot(to_center) < 0.0:
+		n = -n
+	return n
+
+
+func _note_blocker(info: Dictionary, suffix: String) -> void:
+	var col := info.get("collider_id", 0) as int
+	var o := instance_from_id(col) as Node if col else null
+	if o and o.get_parent() and o.get_parent().get_parent():
+		last_held_blocker = "%s/%s%s" % [o.get_parent().get_parent().name, o.get_parent().name, suffix]
+	else:
+		last_held_blocker = "contact" + suffix
 
 
 ## Copie les maillages de la voiture (hors objets attrapables et joueur) en formes de
