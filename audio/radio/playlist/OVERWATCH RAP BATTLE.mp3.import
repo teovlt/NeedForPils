@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://bjjlhbgys1muc"
+path="res://.godot/imported/OVERWATCH RAP BATTLE.mp3-1b92c1a6e3cdef8d664a579322aee6bf.mp3str"
+
+[deps]
+
+source_file="res://audio/radio/playlist/OVERWATCH RAP BATTLE.mp3"
+dest_files=["res://.godot/imported/OVERWATCH RAP BATTLE.mp3-1b92c1a6e3cdef8d664a579322aee6bf.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4
