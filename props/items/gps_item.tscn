@@ -2,9 +2,10 @@
 
 [ext_resource type="PackedScene" path="res://props/gps.glb" id="1_model"]
 [ext_resource type="Script" path="res://interaction/vr_pickable.gd" id="2_pick"]
+[ext_resource type="Script" path="res://cars/SUV4x4/gps_screen.gd" id="3_screen"]
 
 [sub_resource type="BoxShape3D" id="Box_item"]
-size = Vector3(0.13, 0.09, 0.1)
+size = Vector3(0.176, 0.122, 0.135)
 
 [node name="GPS" type="RigidBody3D"]
 collision_layer = 0
@@ -15,12 +16,16 @@ freeze = true
 freeze_mode = 1
 
 [node name="Model" parent="." instance=ExtResource("1_model")]
+transform = Transform3D(1.35, 0, 0, 0, 1.35, 0, 0, 0, 1.35, 0, 0.0149, 0)
 
 [node name="Shape" type="CollisionShape3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.005, -0.035)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.0217, -0.047)
 shape = SubResource("Box_item")
 
 [node name="Grab" type="Node3D" parent="."]
 script = ExtResource("2_pick")
 item_name = "GPS"
 rest_up_axis = 1
+
+[node name="Screen" type="Node3D" parent="Model"]
+script = ExtResource("3_screen")

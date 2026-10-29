@@ -24,6 +24,7 @@ signal killed
 signal net_event(kind: String, data: Array)
 
 const RATE := 22050
+const GROUP := "rivals"
 const BEIGE := Color(0.86, 0.8, 0.64)
 const BROWN := Color(0.42, 0.27, 0.15)
 
@@ -77,6 +78,7 @@ var _cracks: Array[Node3D] = []
 
 
 func _ready() -> void:
+	add_to_group(GROUP)
 	_ready_links()
 	_build_visual()
 	_visual.visible = false

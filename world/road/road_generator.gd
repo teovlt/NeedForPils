@@ -312,6 +312,25 @@ func sample_road(world_pos: Vector3) -> Dictionary:
 	}
 
 
+## Milieu de la route (points du monde, dans l'ordre) entre les abscisses `s0` et `s1`,
+## un point tous les `every` m environ : la carte du GPS.
+func centerline(s0: float, s1: float, every := 4.0) -> PackedVector3Array:
+	var out := PackedVector3Array()
+	var last := -INF
+	for ch in _chunks:
+		var rs: PackedFloat32Array = ch["rows_s"]
+		if rs.is_empty() or rs[rs.size() - 1] < s0 or rs[0] > s1:
+			continue
+		var node: Node3D = ch["node"]
+		var rp: PackedVector3Array = ch["rows_p"]
+		for i in rs.size():
+			if rs[i] < s0 or rs[i] > s1 or rs[i] - last < every:
+				continue
+			last = rs[i]
+			out.append(node.to_global(rp[i]))
+	return out
+
+
 ## Tronçon (noeud) le plus proche d'un point du monde, ou null. Partie à deux : le
 ## copilote y accroche ce que le conducteur a posé sur la route (arbres, barrages).
 func chunk_at(world_pos: Vector3) -> Node3D:

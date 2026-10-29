@@ -385,7 +385,7 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.12, 0, 0)
 [node name="TobaccoPouch" parent="Storage/Glovebox" instance=ExtResource("34_tobacco")]
 
 [node name="GPSMount" type="Node3D" parent="Storage"]
-transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0.12, 1.261, 0.782)
+transform = Transform3D(-0.9396926, 0, 0.34202012, 0, 1, 0, -0.34202012, 0, -0.9396926, 0.12, 1.261, 0.782)
 script = ExtResource("8_zone")
 zone_name = "Support GPS"
 size = Vector3(0.15, 0.1, 0.1)
