@@ -103,7 +103,8 @@ func _on_grab_update(hand: Node3D) -> void:
 		if not _prev_ok:
 			_prev_local = storage.to_local(item.global_position)
 			_prev_ok = true
-		xf = storage.constrain_held(self, xf, _prev_local)
+		if _collides_while_held(xf):
+			xf = storage.constrain_held(self, xf, _prev_local)
 		_prev_local = storage.to_local(xf.origin)
 	hand_velocity = hand_velocity.lerp((xf.origin - _last_pos) / maxf(dt, 0.001), 0.5)
 	_last_pos = xf.origin
@@ -177,6 +178,12 @@ func _hand_xf(hand: Node3D) -> Transform3D:
 	if hand.has_method("visual_transform"):
 		return hand.visual_transform()
 	return hand.global_transform
+
+
+## L'objet tenu bute-t-il sur l'intérieur de la voiture à cette position ? (la clé
+## doit pouvoir entrer dans le contact, enfoncé dans le tableau de bord)
+func _collides_while_held(_xf: Transform3D) -> bool:
+	return true
 
 
 func _nearest_storage() -> CarStorage:

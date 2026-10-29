@@ -1472,6 +1472,8 @@ func _run_autotest_key(delta: float) -> void:
 		var to: Vector3 = ign.global_position + (ign.global_basis as Basis).z * 0.02
 		_hand.global_transform = Transform3D(ign.global_basis, from.lerp(to, k2) + Vector3.UP * 0.15 * sin(k2 * PI))
 		grab.grab_update(_hand)
+	if at.call(2.9):
+		_log("AUTOTEST clé approchée, encore tenue : entrée toute seule=%s, tenue pour tourner=%s" % [ign.has_key(), grab.is_grabbed()])
 	if at.call(3.1):
 		grab.release(_hand)
 		_log("AUTOTEST lâchée près du barillet : clé dans le contact=%s" % ign.has_key())
@@ -1481,9 +1483,10 @@ func _run_autotest_key(delta: float) -> void:
 		_hand.global_transform = Transform3D(ign.global_basis, ign.global_position + (ign.global_basis as Basis).z * 0.04)
 		grab.grab(_hand)
 	var twist := 0.0
-	if _t > 4.0 and _t <= 4.3: twist = (_t - 4.0) / 0.3 * 72.0
-	elif _t > 4.3 and _t <= 5.0: twist = 72.0
-	elif _t > 5.0 and _t <= 6.4: twist = 104.0
+	# (poignet démultiplié : twist_gain = 2, 36° de poignet = 72° de clé)
+	if _t > 4.0 and _t <= 4.3: twist = (_t - 4.0) / 0.3 * 36.0
+	elif _t > 4.3 and _t <= 5.0: twist = 36.0
+	elif _t > 5.0 and _t <= 6.4: twist = 52.0
 	if _t > 4.0 and _t <= 6.4 and grab.is_grabbed():
 		_hand.global_basis = (ign.global_basis as Basis) * Basis(Vector3.BACK, -deg_to_rad(twist))
 		grab.grab_update(_hand)

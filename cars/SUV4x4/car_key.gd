@@ -4,10 +4,13 @@ extends VRPickable
 ## - Au départ, elle est glissée sous la sangle du pare-soleil conducteur (visible et
 ##   attrapable seulement pare-soleil rabattu). Lâchée tout près de la sangle, elle y
 ##   retourne.
-## - Hors du contact : objet attrapable comme les autres. Lâchée tout près du barillet
-##   (ou en visant le barillet à la souris), elle s'y enfonce.
-## - Dans le contact : la saisir puis tourner (VR : tourner le poignet ; souris :
-##   glisser vers la droite / la gauche). En position 0, tirer la main de 5 cm la sort.
+## - Hors du contact : objet attrapable comme les autres. Tenue en main, elle s'enfonce
+##   toute seule dès que la lame arrive près du barillet (`auto_insert_distance`), sans
+##   la lâcher : on peut la tourner aussitôt. Lâchée tout près (ou en visant le barillet
+##   à la souris), elle s'y enfonce aussi.
+## - Dans le contact : la saisir puis tourner (VR : tourner le poignet, démultiplié par
+##   `twist_gain` ; souris : glisser vers la droite / la gauche). Elle passe devant le
+##   volant quand la main est dessus. En position 0, tirer la main de 5 cm vers soi la sort.
 ##   A/X ou F : démarrer / couper le moteur.
 ## - Trousseau : chaque élément est un pendule (intégration de Verlet dans le monde),
 ##   donc il réagit au poids, aux accélérations, aux virages et aux bosses. Les
@@ -16,6 +19,21 @@ extends VRPickable
 
 const EYELET := Vector3(0.0, 0.0, 0.043)   # trou de l'anneau, repère de la clé
 const RING_LEN := 0.024
+## Bout de la lame (repère de la clé) : c'est lui qu'on approche du barillet.
+const BLADE_TIP := Vector3(0.0, 0.0, -0.036)
+
+## Distance (m) bout de la lame <-> barillet à laquelle la clé tenue entre toute seule.
+@export var auto_insert_distance := 0.06
+## Près du barillet (bout de la lame à moins de cette distance), la clé tenue ne bute
+## plus sur le tableau de bord : elle peut entrer dans le contact.
+@export var ignition_free_zone := 0.15
+## Une fois sortie, la clé doit s'éloigner de cette distance avant de pouvoir rentrer
+## de nouveau toute seule (sinon elle rentrerait aussitôt sortie).
+@export var auto_insert_rearm := 0.12
+## Rotation de la clé pour un tour de poignet : 2 = 50° de poignet pour aller de 0 à III.
+@export var twist_gain := 2.0
+## Priorité de la clé dans le contact sur les pièces autour (volant, comodos).
+@export var ignition_pick_bonus := 0.05
 ## [nom, longueur du pendule (m), décalage d'accroche sur l'anneau, angle de vrille (°)]
 const CHARMS := [
 	["Charm_Opener", 0.034, Vector3(0.0, 0.0, 0.004), 0.0],
@@ -37,6 +55,7 @@ var _grab_ref := Vector3.ZERO
 var _grab_angle := 0.0
 var _grab_start := Vector3.ZERO
 var _last_local := Vector3.ZERO
+var _insert_armed := true
 
 
 func _ready() -> void:
@@ -88,6 +107,12 @@ func _find_ignition():
 	return get_tree().get_first_node_in_group("car_ignition")
 
 
+func get_pick_bonus() -> float:
+	if _ignition():
+		return super.get_pick_bonus() + ignition_pick_bonus
+	return super.get_pick_bonus()
+
+
 # --- Saisie --------------------------------------------------------------------
 
 func _on_grab_begin(hand: Node3D) -> void:
@@ -95,6 +120,11 @@ func _on_grab_begin(hand: Node3D) -> void:
 	if ign == null:
 		super._on_grab_begin(hand)
 		return
+	_start_turning(hand, ign)
+
+
+## La main tient la clé dans le contact : le geste la tourne (ou la sort en position 0).
+func _start_turning(hand: Node3D, ign) -> void:
 	_turning = true
 	ign.key_held = true
 	_grab_angle = ign.key_angle
@@ -106,17 +136,21 @@ func _on_grab_begin(hand: Node3D) -> void:
 func _on_grab_update(hand: Node3D) -> void:
 	if not _turning:
 		super._on_grab_update(hand)
+		_try_auto_insert(hand)
 		return
 	var ign = _ignition()
 	if ign == null:
 		return
 	var local: Vector3 = ign.to_local(hand.global_position)
-	# en position 0, tirer la clé vers soi la sort du barillet
-	if ign.get_level() == 0 and (local - _grab_start).length() > 0.05:
+	# en position 0, tirer la clé vers soi (+Z du barillet) la sort ; pousser vers le
+	# tableau de bord ou bouger de côté ne la sort pas (la clé vient d'entrer toute seule
+	# alors que la main avance encore)
+	if ign.get_level() == 0 and (local - _grab_start).z > 0.05:
 		ign.key_held = false
 		var it: RigidBody3D = ign.eject()
 		if it:
 			_turning = false
+			_insert_armed = false
 			_take(hand)
 			super._on_grab_update(hand)
 		return
@@ -129,7 +163,7 @@ func _on_grab_update(hand: Node3D) -> void:
 		# VR : rotation du poignet autour de l'axe du barillet
 		var ref := _hand_twist_ref(hand, ign)
 		var d := atan2(_grab_ref.cross(ref).z, _grab_ref.dot(ref))
-		ign.set_key_angle(_grab_angle - d)
+		ign.set_key_angle(_grab_angle - d * twist_gain)
 	_last_local = local
 
 
@@ -162,6 +196,33 @@ func _on_grab_end(hand: Node3D) -> void:
 		item.global_position = storage.to_global(Vector3(-0.45, 1.0, -0.05))
 		hand_velocity = Vector3.ZERO
 	super._on_grab_end(hand)
+
+
+func _collides_while_held(xf: Transform3D) -> bool:
+	var ign = _find_ignition()
+	return ign == null or (ign.global_position as Vector3).distance_to(xf * BLADE_TIP) > ignition_free_zone
+
+
+## Clé tenue (hors du contact) : le bout de la lame près du barillet, elle s'y enfonce
+## sans qu'on la lâche, et la main la tient alors pour la tourner.
+func _try_auto_insert(hand: Node3D) -> void:
+	if hand != _active_hand or hand.is_in_group(MouseHand.GROUP):
+		return   # (souris : profondeur difficile à régler, on vise et on lâche)
+	var ign = _find_ignition()
+	if ign == null or ign.has_key():
+		return
+	var d: float = (ign.global_position as Vector3).distance_to(item.global_transform * BLADE_TIP)
+	if not _insert_armed:
+		_insert_armed = d > auto_insert_rearm
+		return
+	if d > auto_insert_distance:
+		return
+	_active_hand = null
+	ign.insert(item)
+	_sim_ok = false
+	_start_turning(hand, ign)
+	if hand.has_method("pulse"):
+		hand.pulse(0.6, 0.06)   # « clac » de la clé qui entre
 
 
 func _mouse_aims(hand: Node3D, ign) -> bool:
