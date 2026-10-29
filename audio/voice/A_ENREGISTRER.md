@@ -21,6 +21,7 @@ En partie à deux, le copilote entend les mêmes répliques que le conducteur.
 | [ ] | `audio/voice/demarre.wav` | (intro : trouver les clés et démarrer, texte libre) | 1 s après le début de la partie, voiture garée moteur coupé | `ChaseDirector.start_voice_path` |
 | [ ] | `audio/voice/manque.wav` | « Je suis en manque bordel, il me faut un truc là. » | Quand le manque atteint 45 % (une fois, jusqu'à la pilule suivante) | `PillAddiction.craving_voice_path` |
 | [ ] | `audio/voice/baillement.wav` | (un long bâillement, 3 à 4 s, sans parole) | Quand le conducteur est fatigué : de plus en plus souvent avec la fatigue (toutes les ~75 s puis ~22 s) | `Fatigue.yawn_voice_path` |
+| [ ] | `audio/voice/bourre.wav` | « Oh putain... je suis complètement bourré là. » (voix pâteuse) | Quand on devient bien bourré (vers 2 canettes et demie), une fois par cuite | `PillAddiction.drunk_voice_id` |
 
 ## Narrateur (textes affichés devant les yeux)
 
@@ -80,6 +81,8 @@ seulement la phrase. `{n}` : nombre affiché à l'écran, pas besoin de le dire.
 | [ ] | `fin_police.wav` | « Ils t'ont rattrapé. La police t'a eu. » | Rattrapé par la police |
 | [ ] | `fin_rivaux.wav` | « Ils t'ont eu. Les concurrents ont pris ta came. » | Trop de balles du camping-car |
 | [ ] | `fin_assimile.wav` | « Perdu dans la Pils. Tu souris. Tu ne sais plus pourquoi tu roulais. » | Assimilation à 100 % |
+| [ ] | `fin_pare_brise.wav` | « À travers le pare-brise. Pas de ceinture, pas de deuxième chance. » | Choc violent sans ceinture (le conducteur est éjecté) |
+| [ ] | `fin_pare_brise_copilote.wav` | « Le copilote a traversé le pare-brise. Il n'avait pas mis sa ceinture. » | Partie à deux : choc violent, le copilote sans ceinture est éjecté |
 | [ ] | `fin_rejouer.wav` | « Espace ou A pour rejouer. » | Juste après la réplique de fin |
 
 ## GPS (la voix sort de l'écran du GPS)

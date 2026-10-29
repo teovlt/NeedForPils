@@ -8,7 +8,8 @@ extends Node
 ## Lore : la Pils, une pilule rose, a envahi la ville et la police traque tous ceux qui
 ## en ont. Tu t'enfuis avec un sachet de vingt. Une Pils te rend plus rapide... et
 ## chaque Pils te rend un peu plus accro.
-## Deux fins : rattrapé par la police, ou assimilé (100 %) : perdu dans la Pils.
+## Fins : rattrapé par la police, abattu par les concurrents, assimilé (100 %) : perdu
+## dans la Pils, ou éjecté par le pare-brise dans un accident sans ceinture (CarCrash).
 ##
 ## Les textes s'affichent devant les yeux (Label3D collé à la caméra, invisible dans
 ## les rétros) : lisibles en VR comme en mode bureau. Chacun a sa voix
@@ -16,6 +17,8 @@ extends Node
 ## le texte reste à l'écran le temps de la réplique, ou disparaît si
 ## `show_text_with_voice` est décoché et que la réplique est enregistrée. Espace / Entrée ou A / X pour
 ## passer l'intro ou rejouer.
+
+const GROUP := "chase_director"
 
 const LORE := [
 	["2049.", "La Pils est arrivée en ville. Une pilule rose. Tout le monde en a pris."],
@@ -76,6 +79,7 @@ var _voice_heard := 0
 
 
 func _ready() -> void:
+	add_to_group(GROUP)
 	_car = get_node_or_null(car_path) as SUV4x4
 	_pursuer = get_node_or_null(pursuer_path) as Pursuer
 	_addiction = get_node_or_null(addiction_path) as PillAddiction
@@ -459,6 +463,22 @@ func _on_assimilated() -> void:
 	if _pursuer:
 		_pursuer.stop()
 	_end("PERDU DANS LA PILS.", "Tu souris. Tu ne sais plus pourquoi tu roulais.", "fin_assimile")
+
+
+## Accident sans ceinture (CarCrash) : le conducteur, ou le copilote, a traversé le
+## pare-brise à `kmh`.
+func end_crash(copilot: bool, kmh: float) -> void:
+	if net_puppet:
+		return   # c'est le conducteur qui décide
+	if _pursuer:
+		_pursuer.stop()
+	if _rivals:
+		_rivals.stop()
+	var line := "Pas de ceinture, %d km/h dans le décor." % roundi(kmh)
+	if copilot:
+		_end("LE COPILOTE A TRAVERSÉ LE PARE-BRISE.", line, "fin_pare_brise_copilote")
+	else:
+		_end("À TRAVERS LE PARE-BRISE.", line, "fin_pare_brise")
 
 
 func _end(title: String, line: String, voice := "") -> void:

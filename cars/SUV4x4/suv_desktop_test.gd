@@ -177,6 +177,14 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_pouch_view(delta)
 		elif autotest_scenario == "glaciere":
 			_run_autotest_cooler(delta)
+		elif autotest_scenario == "bourre":
+			_run_autotest_drunk(delta)
+		elif autotest_scenario == "secousses":
+			_run_autotest_jolts(delta)
+		elif autotest_scenario == "accident":
+			_run_autotest_crash(delta, false)
+		elif autotest_scenario == "accident_ceinture":
+			_run_autotest_crash(delta, true)
 		elif autotest_scenario == "enceintes":
 			_run_autotest_speakers(delta)
 		elif autotest_scenario == "sac_a_dos":
@@ -6683,4 +6691,233 @@ func _run_autotest_feed_other(delta: float) -> void:
 		Net.role = Net.Role.SOLO
 		Net.session = null
 	if at.call(7.8):
+		get_tree().quit()
+
+
+# --- Bière : effet bourré qui monte canette après canette ------------------------------
+
+var _dk := {}
+
+
+func _run_autotest_drunk(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = true
+	if at.call(0.05):
+		$Weather.hour = 13.0
+		var add = preload("res://world/pills/pill_addiction.gd").new()
+		add.name = "PillAddiction"
+		add.set("car_path", NodePath("../SUV4x4"))
+		add_child(add)
+		_dk["add"] = add
+	var add = _dk.get("add")
+	if add == null:
+		return
+	for k in 6:
+		if at.call(0.5 + k * 2.0):
+			add.drink_beer(1.0)
+			_log("AUTOTEST canette %d : alcool %.2f, ivresse %.2f, déchiré %.2f, dérive max %.1f°, gestes ralentis %.2f, hoquets %d, voix %s" % [
+					k + 1, add.alcohol, add.get_booze(), add.get_wasted(), add.booze_drift_deg * add.get_booze() + add.wasted_drift_deg * add.get_wasted(),
+					PillAddiction.stoned_level(get_tree()), add.hiccups, str(VoiceLine.history.slice(-2))])
+	if at.call(5.2):
+		_shot("bourre_3_canettes")
+	if at.call(12.6):
+		_shot("bourre_6_canettes")
+	if at.call(13.0):
+		add.hiccup()
+		_dk["kick"] = add._hiccup_kick
+	if at.call(13.05):
+		_log("AUTOTEST hoquet : à-coup volant %.1f°, hoquets %d, son %s, filtre audio %s" % [rad_to_deg(car.drug_steer_offset), add.hiccups, add._hiccup.playing, add._master_lp != null])
+	if at.call(14.0):
+		_shot("bourre_paupieres")
+		get_tree().quit()
+
+
+# --- Secousses : dos d'âne sur la route, objets qui sautent ----------------------------
+
+var _jl := {}
+
+
+func _road_point_ahead(dist: float) -> Vector3:
+	var p := car.global_position + car.global_basis.z * dist
+	var q := PhysicsRayQueryParameters3D.create(p + Vector3.UP * 10.0, p + Vector3.DOWN * 20.0)
+	q.exclude = [car.get_rid()]
+	var r := get_world_3d().direct_space_state.intersect_ray(q)
+	return r.position if r else p
+
+
+func _run_autotest_jolts(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	$Weather.random_events = false
+	$FallingTrees.enabled = false
+	car.external_input = true
+	_inside = true
+	var cr: CarCrash = car.crash
+	if at.call(0.1):
+		car.brake_input = 0.0
+		car.gear_lever.set_notch(SUV4x4.Gear.D, true)
+		car.handbrake_lever.set_angle_deg(0.0, true)
+		car.engine_state = 2
+		# dos d'âne : demi-cylindre de 12 cm en travers de la route, 45 m devant
+		var bump := StaticBody3D.new()
+		var cs := CollisionShape3D.new()
+		var cyl := CylinderShape3D.new()
+		cyl.radius = 0.35
+		cyl.height = 10.0
+		cs.shape = cyl
+		bump.add_child(cs)
+		add_child(bump)
+		var p := _road_point_ahead(45.0)
+		bump.global_transform = Transform3D(Basis(car.global_basis.z, PI * 0.5).rotated(Vector3.UP, 0.0), p + Vector3.DOWN * 0.23)
+		var mi := MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.35
+		cm.bottom_radius = 0.35
+		cm.height = 10.0
+		mi.mesh = cm
+		bump.add_child(mi)
+		_jl["max_jolt"] = 0.0
+		_jl["air"] = 0
+		_jl["top"] = 0.0
+		var n := 0
+		for holder in car.find_children("*", "Node3D", true, false):
+			if holder is CarStorage or holder is StorageZone:
+				for c in holder.get_children():
+					if c is RigidBody3D:
+						n += 1
+		_log("AUTOTEST objets dans la voiture : %d ; accoudoir ouvert %s, boîte à gants ouverte %s" % [n, car.get_node("ConsoleLid").is_open(), car.get_node("GloveboxLid").is_open()])
+	if _t > 0.2 and _t < 9.0:
+		var kmh := car.forward_speed * 3.6
+		car.throttle_input = 1.0 if kmh < 55.0 else 0.0
+		car.external_steer = 0.0
+		if _t < 4.0:
+			_jl["road_max"] = maxf(float(_jl.get("road_max", 0.0)), car.road_jolt)
+		_jl["max_jolt"] = maxf(float(_jl["max_jolt"]), car.road_jolt)
+		if car.road_jolt > 0.8:
+			_jl["peaks"] = str(_jl.get("peaks", "")) + " %.1fs:%.2f(%.0f)" % [_t, car.road_jolt, kmh]
+		var air := 0
+		for holder in car.find_children("*", "Node3D", true, false):
+			if holder is CarStorage or holder is StorageZone:
+				for c in holder.get_children():
+					var st := ItemPhysics.get_state(c) if c is RigidBody3D else {}
+					if not st.is_empty() and st["air"]:
+						air += 1
+						_jl["top"] = maxf(float(_jl["top"]), (st["vel"] as Vector3).y)
+		_jl["air"] = maxi(int(_jl["air"]), air)
+	if at.call(4.0):
+		_log("AUTOTEST route lisse 55 km/h : suspension max %.2f m/s, secousses %d" % [_jl.get("road_max", 0.0), cr.jolts])
+	if at.call(9.0):
+		car.throttle_input = 0.0
+		car.brake_input = 1.0
+		_log("AUTOTEST pics de suspension (t:m/s(km/h)) :" + str(_jl.get("peaks", "")))
+		_log("AUTOTEST dos d'âne : suspension max %.2f m/s, secousses %d, objets en l'air en même temps %d (élan max %.2f m/s), accoudoir ouvert %s, boîte à gants ouverte %s" % [
+				_jl["max_jolt"], cr.jolts, _jl["air"], _jl["top"], car.get_node("ConsoleLid").is_open(), car.get_node("GloveboxLid").is_open()])
+		cr.jolt(1.0, true, true)
+	if at.call(9.8):
+		_log("AUTOTEST secousse max forcée : accoudoir %s, boîte à gants %s ; objets sortis de l'habitacle : %d" % [car.get_node("ConsoleLid").is_open(), car.get_node("GloveboxLid").is_open(), _items_outside_cabin()])
+		get_tree().quit()
+
+
+func _items_outside_cabin() -> int:
+	var out := 0
+	var st: CarStorage = car.get_node("Storage")
+	for holder in car.find_children("*", "Node3D", true, false):
+		if holder is CarStorage or holder is StorageZone:
+			for c in holder.get_children():
+				if c is RigidBody3D and not st.cabin.grow(0.05).has_point(car.to_local((c as Node3D).global_position)):
+					out += 1
+	return out
+
+
+# --- Accident : arbre à 100 km/h, avec ou sans ceinture --------------------------------
+
+var _cx := {}
+
+
+func _run_autotest_crash(delta: float, belted: bool) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	$Weather.random_events = false
+	$FallingTrees.enabled = false
+	car.external_input = true
+	var cr: CarCrash = car.crash
+	_inside = true
+	if cr.ejected and _mouse_hand.anchor != cr._view:
+		_mouse_hand.anchor = cr._view   # la main souris suit le point de vue éjecté
+	if at.call(0.05):
+		$Weather.hour = 13.0
+		var add = preload("res://world/pills/pill_addiction.gd").new()
+		add.name = "PillAddiction"
+		add.set("car_path", NodePath("../SUV4x4"))
+		add_child(add)
+		var d := ChaseDirector.new()
+		d.name = "ChaseDirector"
+		d.addiction_path = NodePath("../PillAddiction")
+		d.car_path = NodePath("../SUV4x4")
+		add_child(d)
+		_cx["d"] = d
+		if belted:
+			car.seatbelt.toggle()
+		cr.crashed.connect(func(k): _cx["kmh"] = k; _cx["t"] = _t)
+	if at.call(2.0):
+		# arbre : tronc de 35 cm de rayon, 40 m devant
+		var tree := StaticBody3D.new()
+		var cs := CollisionShape3D.new()
+		var cyl := CylinderShape3D.new()
+		cyl.radius = 0.35
+		cyl.height = 6.0
+		cs.shape = cyl
+		tree.add_child(cs)
+		var mi := MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.3
+		cm.bottom_radius = 0.35
+		cm.height = 6.0
+		mi.mesh = cm
+		tree.add_child(mi)
+		add_child(tree)
+		tree.global_position = _road_point_ahead(40.0) + Vector3.UP * 3.0 + car.global_basis.x * 0.3
+		car.brake_input = 0.0
+		car.gear_lever.set_notch(SUV4x4.Gear.D, true)
+		car.handbrake_lever.set_angle_deg(0.0, true)
+		car.engine_state = 2
+		car.linear_velocity = car.global_basis.z * (100.0 / 3.6)
+		_log("AUTOTEST ceinture bouclée %s, lancé à %.0f km/h vers l'arbre" % [car.seatbelt.is_buckled(), car.linear_velocity.length() * 3.6])
+	if _t > 2.0 and not _cx.has("kmh"):
+		car.throttle_input = 1.0
+		car.external_steer = 0.0
+	elif _cx.has("kmh"):
+		car.throttle_input = 0.0
+	if _cx.has("kmh") and not _cx.has("logged"):
+		_cx["logged"] = true
+		_log("AUTOTEST choc : %.0f km/h perdus, éjecté %s" % [_cx["kmh"], cr.ejected])
+	if _cx.has("t"):
+		var dt: float = _t - float(_cx["t"])
+		if dt > 0.3 and not _cx.has("s0"):
+			_cx["s0"] = true
+			_shot("accident_vol_debut")
+		if dt > 0.45 and not _cx.has("s1"):
+			_cx["s1"] = true
+			_log("AUTOTEST pendant le vol : éclats de verre %s, rideau %.2f" % [car.get_node_or_null("WindshieldShards") != null, (get_node("PillAddiction") as PillAddiction).curtain])
+			_shot("accident_vol" if cr.ejected else "accident_choc")
+		if dt > 4.0 and not _cx.has("s2"):
+			_cx["s2"] = true
+			var d: ChaseDirector = _cx["d"]
+			var doors := []
+			for dr in car.get_node("Doors").get_children():
+				if dr.is_open():
+					doors.append(dr.name)
+			_log("AUTOTEST 4 s après : fin de partie %s « %s » / « %s », voix %s, accoudoir %s, boîte à gants %s, portières ouvertes %s, éclats %s" % [
+					d.game_over, d._title.text if d._title else "", (d._sub.text if d._sub else "").get_slice("\n", 0), str(VoiceLine.history.slice(-2)),
+					car.get_node("ConsoleLid").is_open(), car.get_node("GloveboxLid").is_open(), str(doors), car.get_node_or_null("WindshieldShards") != null])
+			_shot("accident_fin")
+			get_tree().quit()
+	if _t > 12.0:
+		_log("AUTOTEST pas de choc détecté (vitesse %.0f km/h)" % (car.forward_speed * 3.6))
 		get_tree().quit()

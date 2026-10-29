@@ -84,6 +84,8 @@ décoché et que la voix est enregistrée).
 | [ ] | `fin_police` | ILS T'ONT RATTRAPÉ. | La police t'a eu. | Rattrapé par la police | `chase_director.gd:437` |
 | [ ] | `fin_rivaux` | ILS T'ONT EU. | Les concurrents ont pris ta came. | Trop de balles du camping-car | `chase_director.gd:427` |
 | [ ] | `fin_assimile` | PERDU DANS LA PILS. | Tu souris. Tu ne sais plus pourquoi tu roulais. | Assimilation 100 % | `chase_director.gd:445` |
+| [ ] | `fin_pare_brise` | À TRAVERS LE PARE-BRISE. | Pas de ceinture, {n} km/h dans le décor. | Choc violent sans ceinture (conducteur éjecté) | `chase_director.gd` (`end_crash`) |
+| [ ] | `fin_pare_brise_copilote` | LE COPILOTE A TRAVERSÉ LE PARE-BRISE. | Pas de ceinture, {n} km/h dans le décor. | Partie à deux : copilote sans ceinture éjecté | `chase_director.gd` (`end_crash`) |
 | — | (garder écrit) | | {x,x} km parcourus · {n} Pils · assimilation {n} % · {n} livraisons | Sous la phrase de fin | `chase_director.gd:463-466` |
 | [ ] | `fin_rejouer` | | Espace / A : rejouer | Sous les statistiques | `chase_director.gd:468` |
 

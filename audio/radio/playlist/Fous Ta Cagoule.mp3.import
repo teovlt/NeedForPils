@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://crjytphlw3sc2"
+path="res://.godot/imported/Fous Ta Cagoule.mp3-aeaba23c9f856c3f6511937d0bd948e7.mp3str"
+
+[deps]
+
+source_file="res://audio/radio/playlist/Fous Ta Cagoule.mp3"
+dest_files=["res://.godot/imported/Fous Ta Cagoule.mp3-aeaba23c9f856c3f6511937d0bd948e7.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

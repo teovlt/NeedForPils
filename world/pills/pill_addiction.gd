@@ -14,6 +14,13 @@ extends Node
 ##   nette. Le décor se teinte aux couleurs des pilules (paramètre global de shader
 ##   `pill_assimilation`, lu par nature_tint.gdshader).
 ##
+## - La BIÈRE rend bourré, de plus en plus à chaque canette : voile ambré, bords de la
+##   vue qui tanguent et dédoublent, couleurs plus vives, sons étouffés, voiture qui
+##   tire d'un côté puis de l'autre avec des réactions en retard, gestes ralentis,
+##   hoquet (petit à-coup dans le volant et les manettes). À partir de ~4 canettes
+##   (« déchiré ») : paupières lourdes (la vue s'assombrit par vagues), vue qui se
+##   resserre. Voix « je suis bourré » une fois par cuite (audio/voice/bourre.wav).
+##
 ## Aucun effet ne bouge la caméra (confort VR) : un filtre est posé devant les yeux
 ## et la conduite est perturbée via SUV4x4.drug_*.
 
@@ -62,14 +69,24 @@ const OVERLAY_LAYER := 1 << 19
 @export_range(0.0, 1.0) var stoned_craving_slow := 0.4
 
 @export_group("Bière")
-## Alcool gagné par canette entière (au-delà d'environ 1, on est bien bourré).
+## Alcool gagné par canette entière (au-delà d'environ 1, on est bien bourré ; vers 2,
+## déchiré). Les 6 canettes de la glacière mènent au maximum (3).
 @export var alcohol_per_can := 0.5
+@export var max_alcohol := 3.0
 ## Manque retiré par canette entière.
 @export var beer_relief := 0.25
 ## Secondes pour éliminer 1 d'alcool.
 @export var alcohol_fade_time := 360.0
-## Dérive de la direction quand on est bourré (degrés).
-@export var booze_drift_deg := 4.0
+## Dérive de la direction quand on est bourré, et en plus quand on est déchiré (degrés).
+@export var booze_drift_deg := 7.0
+@export var wasted_drift_deg := 5.0
+## Hoquet quand on est bourré : secondes entre deux hoquets (bien bourré / déchiré) et
+## à-coup dans le volant (degrés).
+@export var hiccup_interval := Vector2(14.0, 6.0)
+@export var hiccup_kick_deg := 2.5
+## Voix quand on devient bien bourré (une fois par cuite).
+@export var drunk_voice_id := "bourre"
+@export_range(0.0, 1.0) var drunk_voice_at := 0.75
 
 @export_group("Pilule")
 ## Gain d'assimilation par pilule.
@@ -116,6 +133,12 @@ var _heart: AudioStreamPlayer
 var _gulp: AudioStreamPlayer
 var _voice: AudioStreamPlayer
 var _voice_said := false
+var _hiccup: AudioStreamPlayer
+var _hiccup_t := 0.0
+var _hiccup_kick := 0.0
+var _drunk_said := false
+## Hoquets (tests).
+var hiccups := 0
 
 
 func _ready() -> void:
@@ -138,6 +161,11 @@ func _ready() -> void:
 		_voice.stream = load(craving_voice_path) as AudioStream
 	_voice.volume_db = craving_voice_db
 	add_child(_voice)
+	_hiccup = AudioStreamPlayer.new()
+	_hiccup.name = "Hiccup"
+	_hiccup.stream = _make_hiccup()
+	_hiccup.volume_db = -3.0
+	add_child(_hiccup)
 	RenderingServer.global_shader_parameter_set("pill_assimilation", 0.0)
 
 
@@ -181,17 +209,22 @@ static func stoned_level(tree: SceneTree) -> float:
 	var a := tree.get_first_node_in_group(GROUP)
 	if a == null:
 		return 0.0
-	return maxf(float(a.get("stoned")), 0.6 * float(a.call("get_booze")))
+	return maxf(float(a.get("stoned")), 0.75 * float(a.call("get_booze")))
 
 
-## Ivresse (0-1) due à la bière.
+## Ivresse (0-1) due à la bière : bien bourré vers 2 canettes et demie.
 func get_booze() -> float:
 	return smoothstep(0.1, 1.3, alcohol)
 
 
+## Au-delà de bourré (0-1) : déchiré vers 5 canettes.
+func get_wasted() -> float:
+	return smoothstep(1.4, 2.6, alcohol)
+
+
 ## Gorgée de bière : `amount` = part de canette bue.
 func drink_beer(amount: float) -> void:
-	alcohol = minf(alcohol + alcohol_per_can * amount, 2.0)
+	alcohol = minf(alcohol + alcohol_per_can * amount, max_alcohol)
 	craving = maxf(craving - beer_relief * amount, 0.0)
 	beers += amount
 
@@ -247,6 +280,7 @@ func _physics_process(delta: float) -> void:
 			blackout_started.emit()
 	stoned = move_toward(stoned, 0.0, delta / stoned_fade_time)
 	alcohol = move_toward(alcohol, 0.0, delta / alcohol_fade_time)
+	_update_hiccups(delta)
 	_apply_to_car()
 
 
@@ -273,7 +307,9 @@ func _apply_to_car() -> void:
 	drift += deg_to_rad(1.2) * st * sin(_t * 0.45 + 0.7)
 	# bourré (bière) : la voiture tire d'un côté puis de l'autre, réactions en retard
 	var bz := get_booze()
-	drift += deg_to_rad(booze_drift_deg) * bz * (sin(_t * 0.37 + 2.1) * 0.65 + sin(_t * 1.13) * 0.35)
+	var bdrift := booze_drift_deg * bz + wasted_drift_deg * get_wasted()
+	drift += deg_to_rad(bdrift) * (sin(_t * 0.37 + 2.1) * 0.65 + sin(_t * 1.13) * 0.35)
+	drift += deg_to_rad(hiccup_kick_deg) * _hiccup_kick
 	_car.drug_steer_offset = shake + drift
 	_car.drug_steer_lag = clampf(drunk * drunk_steer_lag + 0.45 * st + 0.6 * bz, 0.0, 1.0)
 
@@ -306,13 +342,16 @@ func _process(delta: float) -> void:
 		_overlay_mat.set_shader_parameter("assimilation", assimilation)
 		_overlay_mat.set_shader_parameter("stoned", smoothstep(0.0, 1.0, stoned))
 		_overlay_mat.set_shader_parameter("booze", get_booze())
+		_overlay_mat.set_shader_parameter("wasted", get_wasted())
+		_overlay_mat.set_shader_parameter("hiccup", _hiccup_kick)
 	if _env:
 		# Couleurs : délavées en manque, saturées sous pilule.
 		_env.adjustment_enabled = true
 		var sat := lerpf(1.0, 0.2, craving * (1.0 - high)) + 0.8 * high * (1.0 - assimilation) + 0.6 * drunk
 		var st := smoothstep(0.0, 1.0, stoned)
-		_env.adjustment_saturation = sat + 0.25 * st
-		_env.adjustment_contrast = 1.0 + 0.15 * drunk - 0.18 * st
+		var bz := get_booze()
+		_env.adjustment_saturation = sat + 0.25 * st + 0.35 * bz
+		_env.adjustment_contrast = 1.0 + 0.15 * drunk - 0.18 * st + 0.12 * bz
 		_env.adjustment_brightness = 1.0 + 0.06 * st
 	_update_stoned_audio()
 	# Le décor se teinte doucement (paramètre global lu par nature_tint.gdshader).
@@ -323,7 +362,7 @@ func _process(delta: float) -> void:
 ## Défoncé : tous les sons un peu étouffés et lointains (passe-bas sur le bus principal).
 var _master_lp: AudioEffectLowPassFilter
 func _update_stoned_audio() -> void:
-	var st := maxf(smoothstep(0.0, 1.0, stoned), 0.5 * get_booze())
+	var st := maxf(smoothstep(0.0, 1.0, stoned), 0.7 * get_booze())
 	if _master_lp == null:
 		if st < 0.01:
 			return
@@ -384,6 +423,35 @@ func _hide_from_other_cameras() -> void:
 			(c as Camera3D).cull_mask &= ~OVERLAY_LAYER
 
 
+## Hoquet quand on est bourré (son, à-coup dans le volant, petite vibration des
+## manettes), et la voix « je suis bourré » une fois par cuite.
+func _update_hiccups(delta: float) -> void:
+	_hiccup_kick = move_toward(_hiccup_kick, 0.0, delta * 4.0)
+	var bz := get_booze()
+	if bz >= drunk_voice_at and not _drunk_said and not paused:
+		_drunk_said = true
+		VoiceLine.play(self, drunk_voice_id, "perso")
+	elif bz < 0.2:
+		_drunk_said = false
+	if bz < 0.45 or paused:
+		_hiccup_t = 0.0
+		return
+	if _hiccup_t <= 0.0:
+		_hiccup_t = randf_range(0.6, 1.4) * lerpf(hiccup_interval.x, hiccup_interval.y, get_wasted())
+	_hiccup_t -= delta
+	if _hiccup_t <= 0.0:
+		hiccup()
+
+
+func hiccup() -> void:
+	hiccups += 1
+	_hiccup_kick = 1.0 if randf() < 0.5 else -1.0
+	_hiccup.pitch_scale = randf_range(0.9, 1.12)
+	_hiccup.play()
+	for h in get_tree().get_nodes_in_group(VRHandInteractor.GROUP):
+		(h as VRHandInteractor).pulse(0.35, 0.07)
+
+
 # --- Sons générés par code ------------------------------------------------------
 
 func _wav(s: PackedFloat32Array, loop := false) -> AudioStreamWAV:
@@ -415,6 +483,27 @@ func _make_heartbeat() -> AudioStreamWAV:
 				v += sin(TAU * (48.0 + 30.0 * exp(-dt * 30.0)) * dt) * exp(-dt * 18.0) * beat[1]
 		s[i] = v * 0.9
 	return _wav(s, true)
+
+
+## Hoquet « hic » : petit claquement de glotte puis un « i » bref qui monte.
+func _make_hiccup() -> AudioStreamWAV:
+	var n := int(RATE * 0.24)
+	var s := PackedFloat32Array()
+	s.resize(n)
+	var ph := 0.0
+	for i in n:
+		var t := float(i) / RATE
+		var f0 := 210.0 + 140.0 * minf(t / 0.06, 1.0)
+		ph += f0 / RATE
+		var v := 0.0
+		for k in range(1, 16):
+			var fk := f0 * k
+			var w := exp(-pow((fk - 420.0) / 160.0, 2.0)) + 0.55 * exp(-pow((fk - 2300.0) / 450.0, 2.0))
+			v += sin(TAU * ph * k) * w
+		var env := minf(t / 0.006, 1.0) * exp(-maxf(t - 0.02, 0.0) * 22.0)
+		var click := randf_range(-1.0, 1.0) * exp(-t * 400.0) * 0.6
+		s[i] = (v * 0.35 * env + click) * 0.9
+	return _wav(s)
 
 
 ## Prise d'une pilule : « glup » grave puis scintillement montant.

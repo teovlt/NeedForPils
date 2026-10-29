@@ -20,8 +20,9 @@ extends Node3D
 ##   suivant : un lecteur qui vient d'être lancé ne dit pas encore qu'il joue (le
 ##   relancer superposait deux lectures).
 ## - Playlist : chaque morceau (mp3, ogg) est décodé à l'avance en WAV en mémoire, dans un
-##   fil de travail (celui en cours et le suivant ; ~40 Mo par morceau de 4 min). Caler
-##   un mp3 au milieu du morceau prend ~60 ms (bien plus sur le casque) et
+##   fil de travail (celui en cours et le suivant ; ~40 Mo par morceau de 4 min,
+##   décodé par tranches pour ne pas dépasser cette taille en mémoire). Caler un mp3
+##   au milieu du morceau prend ~60 ms (bien plus sur le casque) et
 ##   AudioStreamPlayer3D.play(position) le fait sur le fil principal, une fois par
 ##   haut-parleur : l'image saccadait et les 4 haut-parleurs partaient décalés (son
 ##   décalé entre gauche et droite). Un WAV se cale instantanément : ils partent
@@ -306,20 +307,40 @@ func _update_decoding() -> void:
 
 
 ## Fil de travail : décode tout le morceau et en fait un WAV (16 bits) en mémoire.
+## Par tranches de ~1,5 s converties tout de suite en 16 bits : la mémoire ne dépasse
+## pas la taille du WAV final (~65 Mo pour 6 min ; tout décoder en flottants d'abord
+## montait à ~330 Mo, risqué sur le casque).
 func _decode_job(src: AudioStream, rate: float) -> void:
 	var pb := src.instantiate_playback()
 	pb.start(0.0)
 	var need := int(src.get_length() * rate)
-	var pcm := PackedByteArray()
+	var pcm16 := PackedByteArray()
 	var frames := 0
 	while frames < need:
 		var a := pb.mix_audio(1.0, mini(65536, need - frames))
 		if a.is_empty():
 			break
 		frames += a.size()
-		pcm.append_array(a.to_byte_array())   # flottants 32 bits, gauche / droite
+		var chunk := _float_to_wav16(a.to_byte_array(), rate)   # flottants 32 bits, gauche / droite
+		if chunk == null:
+			break
+		pcm16.append_array(chunk.data)
 	pb.stop()
-	# en-tête WAV « IEEE float » : le lecteur WAV de Godot le convertit en 16 bits
+	if pcm16.is_empty():
+		_decode_out = null
+		return
+	var w := AudioStreamWAV.new()
+	w.format = AudioStreamWAV.FORMAT_16_BITS
+	w.stereo = true
+	w.mix_rate = int(rate)
+	w.data = pcm16
+	w.loop_mode = AudioStreamWAV.LOOP_DISABLED
+	_decode_out = w
+
+
+## Tranche de flottants 32 bits stéréo -> WAV 16 bits (le lecteur WAV de Godot convertit
+## un en-tête « IEEE float »).
+static func _float_to_wav16(pcm: PackedByteArray, rate: float) -> AudioStreamWAV:
 	var h := PackedByteArray()
 	h.resize(44)
 	h.encode_u32(0, 0x46464952)    # RIFF
@@ -336,11 +357,7 @@ func _decode_job(src: AudioStream, rate: float) -> void:
 	h.encode_u32(36, 0x61746164)   # data
 	h.encode_u32(40, pcm.size())
 	h.append_array(pcm)
-	pcm = PackedByteArray()
-	var w := AudioStreamWAV.load_from_buffer(h, {"compress/mode": 0})
-	if w:
-		w.loop_mode = AudioStreamWAV.LOOP_DISABLED
-	_decode_out = w
+	return AudioStreamWAV.load_from_buffer(h, {"compress/mode": 0})
 
 
 func _exit_tree() -> void:

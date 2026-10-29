@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://comufbtk8niwe"
+path="res://.godot/imported/Social Credit Plz.mp3-a16850f4c9ab7e559e96e2d908fec514.mp3str"
+
+[deps]
+
+source_file="res://audio/radio/playlist/Social Credit Plz.mp3"
+dest_files=["res://.godot/imported/Social Credit Plz.mp3-a16850f4c9ab7e559e96e2d908fec514.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

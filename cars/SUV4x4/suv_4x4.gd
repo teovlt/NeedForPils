@@ -13,6 +13,8 @@ extends VehicleBody3D
 ##      K = comodo essuie-glaces, L = comodo phares, Espace = frein arrière tant qu'appuyé,
 ##      1-4 portes, G boîte à gants, C accoudoir, J klaxon, B ceinture, M clé / moteur,
 ##      F2 / F3 radio station - / +, F4 radio marche / arrêt, F9 / F10 volume.
+## Secousses (bosses, trous) et accidents : CarCrash (enfant « Crash ») ; sans ceinture,
+## un gros choc fait traverser le pare-brise.
 
 enum Gear { R, N, D, G2, G1 }
 
@@ -243,6 +245,10 @@ var ignition: Node3D   # contacteur à clé (ignition.gd) : ignition.get_level()
 var seatbelts: Array[Node3D] = []
 var seatbelt: Node3D   # ceinture du conducteur (seatbelt.gd) : seatbelt.is_buckled()
 var horn: Node3D   # klaxon (HornPad) : horn.is_honking()
+var crash: CarCrash   # secousses et accidents (car_crash.gd)
+## Plus forte vitesse de suspension (m/s) des roues au sol à ce pas physique : bosse,
+## trou, retombée d'un saut (lue par CarCrash).
+var road_jolt := 0.0
 var auto_gear := 0        # rapport interne de la boîte auto (0 = 1re, 5 = 6e)
 var shift_timer := 0.0    # > 0 pendant un passage de rapport
 var _kickdown_lock := 0.0
@@ -339,6 +345,9 @@ func _ready() -> void:
 				b.set(k, cfg[k])
 		add_child(b)
 		seatbelts.append(b)
+	crash = CarCrash.new()
+	crash.name = "Crash"
+	add_child(crash)
 	_find_lamp_materials()
 	light_stalk.set_notch(start_light_mode, true)
 	_apply_lights()
@@ -873,6 +882,7 @@ func _update_wipers(delta: float) -> void:
 func _update_road_haptics(delta: float) -> void:
 	var wheels := [$WheelFL, $WheelFR, $WheelRL, $WheelRR]
 	var side_strength := [0.0, 0.0]   # gauche, droite
+	road_jolt = 0.0
 	for i in 4:
 		var w: VehicleWheel3D = wheels[i]
 		var y := to_local(w.global_position).y
@@ -881,6 +891,7 @@ func _update_road_haptics(delta: float) -> void:
 		if not w.is_in_contact():
 			continue
 		debug_max_suspension_speed = maxf(debug_max_suspension_speed, v)
+		road_jolt = maxf(road_jolt, v)
 		if v > haptic_suspension_threshold:
 			var side := 0 if w.position.x > 0.0 else 1   # +X = gauche du véhicule
 			side_strength[side] = maxf(side_strength[side], clampf(v / 2.0, 0.15, 1.0))

@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://bfcgbk1aioqm7"
+path="res://.godot/imported/Ce soir sans mon.mp3-fa2294fae9e4fbfb9ff492bbf83c36ec.mp3str"
+
+[deps]
+
+source_file="res://audio/radio/playlist/Ce soir sans mon.mp3"
+dest_files=["res://.godot/imported/Ce soir sans mon.mp3-fa2294fae9e4fbfb9ff492bbf83c36ec.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4
