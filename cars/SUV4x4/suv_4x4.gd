@@ -213,6 +213,18 @@ var _xr_origin: XROrigin3D
 var _xr_camera: XRCamera3D
 ## Vrai tant que la tête réelle n'a pas encore été calée sur le siège (attend un suivi valide).
 var _calib_wanted := false
+## Calages supplémentaires après le premier (s) : la première pose du casque peut être
+## fausse (casque pas encore sur la tête, suivi ou sol du guardian pas encore prêts) et
+## le joueur se retrouvait au-dessus de la voiture.
+const SETTLE_CALIBS := [1.0, 3.0]
+var _settle_t := -1.0
+var _settle_i := 0
+## Tête hors de la place (au-dessus de l'œil du siège ou loin du siège) pendant
+## HEAD_LOST_TIME s : on recale automatiquement.
+@export var head_lost_up := 0.35
+@export var head_lost_dist := 1.0
+const HEAD_LOST_TIME := 0.75
+var _head_lost_t := 0.0
 var _wiper_phase := 0.0
 var _wiper_pause := 0.0
 var _wiper_angle := 0.0
@@ -348,6 +360,13 @@ func _ready() -> void:
 			xr.connect("session_begun", func(): get_tree().create_timer(0.3).timeout.connect(recenter_view))
 		if xr.has_signal("pose_recentered"):
 			xr.connect("pose_recentered", recenter_view)
+		# casque remis sur la tête, appli de nouveau au premier plan : on recale
+		if xr.has_signal("session_focussed"):
+			xr.connect("session_focussed", recenter_view)
+		if xr.has_signal("user_presence_changed"):
+			xr.connect("user_presence_changed", func(present: bool):
+				if present:
+					recenter_view())
 
 
 # --- État lisible par d'autres scripts ------------------------------------
@@ -583,9 +602,39 @@ func recenter_view() -> void:
 	_calib_wanted = true
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if _calib_wanted and _calibrate_seated():
 		_calib_wanted = false
+		if _settle_t < 0.0:
+			_settle_t = 0.0
+	if _settle_t >= 0.0 and _settle_i < SETTLE_CALIBS.size():
+		_settle_t += delta
+		if _settle_t >= float(SETTLE_CALIBS[_settle_i]):
+			_settle_i += 1
+			_calib_wanted = true
+	_watch_head(delta)
+
+
+## Recale si la tête reste hors de la place (dans le toit, au-dessus de la voiture...).
+func _watch_head(delta: float) -> void:
+	_head_lost_t = 0.0 if not _head_out_of_seat() else _head_lost_t + delta
+	if _head_lost_t > HEAD_LOST_TIME:
+		_head_lost_t = 0.0
+		_calib_wanted = true
+		print("VR : tête hors de la place, recalage")
+
+
+func _head_out_of_seat() -> bool:
+	if _xr_origin == null or not is_instance_valid(_xr_origin) or _xr_camera == null:
+		return false
+	var xri := XRServer.primary_interface
+	if xri == null or not xri.is_initialized() or _xr_camera.transform.origin == Vector3.ZERO:
+		return false
+	var seat := _xr_origin.get_parent() as Node3D
+	if seat == null or seat.get_parent() != self:
+		return false   # point de vue ailleurs (plan aérien de l'intro)
+	var head := seat.to_local(_xr_camera.global_position)   # œil du siège = origine
+	return head.y > head_lost_up or head.y < -0.75 or Vector2(head.x, head.z).length() > head_lost_dist
 
 
 ## Renvoie faux tant que la pose du casque n'est pas encore connue (on réessaie).
