@@ -172,6 +172,8 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_roll(delta)
 		elif autotest_scenario == "sachet_tabac":
 			_run_autotest_pouch_view(delta)
+		elif autotest_scenario == "glaciere":
+			_run_autotest_cooler(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -5475,4 +5477,145 @@ func _run_autotest_pouch_view(delta: float) -> void:
 		(b.get_node("Grab") as TobaccoPouch).toggle()
 	if at.call(2.4):
 		_shot("sachet_tabac_ouvert")
+		get_tree().quit()
+
+
+# --- Glacière : sur la banquette arrière, couvercle, canette sortie, ouverte, bue
+# (bourré, moins de manque, plus de fatigue), canette fermée remise dans la glace -----
+
+var _gl := {}
+
+
+func _run_autotest_cooler(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = false
+	var cooler := car.get_node("Cooler") as Cooler
+	var eye := car.to_local(car.driver_seat.global_position)
+	if at.call(0.05):
+		$Weather.hour = 13.0
+		var add = preload("res://world/pills/pill_addiction.gd").new()
+		add.name = "PillAddiction"
+		add.set("car_path", NodePath("../SUV4x4"))
+		add_child(add)
+		add.craving = 0.6
+		_gl["add"] = add
+		var holder := Node3D.new()
+		add_child(holder)
+		var h := VRHandInteractor.new()
+		holder.add_child(h)
+		h.debug_points = [Vector3(0, -100, 0), Vector3(0, -100, 0)]
+		_gl["h"] = h
+	if at.call(0.2):
+		# relevé de la banquette arrière et des dossiers avant (hors glacière)
+		car.get_node("Storage")._ensure_held_collision()
+		var ex: Array[RID] = []
+		for b in cooler.find_children("*", "StaticBody3D", true, false):
+			ex.append((b as StaticBody3D).get_rid())
+		var sp := get_world_3d().direct_space_state
+		var rows := []
+		for x in [0.0, -0.25, 0.25]:
+			for z in [-0.42, -0.5, -0.6, -0.7, -0.8]:
+				var q := PhysicsRayQueryParameters3D.create(car.to_global(Vector3(x, 1.5, z)), car.to_global(Vector3(x, 0.2, z)), CarStorage.HELD_LAYER, ex)
+				var r := sp.intersect_ray(q)
+				rows.append("(%.2f,%.2f)->%s" % [x, z, ("%.3f" % car.to_local(r.position).y) if r else "-"])
+		_log("AUTOTEST banquette arrière (x,z)->y : %s" % [" ".join(rows)])
+		var backs := []
+		for x in [0.0, 0.2, -0.2, 0.45, -0.45]:
+			var q2 := PhysicsRayQueryParameters3D.create(car.to_global(Vector3(x, 1.0, -0.42)), car.to_global(Vector3(x, 1.0, 0.3)), CarStorage.HELD_LAYER, ex)
+			var r2 := sp.intersect_ray(q2)
+			backs.append("x=%.2f->%s" % [x, ("%.3f" % car.to_local(r2.position).z) if r2 else "-"])
+		_log("AUTOTEST dossiers avant à y=1.0 (premier obstacle en avançant depuis z=-0.42) : %s" % [" ".join(backs)])
+		_log("AUTOTEST glacière : %d canettes, couvercle ouvert=%s" % [cooler.cans_left(), cooler.lid.is_open()])
+	var add = _gl.get("add")
+	var h: VRHandInteractor = _gl.get("h")
+	if h == null:
+		return
+	if _t < 1.5:
+		cam.fov = 75.0
+		cam.global_position = car.to_global(eye + Vector3(-0.2, 0.0, 0.0))
+		cam.look_at(cooler.global_position + car.global_basis.y * 0.15)
+	if at.call(1.0):
+		_shot("glaciere_fermee")
+		cooler.lid.toggle()
+	if at.call(1.8):
+		cam.global_position = cooler.global_position + car.global_basis * Vector3(0.0, 0.55, 0.35)
+		cam.look_at(cooler.global_position + car.global_basis.y * 0.1)
+		_shot("glaciere_ouverte")
+		_log("AUTOTEST couvercle ouvert=%s, zone canettes active=%s" % [cooler.lid.is_open(), cooler._taker.enabled])
+	# main B : prend une canette, l'ouvre, la porte à la bouche
+	if at.call(2.0):
+		var c: Node3D = cooler.nearest_can(cooler.global_position)
+		h.get_parent().global_position = c.global_transform * Vector3(0, 0.08, 0)
+		cooler._taker.set_hand_distance(h, 0.0)
+		cooler._taker.grab(h)
+		var can: BeerCan = cooler._taker._held.get(h)
+		_gl["can"] = can
+		_log("AUTOTEST canette sortie : %s (%s), restent %d" % [can.item.name if can else "rien", "ouverte" if can and can.opened else "fermée", cooler.cans_left()])
+	var can: BeerCan = _gl.get("can")
+	if can and is_instance_valid(can) and _t > 2.0 and _t < 9.0:
+		cam.fov = 70.0
+		cam.global_position = car.to_global(eye)
+		cam.look_at(car.to_global(eye + Vector3(0, -0.15, 1.0)))
+		var mouth = EdiblePickable.mouth_position(get_tree(), can)
+		var target: Vector3 = mouth
+		var tb := cam.global_basis * Basis(Vector3.RIGHT, deg_to_rad(50.0))
+		# sortie par le haut (au-dessus des dossiers avant), puis vers la bouche
+		var k := smoothstep(2.6, 3.4, _t)
+		var start: Vector3 = car.to_global(Vector3(0.2, 1.38, -0.15))
+		var lift: Vector3 = cooler.global_position + car.global_basis.y * 0.55
+		var pos: Vector3 = lift.lerp(start, smoothstep(2.0, 2.5, _t)).lerp(target - tb * Vector3(0, BeerCan.HEIGHT, 0.012), k)
+		var hb := (cam.global_basis).slerp(tb, k)
+		if _t > 6.2:
+			pos = start
+			hb = cam.global_basis
+		h.get_parent().global_transform = Transform3D(hb, pos) * can._offset.affine_inverse()
+		cooler._taker.grab_update(h)
+	if at.call(2.4):
+		can.toggle()
+		_log("AUTOTEST A/X -> canette ouverte=%s" % can.opened)
+	if at.call(2.5):
+		_gl["c0"] = add.craving
+		var f := get_tree().get_first_node_in_group(Fatigue.GROUP) as Fatigue
+		_gl["f0"] = f.fatigue
+	if at.call(4.5):
+		_shot("glaciere_boire")
+	if at.call(6.0):
+		var f := get_tree().get_first_node_in_group(Fatigue.GROUP) as Fatigue
+		_log("AUTOTEST à la bouche 2,5 s : bu %.2f canette, alcool %.2f (ivresse %.2f), manque %.2f -> %.2f, fatigue %.3f -> %.3f" % [can.drunk_amount, add.alcohol, add.get_booze(), _gl["c0"], add.craving, _gl["f0"], f.fatigue])
+	if at.call(6.4):
+		can.toggle()   # boire d'une traite (sans casque)
+	if at.call(9.0):
+		var f := get_tree().get_first_node_in_group(Fatigue.GROUP) as Fatigue
+		_log("AUTOTEST canette finie : reste %.2f, alcool %.2f (ivresse %.2f), manque %.2f, fatigue %.3f, dérive direction %.2f°" % [can.fill, add.alcohol, add.get_booze(), add.craving, f.fatigue, rad_to_deg(car.drug_steer_offset)])
+		cooler._taker.release(h)
+	# bien bourré : la vue
+	if at.call(9.2):
+		add.alcohol = 1.5
+	if _t > 9.2 and _t < 11.0:
+		cam.global_position = car.to_global(eye)
+		cam.look_at(car.to_global(eye + Vector3(0, -0.1, 1.0)))
+	if at.call(10.5):
+		_shot("glaciere_bourre")
+		_log("AUTOTEST bien bourré : ivresse %.2f, dérive %.2f°, retard direction %.2f, gestes ralentis %.2f" % [add.get_booze(), rad_to_deg(car.drug_steer_offset), car.drug_steer_lag, PillAddiction.stoned_level(get_tree())])
+		add.alcohol = 0.0
+	# une canette fermée remise dans la glace
+	if at.call(11.0):
+		var c: Node3D = cooler.nearest_can(cooler.global_position)
+		h.get_parent().global_position = c.global_transform * Vector3(0, 0.08, 0)
+		cooler._taker.set_hand_distance(h, 0.0)
+		cooler._taker.grab(h)
+		_gl["n1"] = cooler.cans_left()
+	if _t > 11.0 and _t < 11.6:
+		h.get_parent().global_position = cooler.global_position + car.global_basis.y * 0.35
+		cooler._taker.grab_update(h)
+	if at.call(11.6):
+		cooler._taker.release(h)
+		_log("AUTOTEST canette fermée lâchée au-dessus de la glacière : %d -> %d canettes" % [_gl["n1"], cooler.cans_left()])
+		cooler.lid.toggle()
+	if at.call(12.4):
+		_log("AUTOTEST couvercle refermé=%s, zone canettes active=%s" % [not cooler.lid.is_open(), cooler._taker.enabled])
 		get_tree().quit()

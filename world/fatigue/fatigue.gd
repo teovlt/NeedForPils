@@ -8,7 +8,8 @@ extends Node
 ## - Effets à partir de `effects_from` : vue qui s'assombrit par les bords, clignements
 ##   de plus en plus fréquents et lents, bâillements (voix enregistrée + yeux plissés et
 ##   larmes), puis micro-sommeils (yeux fermés une à deux secondes) quand on est épuisé.
-## - Le café du thermos (ThermosCup) la fait baisser : drink_coffee().
+## - Le café du thermos (ThermosCup) la fait baisser : drink_coffee() ; la bière
+##   (BeerCan) la fait monter : drink_beer().
 ## Créée automatiquement par la voiture (SUV4x4) si la scène n'en a pas.
 
 const GROUP := "fatigue"
@@ -25,6 +26,8 @@ const OVERLAY_LAYER := 1 << 19     # même couche que le filtre des pilules (cac
 @export_range(0.0, 1.0) var effects_from := 0.3
 ## Fatigue retirée par tasse de café entière.
 @export var coffee_relief := 0.3
+## Fatigue ajoutée par canette de bière entière.
+@export var beer_fatigue := 0.12
 ## Bâillement (voix à enregistrer, cf. audio/voice/A_ENREGISTRER.md).
 @export_file("*.wav", "*.ogg", "*.mp3") var yawn_voice_path := "res://audio/voice/baillement.wav"
 @export var yawn_voice_db := 0.0
@@ -73,6 +76,11 @@ static func level(tree: SceneTree) -> float:
 ## Une tasse de café bue (amount = fraction de tasse).
 func drink_coffee(amount: float) -> void:
 	fatigue = maxf(fatigue - coffee_relief * amount, 0.0)
+
+
+## Gorgée de bière : `amount` = part de canette bue.
+func drink_beer(amount: float) -> void:
+	fatigue = minf(fatigue + beer_fatigue * amount, 1.0)
 
 
 ## Bâillement immédiat (tests, ou appelé par d'autres scripts).

@@ -61,6 +61,16 @@ const OVERLAY_LAYER := 1 << 19
 ## Défonce : le manque monte moins vite (fraction retirée à 100 %).
 @export_range(0.0, 1.0) var stoned_craving_slow := 0.4
 
+@export_group("Bière")
+## Alcool gagné par canette entière (au-delà d'environ 1, on est bien bourré).
+@export var alcohol_per_can := 0.5
+## Manque retiré par canette entière.
+@export var beer_relief := 0.25
+## Secondes pour éliminer 1 d'alcool.
+@export var alcohol_fade_time := 360.0
+## Dérive de la direction quand on est bourré (degrés).
+@export var booze_drift_deg := 4.0
+
 @export_group("Pilule")
 ## Gain d'assimilation par pilule.
 @export var assimilation_per_pill := 0.08
@@ -80,6 +90,8 @@ var craving := 0.0
 ## Défonce du joint (0-1) : détendu, sens altérés (vue brumeuse, sons étouffés, gestes
 ## et volant plus lents). Ne rend pas plus rapide.
 var stoned := 0.0
+var alcohol := 0.0         # bière bue, s'élimine lentement
+var beers := 0.0           # canettes bues (tests)
 var assimilation := 0.0
 var pills_taken := 0
 var blackouts := 0
@@ -163,9 +175,25 @@ func smoke(kind: String, fraction: float) -> void:
 
 
 ## Défonce actuelle (0-1) du joueur, 0 sans PillAddiction (gestes, son...).
+## Gestes ralentis (défoncé, ou bourré) : saisies retardées, objets qui suivent la main
+## avec du retard.
 static func stoned_level(tree: SceneTree) -> float:
 	var a := tree.get_first_node_in_group(GROUP)
-	return float(a.get("stoned")) if a else 0.0
+	if a == null:
+		return 0.0
+	return maxf(float(a.get("stoned")), 0.6 * float(a.call("get_booze")))
+
+
+## Ivresse (0-1) due à la bière.
+func get_booze() -> float:
+	return smoothstep(0.1, 1.3, alcohol)
+
+
+## Gorgée de bière : `amount` = part de canette bue.
+func drink_beer(amount: float) -> void:
+	alcohol = minf(alcohol + alcohol_per_can * amount, 2.0)
+	craving = maxf(craving - beer_relief * amount, 0.0)
+	beers += amount
 
 
 # --- Prise d'une pilule ------------------------------------------------------
@@ -218,6 +246,7 @@ func _physics_process(delta: float) -> void:
 			blackouts += 1
 			blackout_started.emit()
 	stoned = move_toward(stoned, 0.0, delta / stoned_fade_time)
+	alcohol = move_toward(alcohol, 0.0, delta / alcohol_fade_time)
 	_apply_to_car()
 
 
@@ -242,8 +271,11 @@ func _apply_to_car() -> void:
 	# défoncé : direction un peu molle et flottante, mais pas plus de vitesse
 	var st := smoothstep(0.0, 1.0, stoned)
 	drift += deg_to_rad(1.2) * st * sin(_t * 0.45 + 0.7)
+	# bourré (bière) : la voiture tire d'un côté puis de l'autre, réactions en retard
+	var bz := get_booze()
+	drift += deg_to_rad(booze_drift_deg) * bz * (sin(_t * 0.37 + 2.1) * 0.65 + sin(_t * 1.13) * 0.35)
 	_car.drug_steer_offset = shake + drift
-	_car.drug_steer_lag = clampf(drunk * drunk_steer_lag + 0.45 * st, 0.0, 1.0)
+	_car.drug_steer_lag = clampf(drunk * drunk_steer_lag + 0.45 * st + 0.6 * bz, 0.0, 1.0)
 
 
 func _process(delta: float) -> void:
@@ -273,6 +305,7 @@ func _process(delta: float) -> void:
 		_overlay_mat.set_shader_parameter("pulse", pulse)
 		_overlay_mat.set_shader_parameter("assimilation", assimilation)
 		_overlay_mat.set_shader_parameter("stoned", smoothstep(0.0, 1.0, stoned))
+		_overlay_mat.set_shader_parameter("booze", get_booze())
 	if _env:
 		# Couleurs : délavées en manque, saturées sous pilule.
 		_env.adjustment_enabled = true
@@ -290,7 +323,7 @@ func _process(delta: float) -> void:
 ## Défoncé : tous les sons un peu étouffés et lointains (passe-bas sur le bus principal).
 var _master_lp: AudioEffectLowPassFilter
 func _update_stoned_audio() -> void:
-	var st := smoothstep(0.0, 1.0, stoned)
+	var st := maxf(smoothstep(0.0, 1.0, stoned), 0.5 * get_booze())
 	if _master_lp == null:
 		if st < 0.01:
 			return

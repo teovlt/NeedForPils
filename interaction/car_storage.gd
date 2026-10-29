@@ -527,7 +527,8 @@ func _ensure_held_collision() -> void:
 		var skip := false
 		var n: Node = m.get_parent()
 		while n and n != _car:
-			if n is RigidBody3D or n is XROrigin3D or n is Camera3D or n.name == "DriverSeat" or n.name == "Burning":
+			if n is RigidBody3D or n is XROrigin3D or n is Camera3D or n.name == "DriverSeat" or n.name == "Burning" \
+					or n.has_meta("no_held_collision"):
 				skip = true
 				break
 			n = n.get_parent()

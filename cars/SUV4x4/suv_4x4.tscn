@@ -21,6 +21,7 @@
 [ext_resource type="PackedScene" path="res://props/items/papers_item.tscn" id="32_papers"]
 [ext_resource type="PackedScene" path="res://props/items/filter_box_item.tscn" id="33_filters"]
 [ext_resource type="PackedScene" path="res://props/items/tobacco_pouch_item.tscn" id="34_tobacco"]
+[ext_resource type="Script" path="res://interaction/drinks/cooler.gd" id="35_cooler"]
 [ext_resource type="Script" path="res://interaction/vr_mirror.gd" id="16_mirror"]
 [ext_resource type="Script" path="res://interaction/vr_door_handle.gd" id="17_handle"]
 [ext_resource type="Script" path="res://cars/SUV4x4/instrument_cluster.gd" id="18_cluster"]
@@ -618,3 +619,6 @@ light_energy = 0.0
 omni_range = 1.9
 omni_attenuation = 1.3
 
+[node name="Cooler" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.852, -0.62)
+script = ExtResource("35_cooler")

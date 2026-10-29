@@ -11,6 +11,7 @@ uniform float flash = 0.0;
 uniform float pulse = 0.0;
 uniform float assimilation = 0.0;
 uniform float chase = 0.0;
+uniform float booze = 0.0;   // bière : voile ambré, bords sombres qui tanguent
 uniform float stoned = 0.0;  // joint : brume chaude, bords flous qui respirent   // poursuivante proche : bords qui clignotent rose / bleu
 
 vec3 palette(float h) {
@@ -40,6 +41,16 @@ void fragment() {
 	float drift = sin(p.x * 3.0 + TIME * 0.25) * 0.08 + sin(p.y * 4.0 - TIME * 0.2) * 0.08;
 	float haze = stoned * (0.08 + 0.05 * breathe + 0.34 * smoothstep(0.45, 1.25, r + drift));
 	layer(pc, a, mix(vec3(0.62, 0.66, 0.52), vec3(0.78, 0.72, 0.6), breathe), haze);
+
+	// Bourré (bière) : voile ambré qui respire, bords sombres qui tanguent lentement
+	// d'un côté à l'autre et vue qui se resserre par vagues.
+	vec2 sway = vec2(sin(TIME * 0.7), sin(TIME * 0.53 + 1.0)) * 0.09 * booze;
+	float rb = length((p + sway) * vec2(1.3, 1.0)) * 2.0;
+	float rb2 = length((p - sway * 1.3) * vec2(1.3, 1.0)) * 2.0;   // second bord décalé : vue qui dédouble
+	float bwave = 0.5 + 0.5 * sin(TIME * 0.9);
+	layer(pc, a, vec3(0.6, 0.4, 0.12), booze * (0.12 + 0.06 * bwave));
+	float edge = max(smoothstep(0.35 - 0.12 * bwave * booze, 1.25, rb), 0.6 * smoothstep(0.45, 1.3, rb2));
+	layer(pc, a, vec3(0.05, 0.025, 0.0), booze * 0.75 * edge);
 
 	// Éclair rose à la prise d'une pilule.
 	layer(pc, a, vec3(1.0, 0.35, 0.8), flash * flash * 0.45);
