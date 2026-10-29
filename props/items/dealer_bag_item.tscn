@@ -1,0 +1,24 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://interaction/deal/dealer_bag.gd" id="1_bag"]
+
+[sub_resource type="BoxShape3D" id="Box_item"]
+size = Vector3(0.05, 0.014, 0.07)
+
+[node name="DealerBag" type="RigidBody3D"]
+collision_layer = 0
+collision_mask = 0
+mass = 0.015
+continuous_cd = true
+freeze = true
+freeze_mode = 1
+
+[node name="Model" type="Node3D" parent="."]
+
+[node name="Shape" type="CollisionShape3D" parent="."]
+shape = SubResource("Box_item")
+
+[node name="Grab" type="Node3D" parent="."]
+script = ExtResource("1_bag")
+item_name = "Sachet de smileys"
+rest_up_axis = 1

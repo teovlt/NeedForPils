@@ -176,6 +176,8 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_cooler(delta)
 		elif autotest_scenario == "enceintes":
 			_run_autotest_speakers(delta)
+		elif autotest_scenario == "sac_a_dos":
+			_run_autotest_backpack(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -5691,4 +5693,103 @@ func _run_autotest_speakers(delta: float) -> void:
 		cam.look_at(cool.global_transform * Vector3(0, 0.12, 0))
 	if at.call(5.0):
 		_shot("glaciere_cote")
+		get_tree().quit()
+
+
+# --- Sac à dos : à côté de la glacière, rabat, sachets de smileys prêts à livrer -------
+
+var _bp := {}
+
+
+func _run_autotest_backpack(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = false
+	var pack := car.get_node("Backpack") as Backpack
+	var eye := car.to_local(car.driver_seat.global_position)
+	if at.call(0.05):
+		$Weather.hour = 13.0
+		for k in ["a", "b"]:
+			var holder := Node3D.new()
+			add_child(holder)
+			var h := VRHandInteractor.new()
+			holder.add_child(h)
+			h.debug_points = [Vector3(0, -100, 0), Vector3(0, -100, 0)]
+			_bp[k] = h
+		_log("AUTOTEST sac à dos : %d sachets, rabat ouvert=%s, zone sachets active=%s" % [pack.bags_left(), pack.flap.is_open(), pack._taker.enabled])
+	var ha: VRHandInteractor = _bp.get("a")
+	var hb: VRHandInteractor = _bp.get("b")
+	if ha == null:
+		return
+	cam.fov = 65.0
+	if _t < 1.0:
+		cam.global_position = car.to_global(eye + Vector3(-0.35, 0.0, -0.05))
+		cam.look_at(pack.global_position + car.global_basis.y * 0.25)
+	elif _t < 3.0:
+		cam.global_position = car.to_global(Vector3(-0.05, 1.62, -0.42))
+		cam.look_at(pack.global_transform * Vector3(0, 0.3, 0))
+	if at.call(0.8):
+		_shot("sac_ferme")
+		pack.flap.toggle()
+	if at.call(1.8):
+		_shot("sac_ouvert")
+		_log("AUTOTEST rabat ouvert=%s, zone sachets active=%s" % [pack.flap.is_open(), pack._taker.enabled])
+	# main A prend le sachet le plus proche, le sort par le haut, l'amène devant soi
+	if at.call(2.0):
+		var b: Node3D = pack.nearest_bag(pack.global_transform * Vector3(0, 0.3, 0))
+		ha.get_parent().global_position = b.global_transform * Vector3(0, 0.05, 0)
+		pack._taker.set_hand_distance(ha, 0.0)
+		pack._taker.grab(ha)
+		var g: DealerBag = pack._taker._held.get(ha)
+		_bp["bag"] = g
+		_log("AUTOTEST sachet sorti : %s, %d smileys, restent %d sachets" % [g.item.name if g else "rien", g.pills_left() if g else 0, pack.bags_left()])
+	var bag_v = _bp.get("bag")
+	var bag: DealerBag = bag_v if is_instance_valid(bag_v) else null
+	var P := car.to_global(Vector3(0.0, 1.15, 0.25))
+	if bag and _t > 2.0 and _t < 6.0 and bag.is_grabbed():
+		var up := pack.global_transform * Vector3(0, 0.75, 0)
+		var mid := car.to_global(Vector3(0.0, 1.5, -0.35))
+		var pos := (pack.global_transform * Vector3(0, 0.3, 0)).lerp(up, smoothstep(2.0, 2.3, _t)).lerp(mid, smoothstep(2.3, 2.6, _t)).lerp(P, smoothstep(2.6, 3.3, _t))
+		ha.get_parent().global_transform = Transform3D(car.global_basis, pos) * bag._offset.affine_inverse()
+		pack._taker.grab_update(ha)
+	if _t >= 3.0 and _t < 6.0:
+		cam.global_position = car.to_global(Vector3(0.0, 1.32, 0.05))
+		cam.look_at(P)
+	if at.call(3.5):
+		bag.toggle()   # A/X de la main qui le tient : ouvert
+	if at.call(4.2):
+		_shot("sachet_ouvert")
+		var n0 := bag.pills_left()
+		var pill: Node3D = bag._nearest_visible(bag.item.global_position)
+		hb.get_parent().global_position = pill.global_position
+		bag._taker.set_hand_distance(hb, 0.0)
+		bag._taker.grab(hb)
+		var got = bag._taker._held.get(hb)
+		_log("AUTOTEST sachet ouvert=%s ; main B prend une pilule : %s (%d -> %d) ; main B accepte le sachet=%s" % [bag.open, got.item.name if got else "rien", n0, bag.pills_left(), bag.accepts_hand(hb)])
+		bag._taker.release(hb)
+	if at.call(4.6):
+		bag.toggle()   # refermé
+	# remis dans le sac
+	if bag and _t > 4.8 and _t < 5.6 and bag.is_grabbed():
+		var mid := car.to_global(Vector3(0.0, 1.5, -0.35))   # entre les deux sièges avant, par le haut
+		var pos2 := P.lerp(mid, smoothstep(4.8, 5.1, _t)).lerp(pack.global_transform * Vector3(0, 0.6, 0), smoothstep(5.1, 5.45, _t))
+		ha.get_parent().global_transform = Transform3D(car.global_basis, pos2) * bag._offset.affine_inverse()
+		pack._taker.grab_update(ha)
+	if at.call(5.6):
+		var n1 := pack.bags_left()
+		# (le trajet entre les sièges avant n'est pas l'objet du test : on y pose le sachet)
+		var above := pack.global_transform * Vector3(0, 0.55, 0)
+		bag.item.global_position = above
+		bag._prev_ok = false
+		ha.get_parent().global_transform = Transform3D(car.global_basis, above) * bag._offset.affine_inverse()
+		pack._taker.grab_update(ha)
+		_log("   sachet à %s (repère du sac)" % [pack.global_transform.affine_inverse() * bag.item.global_position])
+		pack._taker.release(ha)
+		_log("AUTOTEST sachet lâché au-dessus du sac ouvert : %d -> %d sachets" % [n1, pack.bags_left()])
+		pack.flap.toggle()
+	if at.call(6.3):
+		_log("AUTOTEST rabat refermé=%s, zone sachets active=%s" % [not pack.flap.is_open(), pack._taker.enabled])
 		get_tree().quit()

@@ -331,7 +331,9 @@ func ray_hit_distance(origin: Vector3, dir: Vector3, max_t: float, margin: float
 	var t := super.ray_hit_distance(origin, dir, max_t, margin)
 	if t == INF or not open or pills_left() == 0 or item == null:
 		return t
-	var inv := item.global_transform.affine_inverse()
+	# repère du modèle (réduit pour les petits sachets, DealerBag)
+	var model := item.get_node_or_null("Model") as Node3D
+	var inv := (model.global_transform if model else item.global_transform).affine_inverse()
 	var o := inv * origin
 	var d := inv.basis * dir
 	if absf(d.y) < 1e-4:
