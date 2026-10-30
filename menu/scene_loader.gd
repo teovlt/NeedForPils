@@ -3,7 +3,11 @@ extends Node
 ## l'image figée puis grise pendant que Godot charge et prépare la nouvelle scène.
 ##
 ## 1. Un voile sombre « CHARGEMENT » avec une barre de progression apparaît en fondu
-##    devant la caméra (casque ou écran : c'est un objet 3D accroché à la caméra).
+##    autour de la caméra (casque ou écran : ce sont des objets 3D). Il n'est pas collé
+##    à la tête : la sphère sombre suit seulement la position de la tête, et le panneau
+##    reste posé devant le joueur (il ne le rejoint, en douceur, que s'il tourne
+##    franchement la tête). Collé à la tête, il « nageait » pendant les à-coups du
+##    chargement, quand le casque reprojette la dernière image : désagréable en VR.
 ## 2. La scène est chargée dans un fil d'exécution à part : l'ancienne scène continue
 ##    de tourner (le menu reste animé, la tête suit dans le casque).
 ## 3. On change de scène derrière le voile : la dernière image affichée pendant
@@ -16,15 +20,17 @@ signal loading_started(path: String)
 signal loading_finished(path: String)
 
 ## Durée minimum (s) du voile devant la nouvelle scène.
-const MIN_COVER := 0.8
+const MIN_COVER := 0.5
 ## Durée maximum (s) du voile devant la nouvelle scène, même si elle rame encore.
-const MAX_COVER := 8.0
+const MAX_COVER := 4.0
 ## La scène est « stable » après tant d'images de suite plus courtes que STABLE_DELTA.
 const STABLE_FRAMES := 15
 const STABLE_DELTA := 1.0 / 30.0
 const FADE_OUT := 0.7
 const VEIL_DISTANCE := 1.6
 const BAR_WIDTH := 0.7
+## Le panneau revient devant le joueur quand il regarde à plus de tant (rad) à côté.
+const PANEL_FOLLOW_ANGLE := 0.8
 
 const TIPS := [
 	"Attache ta ceinture.",
@@ -43,6 +49,11 @@ var progress := 0.0
 var _packed := {}       # chemin -> PackedScene déjà chargée
 var _requested := {}    # chemin -> true (chargement en arrière-plan lancé)
 var _veil: Node3D
+var _sphere: MeshInstance3D
+var _panel: Node3D       # textes et barre, posés devant le joueur
+var _panel_cam: Camera3D # caméra pour laquelle le panneau a été posé
+var _panel_yaw := 0.0
+var _panel_yaw_target := 0.0
 var _veil_mats: Array[BaseMaterial3D] = []
 var _veil_labels: Array[Label3D] = []
 var _bar_fill: MeshInstance3D
@@ -167,7 +178,8 @@ func _make_veil() -> void:
 	_veil.process_mode = Node.PROCESS_MODE_ALWAYS
 
 	# sphère sombre autour de la tête, dessinée par-dessus tout le reste
-	var sphere := MeshInstance3D.new()
+	_sphere = MeshInstance3D.new()
+	var sphere := _sphere
 	var sm := SphereMesh.new()
 	sm.radius = 3.0
 	sm.height = 6.0
@@ -176,6 +188,9 @@ func _make_veil() -> void:
 	sphere.mesh = sm
 	sphere.material_override = _veil_mat(Color(0.035, 0.04, 0.05), 120)
 	_veil.add_child(sphere)
+	_panel = Node3D.new()
+	_panel_cam = null
+	_veil.add_child(_panel)
 
 	var logo := _veil_label("NEED FOR PILS", 0.0045, Color(1, 0.72, 0.1), Vector3(0, 0.2, -VEIL_DISTANCE))
 	logo.outline_size = 12
@@ -213,7 +228,7 @@ func _veil_quad(size: Vector2, col: Color, priority: int) -> MeshInstance3D:
 	mi.mesh = q
 	mi.material_override = _veil_mat(col, priority)
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_veil.add_child(mi)
+	_panel.add_child(mi)
 	return mi
 
 
@@ -230,28 +245,42 @@ func _veil_label(text: String, pixel: float, col: Color, pos: Vector3) -> Label3
 	l.outline_render_priority = 126
 	l.position = pos
 	l.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_veil.add_child(l)
+	_panel.add_child(l)
 	_veil_labels.append(l)
 	return l
 
 
-## Accroche le voile à la caméra active (elle peut changer : caméra du casque,
-## caméra du mode bureau...).
+## Range le voile sous le parent de la caméra active (l'origine XR : il suit la
+## voiture, pas la tête). La caméra peut changer : casque, mode bureau...
 func _attach_veil() -> void:
 	if not is_instance_valid(_veil):
 		return
 	var cam := get_viewport().get_camera_3d()
-	if cam == null:
-		if _veil.get_parent() == null:
-			var scene := get_tree().current_scene
-			if scene:
-				scene.add_child(_veil)
+	var parent: Node = cam.get_parent() if cam else get_tree().current_scene
+	if parent == null:
 		return
-	if _veil.get_parent() != cam:
+	if _veil.get_parent() != parent:
 		if _veil.get_parent():
 			_veil.get_parent().remove_child(_veil)
-		cam.add_child(_veil)
+		parent.add_child(_veil)
 		_veil.transform = Transform3D.IDENTITY
+	if cam == null:
+		return
+	var head := cam.transform   # repère du parent, comme le voile
+	# la sphère suit la position de la tête, sans tourner avec elle
+	_sphere.position = head.origin
+	# le panneau : posé devant le regard, rejoint le regard seulement s'il s'en écarte trop
+	var fwd := -head.basis.z
+	fwd.y = 0.0
+	var yaw := atan2(-fwd.x, -fwd.z) if fwd.length() > 0.1 else _panel_yaw
+	if _panel_cam != cam or head.origin.is_zero_approx():
+		_panel_cam = cam if not head.origin.is_zero_approx() else null   # casque pas encore suivi
+		_panel_yaw = yaw
+		_panel_yaw_target = yaw
+	elif absf(angle_difference(_panel_yaw, yaw)) > PANEL_FOLLOW_ANGLE:
+		_panel_yaw_target = yaw
+	_panel_yaw = lerp_angle(_panel_yaw, _panel_yaw_target, clampf(get_process_delta_time() * 3.0, 0.0, 1.0))
+	_panel.transform = Transform3D(Basis(Vector3.UP, _panel_yaw), head.origin)
 
 
 func _set_alpha(a: float) -> void:
