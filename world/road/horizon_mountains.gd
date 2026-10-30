@@ -14,6 +14,9 @@ extends Node3D
 @export var base_offset := -40.0
 
 var _noise := FastNoiseLite.new()
+var _mat: StandardMaterial3D
+## Éclairage cuit dans les couleurs (direction fixe), assombri la nuit par la météo.
+const LIGHT_DIR := Vector3(0.45, 0.75, 0.48)
 
 
 func _ready() -> void:
@@ -21,9 +24,13 @@ func _ready() -> void:
 	_noise.seed = random_seed if random_seed != 0 else randi()
 	_noise.frequency = 1.0
 	_noise.fractal_octaves = 3
+	# Sans éclairage (seulement les couleurs et le brouillard) : le relief est dessiné
+	# en premier (son centre est sur la caméra) puis recouvert par tout le reste ;
+	# éclairé, ce dessin pour rien coûtait cher dans le casque.
 	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.vertex_color_use_as_albedo = true
-	mat.roughness = 1.0
+	_mat = mat
 	for ring in [
 		{"r": mountains_radius, "h": Vector2(170.0, 470.0), "freq": 2.2, "snow": 360.0, "seed": 0.0},
 		{"r": hills_radius, "h": Vector2(45.0, 150.0), "freq": 3.5, "snow": 99999.0, "seed": 37.0},
@@ -40,6 +47,11 @@ func _process(_delta: float) -> void:
 	var cam := get_viewport().get_camera_3d()
 	if cam:
 		global_position = cam.global_position + Vector3(0, base_offset, 0)
+	# plus de lumière du soleil (matériau sans éclairage) : on assombrit à la main
+	var weather := get_tree().get_first_node_in_group("weather_system")
+	if weather and weather.has_method("get_darkness"):
+		var light := 1.0 - 0.85 * float(weather.get_darkness())
+		_mat.albedo_color = Color(light, light, light)
 
 
 func _h(angle: float, freq: float, seed_off: float) -> float:
@@ -101,6 +113,9 @@ func _build_ring(cfg: Dictionary) -> ArrayMesh:
 					col = Color(0.12, 0.24, 0.12).lerp(Color(0.18, 0.3, 0.13), g)          # forêt
 				# ordre horaire vu du centre (face avant dans Godot) : dans l'autre sens,
 				# les reliefs étaient éliminés au rendu et restaient invisibles
+				# facettes : lumière cuite (direction fixe), le matériau est sans éclairage
+				col = col * (0.62 + 0.45 * maxf(nrm.dot(LIGHT_DIR.normalized()), 0.0))
+				col.a = 1.0
 				for v in [v0, v2, v1]:
 					verts.append(v)
 					normals.append(nrm)
