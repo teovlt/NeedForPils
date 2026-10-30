@@ -554,6 +554,47 @@ func _update_finger_presses() -> void:
 				hand.pulse(0.3, 0.03)
 
 
+# --- Partie à deux ------------------------------------------------------------------
+
+## Conducteur : où en est la radio (horloge des stations, playlist, morceau et position
+## dans les haut-parleurs).
+func net_state() -> Array:
+	var pos := -1.0
+	if not speakers.is_empty() and speakers[0].playing:
+		pos = speakers[0].get_playback_position()
+	return [_clock, _pl_index, _pl_started, _offsets.duplicate(), _loaded, _track, pos]
+
+
+## Copilote : se cale sur la radio du conducteur (même morceau, même position, à
+## `latency` s près, le temps que le message arrive). Chaque machine tirait son
+## morceau et sa position, et dérivait ensuite : la musique n'était pas la même.
+func net_apply(st: Array, latency: float) -> void:
+	if st.size() < 7:
+		return
+	_clock = float(st[0]) + latency
+	_pl_index = st[1]
+	_pl_started = st[2]
+	var offs: Array = st[3]
+	if offs.size() == _offsets.size():
+		_offsets.assign(offs)
+	var loaded: int = st[4]
+	if loaded != _loaded or loaded < 0:
+		return   # station ou marche différente : la main de l'autre joueur arrive
+	if _track != int(st[5]):
+		_load(_loaded)   # pas le même morceau de la playlist : relancé au bon endroit
+		return
+	var pos: float = st[6]
+	if pos < 0.0 or speakers.is_empty() or not speakers[0].playing:
+		return
+	var target := pos + latency
+	var length := speakers[0].stream.get_length() if speakers[0].stream else 0.0
+	if length > 0.0:
+		target = fmod(target, length)
+	if absf(speakers[0].get_playback_position() - target) > 0.12:
+		for p in speakers:
+			p.seek(target)
+
+
 # --- Mise à jour -----------------------------------------------------------------
 
 func _process(delta: float) -> void:

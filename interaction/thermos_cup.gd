@@ -36,6 +36,7 @@ var _gulp: AudioStreamPlayer3D
 var _gulp_t := 0.0
 var _auto_drink := false
 var _auto_remote := false       # ... demandée par l'autre joueur (partie à deux)
+var _net_drink_t := 0.0         # partie à deux : l'autre joueur nous fait boire (s restantes)
 
 
 func _ready() -> void:
@@ -172,18 +173,23 @@ func _process(delta: float) -> void:
 	if item == null:
 		return
 	var up := item.global_basis.y.normalized().dot(Vector3.UP)
-	var drinking := false
+	var drinking := _net_drink_t > 0.0   # l'autre joueur nous fait boire (net_feed)
+	_net_drink_t = maxf(_net_drink_t - delta, 0.0)
+	# tenue par l'autre joueur : c'est sa machine qui cherche une bouche
+	var remote_held := Net.is_online() and Net.held_by_remote(self)
 	if fill > 0.001:
 		var rate := 0.0
 		var remote := false   # bu par l'autre joueur : l'effet est chez lui
+		var feed_other := false
 		if _auto_drink:
 			rate = drink_rate * 1.2
 			remote = _auto_remote
-		elif is_grabbed():
+		elif is_grabbed() and not remote_held:
 			var m := EdiblePickable.mouth_near(get_tree(), rim_center(), MOUTH_RADIUS)
 			if not m.is_empty() and up < 0.97:
 				rate = drink_rate * lerpf(0.4, 1.0, clampf((0.95 - up) / 0.5, 0.0, 1.0))
 				remote = not m[2]
+				feed_other = remote
 		if rate > 0.0:
 			drinking = true
 			var q := minf(rate * delta, fill)
@@ -192,6 +198,8 @@ func _process(delta: float) -> void:
 			var f := get_tree().get_first_node_in_group(Fatigue.GROUP)
 			if f and not remote:
 				f.drink_coffee(q)
+			if feed_other:
+				Net.feed(self, q)
 			_gulp_t -= delta
 			if _gulp_t <= 0.0:
 				_gulp_t = 0.7
@@ -200,7 +208,7 @@ func _process(delta: float) -> void:
 				for h in _grab_hands:
 					if h.has_method("pulse"):
 						h.pulse(0.15, 0.06)
-		else:
+		elif not drinking:
 			# penchée sans boire : le café se renverse
 			var thresh := lerpf(0.05, 0.75, fill)
 			if up < thresh:
@@ -218,6 +226,22 @@ func _process(delta: float) -> void:
 	if _steam.emitting:
 		_steam.global_position = liquid_surface() + Vector3.UP * 0.01
 	_update_liquid()
+
+
+## Partie à deux : l'autre joueur nous fait boire une gorgée `q` de la tasse.
+func net_feed(q: float) -> void:
+	q = minf(q, fill)
+	if q <= 0.0:
+		return
+	fill -= q
+	drunk += q
+	var f := get_tree().get_first_node_in_group(Fatigue.GROUP)
+	if f:
+		f.drink_coffee(q)
+	if _net_drink_t <= 0.0 and _gulp:
+		_gulp.pitch_scale = randf_range(0.9, 1.1)
+		_gulp.play()
+	_net_drink_t = 0.3
 
 
 func _is_spilling(up: float) -> bool:

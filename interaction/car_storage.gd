@@ -212,8 +212,8 @@ func _physics_process(delta: float) -> void:
 				item.remove_meta("rest_xf")
 				ItemPhysics.begin(item)
 			continue
-		if not item_physics:
-			continue
+		if not item_physics or NetSession.follows_host(item):
+			continue   # (partie à deux, copilote : l'objet suit le conducteur)
 		var st := ItemPhysics.get_state(item)
 		if st.is_empty():
 			st = ItemPhysics.begin(item)

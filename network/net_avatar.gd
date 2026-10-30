@@ -30,7 +30,6 @@ func _init(shirt: Color) -> void:
 func _ready() -> void:
 	head = Node3D.new()
 	head.name = "Head"
-	head.top_level = true
 	add_child(head)
 	var skin := _mat(SKIN)
 	_sphere(head, 0.1, Vector3(0, 0, 0.02), skin, Vector3(0.92, 1.05, 1.0))
@@ -155,7 +154,6 @@ func _limb(part: String, r: float, m: Material) -> void:
 	cm.rings = 2
 	mi.mesh = cm
 	mi.material_override = m
-	mi.top_level = true
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mi)
 	_parts[part] = mi
