@@ -22,6 +22,7 @@
 [ext_resource type="PackedScene" path="res://props/items/filter_box_item.tscn" id="33_filters"]
 [ext_resource type="PackedScene" path="res://props/items/tobacco_pouch_item.tscn" id="34_tobacco"]
 [ext_resource type="Script" path="res://interaction/drinks/cooler.gd" id="35_cooler"]
+[ext_resource type="PackedScene" path="res://props/items/docker_cap_item.tscn" id="36_cap"]
 [ext_resource type="Script" path="res://interaction/deal/backpack.gd" id="36_backpack"]
 [ext_resource type="Script" path="res://interaction/vr_mirror.gd" id="16_mirror"]
 [ext_resource type="Script" path="res://interaction/vr_door_handle.gd" id="17_handle"]
@@ -387,6 +388,9 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.12, 0, 0)
 [node name="FilterBox" parent="Storage/Console" instance=ExtResource("33_filters")]
 
 [node name="TobaccoPouch" parent="Storage/Glovebox" instance=ExtResource("34_tobacco")]
+
+[node name="DockerCap" parent="Storage" instance=ExtResource("36_cap")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.45, 0.85, -0.6)
 
 [node name="GPSMount" type="Node3D" parent="Storage"]
 transform = Transform3D(-0.9396926, 0, 0.34202012, 0, 1, 0, -0.34202012, 0, -0.9396926, 0.12, 1.261, 0.782)

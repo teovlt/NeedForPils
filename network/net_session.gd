@@ -30,6 +30,7 @@ extends Node
 ## - Consommer (pilule, cigarette, joint, bière, café) à la bouche de l'autre joueur :
 ##   la machine de la main qui tient l'objet décide et prévient l'autre (Net.feed ->
 ##   on_feed), qui applique l'effet à son joueur.
+## - Bonnet mis sur une tête : la machine qui le lâche décide (Net.wear -> on_wear).
 
 enum HandEvent { GRAB, RELEASE, TOGGLE, BUTTON }
 
@@ -611,6 +612,8 @@ func _send_items(delta: float) -> void:
 			continue
 		if float(item.get_meta("net_remote_until", -1.0)) > Net.sim_time:
 			continue   # lâché par le copilote : il le pose lui-même
+		if item.has_meta(DockerCap.WORN_META):
+			continue   # sur une tête : il la suit chez les deux
 		var parent_path := String(car.get_path_to(item.get_parent()))
 		var xf: Transform3D = item.transform
 		var last: Array = _item_sent.get(item.get_instance_id(), [])
@@ -627,7 +630,7 @@ func on_items(list: Array) -> void:
 		return
 	for e in list:
 		var item := _item_named(e[0])
-		if item == null or not follows_host(item):
+		if item == null or not follows_host(item) or item.has_meta(DockerCap.WORN_META):
 			continue
 		var grab := item.get_node_or_null("Grab") as VRInteractable
 		if grab and grab.is_grabbed():
@@ -697,7 +700,7 @@ func _send_item_rest(item: RigidBody3D) -> void:
 	if not Net.is_online() or not is_instance_valid(item) or not item.is_inside_tree() or not car.is_ancestor_of(item):
 		return   # jeté dehors : il est resté sur la route, on laisse
 	var grab := item.get_node_or_null("Grab") as VRInteractable
-	if grab and grab.is_grabbed():
+	if grab and grab.is_grabbed() or item.has_meta(DockerCap.WORN_META):
 		return
 	Net.rx_item.rpc(String(item.name), String(car.get_path_to(item.get_parent())), item.transform)
 
@@ -707,7 +710,7 @@ func on_item(item_name: String, parent_path: String, local_xf: Transform3D) -> v
 		return
 	var item := _item_named(item_name)
 	var parent := car.get_node_or_null(NodePath(parent_path)) as Node3D
-	if item == null or parent == null:
+	if item == null or parent == null or item.has_meta(DockerCap.WORN_META):
 		return
 	var grab := item.get_node_or_null("Grab") as VRInteractable
 	if grab and grab.is_grabbed():
@@ -728,6 +731,17 @@ func on_item(item_name: String, parent_path: String, local_xf: Transform3D) -> v
 	ItemPhysics.stop(item)
 	item.transform = local_xf
 	ItemPhysics.begin(item)
+
+
+## L'autre joueur a mis le bonnet `item_name` sur une tête (Net.wear) : pareil ici.
+func on_wear(item_name: String, driver_seat: bool) -> void:
+	var item := _item_named(item_name)
+	var cap := item.get_node_or_null("Grab") as DockerCap if item else null
+	if cap == null:
+		return
+	Net.applying_remote = true
+	cap.wear(driver_seat)
+	Net.applying_remote = false
 
 
 # --- Autre joueur -> chez soi ----------------------------------------------------------

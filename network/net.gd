@@ -151,6 +151,14 @@ func _flush_feeds() -> void:
 	_feed_timer = 0.0
 
 
+## Bonnet (DockerCap) mis sur la tête du conducteur ou du copilote : la machine qui l'a
+## lâché décide, l'autre le met sur la même tête (par le nom de l'objet : son chemin
+## n'est pas forcément le même chez les deux à ce moment-là).
+func wear(item: Node, driver_seat: bool) -> void:
+	if is_online() and not applying_remote:
+		rx_wear.rpc(String(item.name), driver_seat)
+
+
 ## Action clavier (raccourci) : faite chez soi et rejouée chez l'autre joueur.
 func perform(node: Node, method: StringName, args: Array = []) -> void:
 	node.callv(method, args)
@@ -481,6 +489,11 @@ func rx_call(path: String, method: String, args: Array) -> void:
 @rpc("any_peer", "reliable", "call_remote", 2)
 func rx_item(item_name: String, parent_path: String, local_xf: Transform3D) -> void:
 	_to_session(&"on_item", [item_name, parent_path, local_xf])
+
+
+@rpc("any_peer", "reliable", "call_remote", 2)
+func rx_wear(item_name: String, driver_seat: bool) -> void:
+	_to_session(&"on_wear", [item_name, driver_seat])
 
 
 @rpc("authority", "reliable", "call_remote", 2)
