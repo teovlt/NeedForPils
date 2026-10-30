@@ -48,8 +48,6 @@ addiction_path = NodePath("../PillAddiction")
 script = ExtResource("26_pursuer")
 road_path = NodePath("../RoadGenerator")
 car_path = NodePath("../SUV4x4")
-far_gap = null
-catch_up_bonus = null
 
 [node name="ChaseDirector" type="Node" parent="." unique_id=610801487]
 script = ExtResource("27_director")
