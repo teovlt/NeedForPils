@@ -3,7 +3,8 @@ extends Node3D
 ## Corps très simple de l'autre joueur (partie à deux), assis sur son siège : tête avec
 ## cheveux, nez et deux yeux qui clignent, cou, buste, bras qui rejoignent ses mains
 ## (coude plié vers le bas et l'extérieur), cuisses et tibias jusqu'au plancher.
-## Le conducteur a une barbe rousse (collier, favoris, moustache, pointe au menton).
+## Le conducteur a les cheveux et une barbe roux (collier, favoris, moustache, pointe au
+## menton) ; le copilote porte des lunettes (monture rectangulaire fine en métal noir).
 ## Tout est en formes de base, posé à chaque image par `pose()` (repère de la voiture).
 
 const SKIN := Color(0.86, 0.67, 0.53)
@@ -20,15 +21,17 @@ var head: Node3D
 
 var _shirt: Color
 var _beard := false
+var _glasses := false
 var _parts := {}             # nom -> MeshInstance3D posés chaque image
 var _eyes: Array[Node3D] = []
 var _blink_t := 3.0
 var _blink := 0.0
 
 
-func _init(shirt: Color, beard := false) -> void:
+func _init(shirt: Color, beard := false, glasses := false) -> void:
 	_shirt = shirt
 	_beard = beard
+	_glasses = glasses
 
 
 func _ready() -> void:
@@ -37,7 +40,7 @@ func _ready() -> void:
 	add_child(head)
 	var skin := _mat(SKIN)
 	_sphere(head, 0.1, Vector3(0, 0, 0.02), skin, Vector3(0.92, 1.05, 1.0))
-	var hair := _sphere(head, 0.104, Vector3(0, 0.03, 0.03), _mat(HAIR), Vector3(0.95, 0.85, 1.03))
+	var hair := _sphere(head, 0.104, Vector3(0, 0.03, 0.03), _mat(BEARD if _beard else HAIR), Vector3(0.95, 0.85, 1.03))
 	(hair.mesh as SphereMesh).is_hemisphere = true
 	(hair.mesh as SphereMesh).height = 0.104   # demi-sphère : hauteur = rayon
 	_sphere(head, 0.018, Vector3(0, -0.015, -0.085), skin)   # nez
@@ -51,6 +54,8 @@ func _ready() -> void:
 		_eyes.append(eye)
 	if _beard:
 		_add_beard()
+	if _glasses:
+		_add_glasses()
 	var shirt := _mat(_shirt)
 	var pants := _mat(PANTS)
 	_limb("Neck", 0.04, skin)
@@ -136,6 +141,58 @@ func _add_beard() -> void:
 	for side in [-1.0, 1.0]:
 		_sphere(head, 0.024, Vector3(0.08 * side, -0.005, 0.0), m, Vector3(0.6, 1.9, 1.2))       # favori
 		_sphere(head, 0.02, Vector3(0.019 * side, -0.043, -0.086), m, Vector3(1.5, 0.55, 0.7))   # moustache
+
+
+## Lunettes : deux cercles rectangulaires fins devant les yeux (barre du haut plus
+## épaisse), pont, plaquettes sur le nez, branches jusqu'aux oreilles, verres à peine
+## teintés (tête : visage vers -Z).
+func _add_glasses() -> void:
+	var metal := _mat(Color(0.05, 0.05, 0.06))
+	metal.metallic = 0.6
+	metal.roughness = 0.4
+	var z := -0.097
+	var w := 0.05
+	var h := 0.026
+	var y := 0.018
+	for side in [-1.0, 1.0]:
+		var cx: float = 0.037 * side
+		_bar(Vector3(cx, y + h * 0.5, z), Vector3(w, 0.005, 0.004), metal)       # haut (épais)
+		_bar(Vector3(cx, y - h * 0.5, z), Vector3(w, 0.0022, 0.0025), metal)     # bas
+		_bar(Vector3(cx + w * 0.5 * side, y, z), Vector3(0.0028, h, 0.003), metal)   # côté extérieur
+		_bar(Vector3(cx - w * 0.5 * side, y, z), Vector3(0.0022, h, 0.0025), metal)  # côté nez
+		# verre
+		var lens := MeshInstance3D.new()
+		var q := QuadMesh.new()
+		q.size = Vector2(w, h)
+		lens.mesh = q
+		var lm := StandardMaterial3D.new()
+		lm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		lm.albedo_color = Color(0.75, 0.85, 0.9, 0.12)
+		lm.roughness = 0.05
+		lm.cull_mode = BaseMaterial3D.CULL_DISABLED
+		lens.material_override = lm
+		lens.position = Vector3(cx, y, z)
+		lens.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		head.add_child(lens)
+		# charnière, puis branche jusqu'à l'oreille
+		var hinge_x: float = 0.064 * side
+		var temple_x: float = 0.093 * side
+		_bar(Vector3((hinge_x + temple_x) * 0.5, y + h * 0.4, z + 0.004), Vector3(absf(temple_x - hinge_x) + 0.004, 0.005, 0.005), metal)
+		_bar(Vector3(temple_x, y + h * 0.35, (z + 0.03) * 0.5), Vector3(0.004, 0.005, 0.03 - z), metal)
+		# plaquette sur le nez
+		_sphere(head, 0.004, Vector3(0.011 * side, y - 0.006, z + 0.008), _mat(Color(0.85, 0.85, 0.85)))
+	_bar(Vector3(0, y + h * 0.42, z), Vector3(0.026, 0.004, 0.004), metal)   # pont
+
+
+func _bar(pos: Vector3, size: Vector3, m: Material) -> void:
+	var mi := MeshInstance3D.new()
+	var b := BoxMesh.new()
+	b.size = size
+	mi.mesh = b
+	mi.material_override = m
+	mi.position = pos
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	head.add_child(mi)
 
 
 func _mat(c: Color) -> StandardMaterial3D:
