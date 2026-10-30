@@ -22,7 +22,9 @@ extends Node
 ##   resserre. Voix « je suis bourré » une fois par cuite (audio/voice/bourre.wav).
 ##
 ## Aucun effet ne bouge la caméra (confort VR) : un filtre est posé devant les yeux
-## et la conduite est perturbée via SUV4x4.drug_*.
+## et la conduite est perturbée via SUV4x4.drug_*. Le filtre (un quad plein écran par
+## œil) et le réglage des couleurs (une passe plein écran) ne sont actifs que quand un
+## effet se voit : sobre et sans manque, rien n'est dessiné en plus (casque).
 
 signal pill_taken(count: int)
 signal blackout_started
@@ -332,7 +334,11 @@ func _process(delta: float) -> void:
 	if _blackout > 0.0:
 		# fondu au noir rapide, retour progressif sur la dernière seconde
 		blackout = clampf((blackout_duration - _blackout) / 0.4, 0.0, 1.0) * clampf(_blackout / 1.0, 0.0, 1.0)
-	if _overlay_mat:
+	if _overlay:
+		var cv := craving * (1.0 - high)
+		_overlay.visible = cv > 0.15 or drunk > 0.002 or blackout > 0.002 or curtain > 0.002 \
+				or chase > 0.002 or _flash > 0.002 or stoned > 0.002 or alcohol > 0.05
+	if _overlay_mat and _overlay.visible:
 		_overlay_mat.set_shader_parameter("craving", craving * (1.0 - high))
 		_overlay_mat.set_shader_parameter("drunk", drunk)
 		_overlay_mat.set_shader_parameter("blackout", maxf(blackout, curtain))
@@ -346,13 +352,15 @@ func _process(delta: float) -> void:
 		_overlay_mat.set_shader_parameter("hiccup", _hiccup_kick)
 	if _env:
 		# Couleurs : délavées en manque, saturées sous pilule.
-		_env.adjustment_enabled = true
 		var sat := lerpf(1.0, 0.2, craving * (1.0 - high)) + 0.8 * high * (1.0 - assimilation) + 0.6 * drunk
 		var st := smoothstep(0.0, 1.0, stoned)
 		var bz := get_booze()
 		_env.adjustment_saturation = sat + 0.25 * st + 0.35 * bz
 		_env.adjustment_contrast = 1.0 + 0.15 * drunk - 0.18 * st + 0.12 * bz
 		_env.adjustment_brightness = 1.0 + 0.06 * st
+		# au neutre, pas de passe de réglage des couleurs (coûteuse dans le casque)
+		_env.adjustment_enabled = absf(_env.adjustment_saturation - 1.0) > 0.01 \
+				or absf(_env.adjustment_contrast - 1.0) > 0.01 or absf(_env.adjustment_brightness - 1.0) > 0.01
 	_update_stoned_audio()
 	# Le décor se teinte doucement (paramètre global lu par nature_tint.gdshader).
 	_shown_assimilation = move_toward(_shown_assimilation, assimilation, delta * 0.1)

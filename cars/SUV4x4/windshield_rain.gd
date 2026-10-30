@@ -64,6 +64,7 @@ func _ready() -> void:
 	_img = Image.create_from_data(resolution.x, resolution.y, false, Image.FORMAT_R8, _bytes)
 	_tex = ImageTexture.create_from_image(_img)
 	_mat.set_shader_parameter("wet_map", _tex)
+	visible = false   # sèche au départ
 
 
 ## Humidité moyenne (0-1) de la zone balayée côté conducteur : mesure de la visibilité.
@@ -111,6 +112,7 @@ func update_rain(rain: float, wiper_angle: float, light: float, delta: float, st
 	if grow == 0.0 and dry == 0.0 and not wiping:
 		return
 
+	var wettest := 0.0
 	var rmin2 := blade_range.x * blade_range.x
 	var rmax2 := blade_range.y * blade_range.y
 	var idx := 0
@@ -133,8 +135,11 @@ func update_rain(rain: float, wiper_angle: float, light: float, delta: float, st
 							w = minf(w, _residual * (0.5 + fposmod(float(idx) * 0.37, 1.0)))
 							break
 			_wet[idx] = w
+			wettest = maxf(wettest, w)
 			_bytes[idx] = int(w * 255.0)
 			idx += 1
+	# vitre sèche : pas de dessin (le flou relit l'image : passe coûteuse)
+	visible = wettest > 0.004
 	_img.set_data(resolution.x, resolution.y, false, Image.FORMAT_R8, _bytes)
 	_tex.update(_img)
 	_mat.set_shader_parameter("light", light)

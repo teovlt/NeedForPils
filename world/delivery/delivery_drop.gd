@@ -77,6 +77,7 @@ func _decorate(model: Node3D) -> void:
 		l.position = Vector3(0.05, 0.2, 0.201)
 		l.rotation_degrees = Vector3(0, 0, rng.randf_range(-12, 12))
 		l.set_meta("_vr_outline", true)
+		l.visibility_range_end = 60.0   # écriture illisible au-delà
 		model.add_child(l)
 	else:
 		var l := Label3D.new()
@@ -89,6 +90,7 @@ func _decorate(model: Node3D) -> void:
 		l.position = Vector3(0.0967, 1.22, 0.0)
 		l.rotation_degrees = Vector3(0, 90, 0)
 		l.set_meta("_vr_outline", true)
+		l.visibility_range_end = 60.0   # écriture illisible au-delà
 		model.add_child(l)
 
 

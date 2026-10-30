@@ -264,6 +264,7 @@ func label(text: String, pos: Vector3, c: Color, size := 64, rot := Vector3.ZERO
 	l.rotation_degrees = rot
 	l.shaded = not glow
 	l.double_sided = false
+	l.visibility_range_end = 250.0   # illisible au-delà
 	(parent if parent else self).add_child(l)
 	return l
 

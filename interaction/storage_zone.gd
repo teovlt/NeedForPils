@@ -38,6 +38,18 @@ func _ready() -> void:
 			_place(c as RigidBody3D, false)
 
 
+## Compartiment bien fermé (couvercle à moins de 2°) : ce qu'il contient ne se voit
+## pas, on ne le dessine pas (casque : moins d'objets à dessiner).
+func _hide_if_shut(item: RigidBody3D) -> void:
+	var shut := _hinge != null and absf(_hinge.angle) < deg_to_rad(2.0) and not _hinge.is_grabbed()
+	if shut and item.visible:
+		item.visible = false
+		item.set_meta("_zone_hidden", true)
+	elif not shut and item.has_meta("_zone_hidden"):
+		item.remove_meta("_zone_hidden")
+		item.visible = true
+
+
 func _physics_process(delta: float) -> void:
 	var open := is_accessible()
 	if _car == null:
@@ -49,6 +61,7 @@ func _physics_process(delta: float) -> void:
 		if not c is RigidBody3D:
 			continue
 		var item := c as RigidBody3D
+		_hide_if_shut(item)
 		var grab := item.get_node_or_null("Grab") as VRPickable
 		if grab:
 			grab.enabled = open

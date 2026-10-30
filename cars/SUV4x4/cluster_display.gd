@@ -2,7 +2,8 @@ class_name ClusterDisplay
 extends Node2D
 ## Dessin du combiné d'instruments (compteur à aiguille, heure, rapport, voyants).
 ## Pas de météo ni de compteur d'arbres : seulement les infos de conduite.
-## Lit l'état du 4x4 (SUV4x4) à chaque image.
+## Lit l'état du 4x4 (SUV4x4) et se redessine `fps` fois par seconde (assez pour
+## l'aiguille ; chaque image coûtait un dessin 2D + un rendu de l'écran pour rien).
 
 const MAX_KMH := 160.0
 const BG := Color(0.02, 0.025, 0.035)
@@ -14,6 +15,10 @@ var size := Vector2(640, 240)
 var _shown_kmh := 0.0
 var _blink := 0.0
 var _font: Font
+var fps := 30.0
+var _redraw_t := 0.0
+## Viewport de l'écran : rendu seulement quand le dessin a changé.
+var viewport: SubViewport
 
 
 func _ready() -> void:
@@ -25,7 +30,13 @@ func _process(delta: float) -> void:
 	if car:
 		var kmh := absf(car.forward_speed) * 3.6
 		_shown_kmh = lerpf(_shown_kmh, kmh, clampf(delta * 8.0, 0.0, 1.0))
+	_redraw_t -= delta
+	if _redraw_t > 0.0:
+		return
+	_redraw_t = 1.0 / fps
 	queue_redraw()
+	if viewport:
+		viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 
 
 func _text(center_x: float, baseline_y: float, text: String, font_size: int, color: Color) -> void:

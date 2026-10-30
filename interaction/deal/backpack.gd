@@ -37,6 +37,7 @@ const RETURN_TIME := 0.35
 var flap: VRHingeInteractable
 var carry: Carry
 var _slots: Array[Node3D] = []
+var _bags_root: Node3D   # parent des sachets (masqué rabat fermé)
 var _taker: SachetTaker
 var _taken := 0
 var _home: Transform3D           # place sur la banquette (repère de la voiture)
@@ -172,6 +173,7 @@ func _ready() -> void:
 	flap_mesh.transform = Transform3D(fxf.basis, Vector3.ZERO)
 	flap.opened.connect(refresh_state)
 	flap.closed.connect(refresh_state)
+	flap.grabbed.connect(func(_h): refresh_state())
 	parts.queue_free()
 	# affaires au fond (sweat roulé), les sachets debout par-dessus
 	var stuff := MeshInstance3D.new()
@@ -189,6 +191,7 @@ func _ready() -> void:
 	root.name = "Bags"
 	root.set_meta("no_held_collision", true)   # la main plonge dans le sac
 	add_child(root)
+	_bags_root = root
 	var n := randi_range(bag_range.x, bag_range.y)
 	for i in SLOTS:
 		var b := _sachet_visual()
@@ -301,6 +304,8 @@ func bags_left() -> int:
 func refresh_state() -> void:
 	if _taker:
 		_taker.enabled = (flap.is_open() and bags_left() > 0) or _taker.is_grabbed()
+		# rabat fermé : les sachets (et leurs smileys) ne se voient pas, on ne les dessine pas
+		_bags_root.visible = flap.is_open() or flap.is_grabbed() or _taker.is_grabbed()
 
 
 func distance_to_bags(p: Vector3) -> float:
