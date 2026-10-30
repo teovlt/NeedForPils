@@ -19,20 +19,38 @@ extends Node
 ##   prises du bout de l'index, et appuis au toucher (klaxon, radio, comodos). Un objet
 ##   lâché ne retombe pas forcément pareil chez les deux : celui qui l'a lâché envoie
 ##   ensuite où il s'est posé.
+## - Tous les messages de position sont datés avec le temps de simulation (Net.sim_time)
+##   et rejoués un peu dans le passé (NetClock) : voiture, tête et mains de l'autre
+##   joueur glissent entre deux messages au lieu de sauter de l'un à l'autre, et ses
+##   gestes (saisir, lâcher) arrivent au moment où sa main affichée y est.
+## - Objets en vrac dans la voiture : le conducteur fait foi. Le copilote ne les fait plus
+##   glisser ni sauter lui-même (chaque machine les faisait bouger à sa façon) : il
+##   reçoit leurs places (on_items), sauf ceux qu'il vient de lâcher, qu'il pose lui-même.
+## - Radio : le copilote cale le morceau et sa position sur ceux du conducteur.
+## - Consommer (pilule, cigarette, joint, bière, café) à la bouche de l'autre joueur :
+##   la machine de la main qui tient l'objet décide et prévient l'autre (Net.feed ->
+##   on_feed), qui applique l'effet à son joueur.
 
 enum HandEvent { GRAB, RELEASE, TOGGLE, BUTTON }
 
-## Retard de l'interpolation de la voiture chez le copilote (s).
-const INTERP_DELAY := 0.1
 ## Au-delà de la dernière position reçue, on prolonge le mouvement au plus ce temps (s).
 const MAX_EXTRAPOLATION := 0.25
+## Fréquence d'envoi de la voiture et de la tête et des mains (par seconde) : la moitié
+## de l'image du casque (72 Hz) suffit, l'autre machine interpole entre deux messages ;
+## deux fois moins de paquets dans le Wi-Fi (moins de gigue) et moins de travail.
+const POSE_RATE := 36.0
 ## Fréquence d'envoi des animaux (par seconde).
 const ANIMAL_RATE := 15.0
+## Fréquence d'envoi des objets en vrac qui bougent (par seconde), et de tous (rattrapage).
+const ITEM_RATE := 15.0
+const ITEM_FULL_PERIOD := 2.0
+## Le copilote rapproche l'objet de la place reçue à cette vitesse (1/s).
+const ITEM_FOLLOW_RATE := 18.0
 ## Délai (s) après un lâcher avant d'envoyer la position où l'objet s'est posé.
 const ITEM_REST_DELAY := 2.0
 ## Méthodes qu'un message de l'autre joueur a le droit d'appeler (raccourcis clavier).
 const ALLOWED_CALLS := ["toggle", "press", "unpress", "_key_shortcut", "_press", "toggle_power", "set_volume",
-	"set_notch", "step"]
+	"set_notch", "step", "net_roll", "net_receive"]
 
 var car: SUV4x4
 var _road: RoadGenerator
@@ -59,16 +77,27 @@ const HAND_SCENES := ["res://addons/godot-xr-tools/hands/scenes/lowpoly/left_han
 	"res://addons/godot-xr-tools/hands/scenes/lowpoly/right_hand_low.tscn"]
 
 var _local_hands := {}            # main locale -> indice (0 gauche, 1 droite, 2 souris)
-var _snapshots: Array = []        # copilote : [temps conducteur, Transform3D, vitesse, vitesse angulaire]
-var _clock_offset := 0.0
-var _clock_ready := false
+var _snapshots: Array = []        # copilote : [temps conducteur, Transform3D, vitesse, vitesse angulaire, police, rivaux, message]
+var _car_clock := NetClock.new()
+var _pose_clock := NetClock.new()
+var _poses: Array = []            # [temps de l'autre, pose]
+var _hand_events: Array = []      # gestes de l'autre en attente : [temps de l'autre, arguments]
+var _items_timer := 0.0
+var _items_full_timer := 0.0
+var _item_list: Array = []        # conducteur : objets de la voiture (rafraîchi chaque seconde)
+var _item_list_timer := 0.0
+var _item_sent := {}              # conducteur : id -> [chemin du parent, transformation envoyée]
+var _item_names := {}             # copilote : nom -> objet
+var _followed: Array = []         # copilote : objets qui suivent les places reçues
 var _world_timer := 0.0
-var _last_car: Array = []
 var _animal_timer := 0.0
 var _last_text: Array = []
 var _props_sig := ""
 var _controls_sent := [0.0, false]
 var _controls_timer := 0.0
+var _car_send_t := 0.0
+var _pose_send_t := 0.0
+var _hands_scan_t := 0.0
 
 
 func _ready() -> void:
@@ -85,6 +114,8 @@ func _ready() -> void:
 	_animals = main.get_node_or_null("RoadGenerator/Animals") as AnimalManager
 	_deliveries = main.get_node_or_null("RoadGenerator/Deliveries") as DeliveryManager
 	_rivals = _director._rivals if _director else null
+	_car_clock.send_interval = 1.0 / POSE_RATE
+	_pose_clock.send_interval = 1.0 / POSE_RATE
 	if Net.is_copilot():
 		# le copilote applique la position reçue avant que le reste de la scène bouge
 		process_physics_priority = -100
@@ -154,12 +185,21 @@ func _setup_copilot() -> void:
 func _physics_process(delta: float) -> void:
 	if car == null or not Net.is_online():
 		return
-	_find_local_hands()
+	_hands_scan_t -= delta
+	if _hands_scan_t <= 0.0:
+		_hands_scan_t = 0.5   # (mains apparues : rare, pas besoin de chercher à chaque image)
+		_find_local_hands()
 	if Net.is_copilot():
 		_apply_car()
 		_send_controls(delta)
+		_follow_items(delta)
 	else:
-		_send_car()
+		_car_send_t -= delta
+		if _car_send_t <= 0.0:
+			_car_send_t += 1.0 / POSE_RATE
+			_car_send_t = maxf(_car_send_t, 0.0)
+			_send_car()
+		_send_items(delta)
 		_world_timer -= delta
 		if _world_timer <= 0.0:
 			_world_timer = 0.5
@@ -174,9 +214,12 @@ class _LateSender extends Node:
 	func _ready() -> void:
 		process_physics_priority = 1000
 
-	func _physics_process(_delta: float) -> void:
+	func _physics_process(delta: float) -> void:
 		if session.car and Net.is_online():
-			session._send_pose()
+			session._pose_send_t -= delta
+			if session._pose_send_t <= 0.0:
+				session._pose_send_t = maxf(session._pose_send_t + 1.0 / POSE_RATE, 0.0)
+				session._send_pose()
 
 
 ## Décalage du monde local (recentrages de la route) : absolu = local + décalage.
@@ -194,10 +237,6 @@ func _from_abs(xf: Transform3D) -> Transform3D:
 	return xf
 
 
-func _now() -> float:
-	return Time.get_ticks_usec() / 1000000.0
-
-
 # --- Voiture : conducteur -> copilote -------------------------------------------------
 
 func _send_car() -> void:
@@ -210,7 +249,7 @@ func _send_car() -> void:
 	if _rivals:
 		rivals = _rivals.net_state()
 		rivals[1] = _to_abs(rivals[1])
-	Net.rx_car.rpc([_now(), _to_abs(car.global_transform), car.linear_velocity, car.forward_speed,
+	Net.rx_car.rpc([Net.sim_time, _to_abs(car.global_transform), car.linear_velocity, car.forward_speed,
 		car.throttle_input, car.brake_input, car.auto_gear, car.shift_timer, car.engine_state,
 		w.input_target_angle / deg_to_rad(w.max_rotation_deg), car.angular_velocity, police, rivals])
 
@@ -219,27 +258,21 @@ func on_car(data: Array) -> void:
 	if not Net.is_copilot() or data.size() < 13:
 		return
 	var t: float = data[0]
-	var offset := t - _now()
-	if not _clock_ready or absf(offset - _clock_offset) > 0.5:
-		_clock_offset = offset
-		_clock_ready = true
-		_snapshots.clear()
-	elif offset > _clock_offset:
-		_clock_offset = offset   # paquet moins retardé : c'est le vrai décalage
-	else:
-		_clock_offset = lerpf(_clock_offset, offset, 0.01)   # suit lentement une dérive
+	_car_clock.sample(t, Net.sim_time)
 	if not _snapshots.is_empty() and t <= _snapshots[-1][0]:
 		return
-	_snapshots.append([t, data[1], data[2], data[10], data[11], data[12]])
-	while _snapshots.size() > 30:
+	_snapshots.append([t, data[1], data[2], data[10], data[11], data[12], data])
+	while _snapshots.size() > 40:
 		_snapshots.pop_front()
-	_last_car = data
 
 
+## Position de la voiture du copilote : courbe d'Hermite entre les deux messages qui
+## encadrent l'instant affiché (positions et vitesses : pas de cassure de trajectoire
+## à chaque message), orientation interpolée.
 func _apply_car() -> void:
-	if _snapshots.is_empty():
+	if _snapshots.is_empty() or not _car_clock.is_ready():
 		return
-	var rt := _now() + _clock_offset - INTERP_DELAY
+	var rt := _car_clock.render_time(Net.sim_time)
 	while _snapshots.size() > 2 and _snapshots[1][0] <= rt:
 		_snapshots.pop_front()
 	var a: Array = _snapshots[0]
@@ -250,13 +283,28 @@ func _apply_car() -> void:
 	var police_xf: Transform3D = police[1] if not police.is_empty() else Transform3D.IDENTITY
 	var rivals: Array = a[5]
 	var rivals_xf: Transform3D = rivals[1] if not rivals.is_empty() else Transform3D.IDENTITY
+	var shown: Array = a[6]
 	if _snapshots.size() >= 2 and rt >= a[0]:
 		var b: Array = _snapshots[1]
 		var span: float = b[0] - a[0]
 		var w := clampf((rt - a[0]) / span, 0.0, 1.0) if span > 0.0 else 1.0
-		xf = a[1].interpolate_with(b[1], w)
-		vel = (a[2] as Vector3).lerp(b[2], w)
-		ang = (a[3] as Vector3).lerp(b[3], w)
+		if rt > b[0]:
+			# plus de message assez récent : on prolonge un peu le mouvement
+			xf = b[1]
+			xf.origin += (b[2] as Vector3) * minf(rt - b[0], MAX_EXTRAPOLATION)
+			vel = b[2]
+			ang = b[3]
+		else:
+			var p0: Vector3 = (a[1] as Transform3D).origin
+			var p1: Vector3 = (b[1] as Transform3D).origin
+			var w2 := w * w
+			var w3 := w2 * w
+			var pos := p0 * (2.0 * w3 - 3.0 * w2 + 1.0) + (a[2] as Vector3) * span * (w3 - 2.0 * w2 + w) \
+				+ p1 * (-2.0 * w3 + 3.0 * w2) + (b[2] as Vector3) * span * (w3 - w2)
+			var b0 := (a[1] as Transform3D).basis.orthonormalized()
+			xf = Transform3D(b0.slerp((b[1] as Transform3D).basis.orthonormalized(), w), pos)
+			vel = (a[2] as Vector3).lerp(b[2], w)
+			ang = (a[3] as Vector3).lerp(b[3], w)
 		var pb: Array = b[4]
 		if not police.is_empty() and not pb.is_empty():
 			police_xf = police_xf.interpolate_with(pb[1], w) if police[0] and pb[0] else pb[1]
@@ -265,9 +313,7 @@ func _apply_car() -> void:
 		if not rivals.is_empty() and not rb.is_empty():
 			rivals_xf = rivals_xf.interpolate_with(rb[1], w) if rivals[0] and rb[0] else rb[1]
 			rivals = rb
-		if rt > b[0]:
-			xf = b[1]
-			xf.origin += (b[2] as Vector3) * minf(rt - b[0], MAX_EXTRAPOLATION)
+		shown = b[6]
 	if _pursuer and not police.is_empty():
 		_pursuer.net_apply(police, _from_abs(police_xf))
 	if _rivals and not rivals.is_empty():
@@ -276,14 +322,14 @@ func _apply_car() -> void:
 	car.linear_velocity = vel
 	car.angular_velocity = ang
 	car.engine_force = 0.0
-	if _last_car.size() >= 10:
-		car.forward_speed = _last_car[3]
-		car.throttle_input = _last_car[4]
-		car.brake_input = _last_car[5]
-		car.auto_gear = _last_car[6]
-		car.shift_timer = _last_car[7]
-		car.engine_state = _last_car[8]
-		car.external_steer = _last_car[9]
+	# tableau de bord et volant : ceux du message affiché (pas du dernier reçu, en avance)
+	car.forward_speed = shown[3]
+	car.throttle_input = shown[4]
+	car.brake_input = shown[5]
+	car.auto_gear = shown[6]
+	car.shift_timer = shown[7]
+	car.engine_state = shown[8]
+	car.external_steer = shown[9]
 
 
 # --- Police, arbres, animaux, textes (conducteur -> copilote) --------------------------
@@ -393,6 +439,8 @@ func _world_state() -> Dictionary:
 		st["paused"] = addiction.paused
 	if _deliveries:
 		st["deliv"] = _deliveries.net_state()
+	if car.radio and car.radio.has_method("net_state"):
+		st["radio"] = car.radio.net_state()
 	return st
 
 
@@ -420,6 +468,19 @@ func on_world(st: Dictionary) -> void:
 		addiction.paused = st["paused"]
 	if _deliveries and st.has("deliv"):
 		_deliveries.net_apply(st["deliv"])
+	if st.has("radio") and car.radio and car.radio.has_method("net_apply"):
+		car.radio.net_apply(st["radio"], _latency())
+
+
+## Temps (s) que met un message pour arriver (moitié de l'aller-retour mesuré par ENet).
+func _latency() -> float:
+	var peer := multiplayer.multiplayer_peer as ENetMultiplayerPeer
+	if peer == null:
+		return 0.0
+	var p := peer.get_peer(1)
+	if p == null:
+		return 0.0
+	return p.get_statistic(ENetPacketPeer.PEER_ROUND_TRIP_TIME) / 2000.0
 
 
 ## L'autre joueur a livré un sachet.
@@ -469,16 +530,18 @@ func _send_pose() -> void:
 				if not vis.is_empty():
 					vis[0] = inv * (vis[0] as Transform3D)
 				touch[i] = [vh.can_touch(), inv * vh.fingertip_position(), inv * vh.palm_position(), vis]
-	Net.rx_pose.rpc([inv * cam.global_transform, hands[0], hands[1], hands[2], touch[0], touch[1]])
+	Net.rx_pose.rpc([inv * cam.global_transform, hands[0], hands[1], hands[2], touch[0], touch[1], Net.sim_time])
 
 
 func _on_local_interaction(kind: int, target: Node, hand: Node3D) -> void:
 	if not Net.is_online() or not is_instance_valid(target) or not _local_hands.has(hand):
 		return
 	var path := String(get_parent().get_path_to(target))
-	Net.rx_hand.rpc(_local_hands[hand], kind, path, car.global_transform.affine_inverse() * hand.global_transform)
+	Net.rx_hand.rpc(_local_hands[hand], kind, path, car.global_transform.affine_inverse() * hand.global_transform, Net.sim_time,
+		_release_velocity(kind, target))
 	if kind == HandEvent.RELEASE and target is VRPickable:
 		var item := (target as VRPickable).item
+		_mark_local_release(item)
 		get_tree().create_timer(ITEM_REST_DELAY).timeout.connect(_send_item_rest.bind(item))
 
 
@@ -487,9 +550,146 @@ func _on_local_tip(kind: int, target: Node, hand: VRHandInteractor) -> void:
 	if not Net.is_online() or not is_instance_valid(target) or not _local_hands.has(hand):
 		return
 	var path := String(get_parent().get_path_to(target))
-	Net.rx_hand.rpc(3 + _local_hands[hand], kind, path, car.global_transform.affine_inverse() * hand.tip_hand.global_transform)
+	Net.rx_hand.rpc(3 + _local_hands[hand], kind, path, car.global_transform.affine_inverse() * hand.tip_hand.global_transform, Net.sim_time,
+		_release_velocity(kind, target))
 	if kind == HandEvent.RELEASE and target is VRPickable:
+		_mark_local_release((target as VRPickable).item)
 		get_tree().create_timer(ITEM_REST_DELAY).timeout.connect(_send_item_rest.bind((target as VRPickable).item))
+
+
+## Lâcher : vitesse de l'objet par rapport à la voiture (repère de la voiture), pour
+## que l'autre machine le lance pareil (elle calculait sa propre vitesse d'après la
+## main affichée, en retard : un objet posé pouvait partir par la fenêtre).
+func _release_velocity(kind: int, target: Node) -> Vector3:
+	if kind != HandEvent.RELEASE or not target is VRPickable:
+		return Vector3.ZERO
+	return car.global_basis.inverse() * ((target as VRPickable).hand_velocity - car.linear_velocity)
+
+
+## Copilote : objet qu'il vient de lâcher ; il le fait tomber et le pose lui-même
+## (les places envoyées par le conducteur sont ignorées) jusqu'à ce qu'il soit posé.
+func _mark_local_release(item: RigidBody3D) -> void:
+	if Net.is_copilot() and is_instance_valid(item):
+		item.set_meta("net_local_until", Net.sim_time + ITEM_REST_DELAY + 1.5)
+		_followed.erase(item)
+		if item.has_meta("net_xf"):
+			item.remove_meta("net_xf")
+
+
+## Partie à deux, copilote : l'objet suit les places envoyées par le conducteur ; la
+## physique simplifiée des rangements (CarStorage, StorageZone) ne le bouge pas.
+static func follows_host(item: Node) -> bool:
+	if not Net.is_online() or not Net.is_copilot():
+		return false
+	return float(item.get_meta("net_local_until", -1.0)) < Net.sim_time
+
+
+# --- Objets en vrac : conducteur -> copilote ---------------------------------------------
+
+func _send_items(delta: float) -> void:
+	_item_list_timer -= delta
+	if _item_list_timer <= 0.0:
+		_item_list_timer = 1.0
+		_item_list.clear()
+		for n in car.find_children("*", "RigidBody3D", true, false):
+			if n.get_node_or_null("Grab") is VRPickable:
+				_item_list.append(n)
+	_items_timer -= delta
+	if _items_timer > 0.0:
+		return
+	_items_timer = 1.0 / ITEM_RATE
+	_items_full_timer -= 1.0 / ITEM_RATE
+	var full := _items_full_timer <= 0.0
+	if full:
+		_items_full_timer = ITEM_FULL_PERIOD
+	var list := []
+	for item in _item_list:
+		if not is_instance_valid(item) or not item.is_inside_tree() or not car.is_ancestor_of(item):
+			continue
+		var grab := item.get_node_or_null("Grab") as VRInteractable
+		if grab and grab.is_grabbed():
+			continue
+		if float(item.get_meta("net_remote_until", -1.0)) > Net.sim_time:
+			continue   # lâché par le copilote : il le pose lui-même
+		var parent_path := String(car.get_path_to(item.get_parent()))
+		var xf: Transform3D = item.transform
+		var last: Array = _item_sent.get(item.get_instance_id(), [])
+		if not full and not last.is_empty() and last[0] == parent_path 				and (last[1] as Transform3D).origin.distance_to(xf.origin) < 0.002 				and ((last[1] as Transform3D).basis.get_rotation_quaternion().angle_to(xf.basis.get_rotation_quaternion())) < 0.03:
+			continue
+		_item_sent[item.get_instance_id()] = [parent_path, xf]
+		list.append([String(item.name), parent_path, xf])
+	if not list.is_empty():
+		Net.rx_items.rpc(list)
+
+
+func on_items(list: Array) -> void:
+	if not Net.is_copilot() or car == null:
+		return
+	for e in list:
+		var item := _item_named(e[0])
+		if item == null or not follows_host(item):
+			continue
+		var grab := item.get_node_or_null("Grab") as VRInteractable
+		if grab and grab.is_grabbed():
+			continue
+		var parent := car.get_node_or_null(NodePath(e[1])) as Node3D
+		if parent == null:
+			continue
+		if item.get_parent() != parent:
+			if item.get_parent() is StorageZone:
+				(item.get_parent() as StorageZone).on_item_taken(item)
+			item.reparent(parent, false)
+			item.transform = e[2]
+		item.top_level = false
+		ItemPhysics.stop(item)   # sa simulation reprendra de la place reçue
+		item.set_meta("net_xf", e[2])
+		if not _followed.has(item):
+			_followed.append(item)
+
+
+## Rapproche en douceur les objets suivis de leur dernière place reçue.
+func _follow_items(delta: float) -> void:
+	var k := clampf(delta * ITEM_FOLLOW_RATE, 0.0, 1.0)
+	for i in range(_followed.size() - 1, -1, -1):
+		var item = _followed[i]
+		if not is_instance_valid(item) or not item.has_meta("net_xf") or not follows_host(item):
+			_followed.remove_at(i)
+			continue
+		var grab := item.get_node_or_null("Grab") as VRInteractable
+		if grab and grab.is_grabbed():
+			item.remove_meta("net_xf")   # pris en main : il suit la main, plus le conducteur
+			_followed.remove_at(i)
+			continue
+		var target: Transform3D = item.get_meta("net_xf")
+		var xf: Transform3D = item.transform
+		if xf.origin.distance_to(target.origin) < 0.0005:
+			item.transform = target
+			_followed.remove_at(i)
+			continue
+		item.transform = xf.interpolate_with(target, k)
+
+
+## Objet de la voiture d'après son nom (les noms sont les mêmes chez les deux joueurs).
+func _item_named(item_name: String) -> RigidBody3D:
+	var item = _item_names.get(item_name)
+	if item != null and is_instance_valid(item) and String(item.name) == item_name and car.is_ancestor_of(item):
+		return item
+	_item_names.clear()
+	for n in car.find_children("*", "RigidBody3D", true, false):
+		_item_names[String(n.name)] = n
+	item = _item_names.get(item_name)
+	return item as RigidBody3D
+
+
+# --- Consommer à la bouche de l'autre joueur ---------------------------------------------
+
+## L'autre joueur nous fait consommer l'objet `path` (Net.feed) : l'effet est pour nous.
+func on_feed(path: String, amount: float) -> void:
+	var target := get_parent().get_node_or_null(NodePath(path))
+	if target and target.has_method("net_feed"):
+		target.call("net_feed", amount)
+	elif amount <= 0.0:
+		EdiblePickable.swallow(get_tree(), true)   # pilule déjà disparue chez nous
 
 
 ## Objet lâché par le joueur local, maintenant posé : sa place fait foi chez l'autre.
@@ -505,11 +705,10 @@ func _send_item_rest(item: RigidBody3D) -> void:
 func on_item(item_name: String, parent_path: String, local_xf: Transform3D) -> void:
 	if car == null:
 		return
-	var found := get_parent().find_children(item_name, "RigidBody3D", true, false)
+	var item := _item_named(item_name)
 	var parent := car.get_node_or_null(NodePath(parent_path)) as Node3D
-	if found.is_empty() or parent == null:
+	if item == null or parent == null:
 		return
-	var item := found[0] as RigidBody3D
 	var grab := item.get_node_or_null("Grab") as VRInteractable
 	if grab and grab.is_grabbed():
 		return
@@ -523,7 +722,7 @@ func on_item(item_name: String, parent_path: String, local_xf: Transform3D) -> v
 	item.collision_mask = 0
 	item.linear_velocity = Vector3.ZERO
 	item.angular_velocity = Vector3.ZERO
-	for m in ["rest_xf", "free_timer"]:
+	for m in ["rest_xf", "free_timer", "net_remote_until", "net_xf"]:
 		if item.has_meta(m):
 			item.remove_meta(m)
 	ItemPhysics.stop(item)
@@ -534,9 +733,29 @@ func on_item(item_name: String, parent_path: String, local_xf: Transform3D) -> v
 # --- Autre joueur -> chez soi ----------------------------------------------------------
 
 func on_pose(data: Array) -> void:
-	if car == null or data.size() < 6:
+	if car == null or data.size() < 7:
 		return
 	_ensure_remote_player()
+	var t: float = data[6]
+	_pose_clock.sample(t, Net.sim_time)
+	if not _poses.is_empty() and t <= _poses[-1][0]:
+		return
+	_poses.append([t, data])
+	while _poses.size() > 40:
+		_poses.pop_front()
+
+
+## Pose de l'autre joueur à l'instant affiché (interpolée entre deux messages).
+func _apply_remote_pose(rt: float) -> void:
+	if _poses.is_empty():
+		return
+	while _poses.size() > 2 and _poses[1][0] <= rt:
+		_poses.pop_front()
+	var data: Array = _poses[0][1]
+	if _poses.size() >= 2 and rt > _poses[0][0]:
+		var span: float = _poses[1][0] - _poses[0][0]
+		var w := clampf((rt - _poses[0][0]) / span, 0.0, 1.0) if span > 0.0 else 1.0
+		data = NetClock.lerp_any(_poses[0][1], _poses[1][1], w)
 	_remote_head_local = data[0]
 	for i in 3:
 		_remote_hand_local[i] = data[i + 1]
@@ -544,10 +763,25 @@ func on_pose(data: Array) -> void:
 		_remote_touch[i] = data[i + 4]
 
 
-func on_hand(index: int, kind: int, path: String, local_xf: Transform3D) -> void:
+## Geste de l'autre joueur : rejoué quand sa main affichée arrive à l'instant du geste.
+func on_hand(index: int, kind: int, path: String, local_xf: Transform3D, t: float, vel: Vector3) -> void:
 	if car == null or index < 0 or index > 4:
 		return
 	_ensure_remote_player()
+	_hand_events.append([t, index, kind, path, local_xf, vel])
+
+
+func _run_hand_events(rt: float) -> void:
+	while not _hand_events.is_empty():
+		var e: Array = _hand_events[0]
+		# (horloge pas encore calée, ou geste vieux d'une demi-seconde : tout de suite)
+		if _pose_clock.is_ready() and e[0] > rt and e[0] - rt < 0.5:
+			return
+		_hand_events.pop_front()
+		_do_hand(e[1], e[2], e[3], e[4], e[5])
+
+
+func _do_hand(index: int, kind: int, path: String, local_xf: Transform3D, vel: Vector3) -> void:
 	var proxy := _remote_hands[index]
 	if index < 3:
 		_remote_hand_local[index] = local_xf
@@ -563,6 +797,12 @@ func on_hand(index: int, kind: int, path: String, local_xf: Transform3D) -> void
 				proxy.held = target
 				target.grab(proxy)
 		HandEvent.RELEASE:
+			if is_instance_valid(proxy.held) and proxy.held is VRPickable:
+				var pk := proxy.held as VRPickable
+				pk.hand_velocity = car.global_basis * vel + car.linear_velocity
+				if Net.is_driver():
+					# lâché par le copilote : c'est lui qui le pose (voir on_items)
+					pk.item.set_meta("net_remote_until", Net.sim_time + ITEM_REST_DELAY + 1.5)
 			_release_proxy(proxy)
 		HandEvent.TOGGLE:
 			if target and target.has_method("toggle"):
@@ -596,6 +836,9 @@ func _release_proxy(proxy: NetRemoteHand) -> void:
 func _update_remote_hands() -> void:
 	if remote_player == null:
 		return
+	var rt := _pose_clock.render_time(Net.sim_time) if _pose_clock.is_ready() else INF
+	_run_hand_events(rt)
+	_apply_remote_pose(rt)
 	var cxf := car.global_transform
 	_remote_head.global_transform = cxf * _remote_head_local
 	for i in 5:
@@ -676,9 +919,16 @@ func _grip_pose(i: int) -> Resource:
 func _ensure_remote_player() -> void:
 	if remote_player:
 		return
+	# Accroché à la voiture : avatar, mains et yeux suivent la voiture à chaque instant.
+	# Rangé ailleurs, il gardait la place de la voiture à l'image précédente pour les
+	# scripts qui passent avant la NetSession (les mains du conducteur) : en roulant,
+	# la bouche de l'autre joueur était 35 cm en arrière (à 90 km/h) et on ne pouvait
+	# rien lui faire avaler.
 	remote_player = Node3D.new()
 	remote_player.name = "RemotePlayer"
-	add_child(remote_player)
+	# son corps n'arrête pas les objets tenus (on doit pouvoir les porter à sa bouche)
+	remote_player.set_meta("no_held_collision", true)
+	car.add_child(remote_player)
 	# corps assis simple ; haut rouge pour le conducteur, bleu pour le copilote
 	_avatar = NetAvatar.new(Color(0.55, 0.22, 0.18) if Net.is_copilot() else Color(0.18, 0.32, 0.55))
 	_avatar.name = "Avatar"
@@ -701,14 +951,12 @@ func _ensure_remote_player() -> void:
 			var shown := (load(HAND_SCENES[i]) as PackedScene).instantiate() as Node3D
 			shown.name = ["RemoteLeftHand", "RemoteRightHand"][i]
 			remote_player.add_child(shown)
-			shown.top_level = true
 			shown.set_physics_process(false)   # pas de manette à suivre : posée à la main
 			shown.visible = false
 			_remote_hand_meshes.append(shown)
 			continue
 		# main souris : un point lumineux là où vise l'autre joueur
 		var mesh := MeshInstance3D.new()
-		mesh.top_level = true
 		var dot := SphereMesh.new()
 		dot.radius = 0.015
 		dot.height = 0.03

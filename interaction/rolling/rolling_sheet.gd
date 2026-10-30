@@ -11,6 +11,10 @@ extends VRPickable
 ## 3 cm, VR) -> elle se roule : joint s'il y a de l'herbe, sinon cigarette
 ## (Smokable, à allumer au briquet et à fumer). Plus elle est chargée, plus il dure.
 ## Repère : feuille à plat, longueur selon X (filtre au bout +X), colle vers +Z.
+## Partie à deux : c'est la machine du joueur qui pose une pincée / le filtre, puis qui
+## roule, qui décide ; l'autre recopie (net_receive, net_roll). Avant, chacune refaisait
+## tout d'après les gestes rejoués : une pincée lâchée quelques centimètres à côté chez
+## l'autre, sa feuille n'était jamais prête et il ne voyait pas le joint roulé.
 
 const SIZE := Vector2(0.07, 0.036)
 const JOINT_SCENE := "res://props/items/joint_item.tscn"
@@ -82,6 +86,8 @@ func is_ready_to_roll() -> bool:
 func try_receive(g: VRPickable) -> bool:
 	if rolled or g == self or g.item == null:
 		return false
+	if Net.is_online() and g.item.get_meta("net_remote", false):
+		return false   # lâché par l'autre joueur : sa machine nous dit s'il l'a pris
 	var l := item.global_transform.affine_inverse() * g.item.global_position
 	if Vector3(l.x, l.y * 0.5, l.z).length() > RECEIVE_RADIUS:
 		return false
@@ -101,10 +107,44 @@ func try_receive(g: VRPickable) -> bool:
 			return false
 	else:
 		return false
+	Net.remote_call(self, &"net_receive", [String(get_tree().current_scene.get_path_to(g.item)), g.kind, g.amount])
 	g.item.queue_free()
 	_rustle.play()
 	_update_visual()
 	return true
+
+
+## Partie à deux : l'autre joueur a posé `kind` sur cette feuille (objet `item_path`,
+## chemin depuis la scène, retiré ici aussi).
+func net_receive(item_path: String, kind: String, amount: float) -> void:
+	if rolled:
+		return
+	match kind:
+		"weed":
+			weed += amount
+		"tobacco":
+			tobacco += amount
+		"filter":
+			has_filter = true
+	var it := get_tree().current_scene.get_node_or_null(NodePath(item_path))
+	if it:
+		for h in it.find_children("*", "VRInteractable", true, false):
+			for hand in (h as VRInteractable)._grab_hands.duplicate():
+				(h as VRInteractable).release(hand)
+		it.queue_free()
+	_rustle.play()
+	_update_visual()
+
+
+## Partie à deux : l'autre joueur a roulé cette feuille (avec ce contenu).
+func net_roll(w: float, t: float, filter: bool) -> void:
+	if rolled:
+		return
+	weed = w
+	tobacco = t
+	has_filter = filter
+	_update_visual()
+	roll()
 
 
 func _update_visual() -> void:
@@ -144,6 +184,7 @@ func toggle() -> void:
 func roll() -> Smokable:
 	if rolled:
 		return null
+	Net.remote_call(self, &"net_roll", [weed, tobacco, has_filter])
 	rolled = true
 	var is_joint := weed > 0.01
 	var obj := (load(JOINT_SCENE if is_joint else CIG_SCENE) as PackedScene).instantiate() as RigidBody3D

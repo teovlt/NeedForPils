@@ -19,7 +19,22 @@ import math, os, sys
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "animals"))
-from animals_build import Model, box
+from animals_build import Model, loft, box as _loft_box
+
+
+def box(center, size):
+    """Pavé aux dimensions demandées. (box() d'animals_build fait une section carrée
+    tournée de 45° : ses pavés ne mesuraient que 71 % de la largeur et de la hauteur
+    voulues ; le poteau de la boîte aux lettres flottait au-dessus du sol et les
+    pièces ne se touchaient plus.)"""
+    k = math.sqrt(2.0)
+    return _loft_box(center, (size[0] * k, size[1] * k, size[2]))
+
+
+def beam(a, b, w):
+    """Poutre de section carrée w × w entre les points a et b (pièce en biais)."""
+    k = math.sqrt(2.0)
+    return loft([a, b], [(w * k, w * k)] * 2, n=4, rot=math.pi / 4)
 
 # ---------------------------------------------------------------- outils
 
@@ -88,6 +103,7 @@ def plate(profile, z, y0=0.0, front=True, scale=1.0):
 # ---------------------------------------------------------------- boîte aux lettres
 
 POST_H = 1.10
+POST_BURY = 0.30
 BOX_Y = 1.135                  # dessous du caisson
 BOX_W, BOX_WALL_H, BOX_L = 0.19, 0.12, 0.46
 
@@ -100,9 +116,11 @@ def mailbox():
     rust = m.mat("Mailbox_Rust", (0.45, 0.24, 0.12), 0.9)
     red = m.mat("Mailbox_Red", (0.78, 0.10, 0.08), 0.6)
     dark = m.mat("Mailbox_Dark", (0.08, 0.08, 0.08), 0.5)
-    post = box((0, POST_H / 2, -0.06), (0.09, POST_H, 0.09))
+    # poteau enfoncé de POST_BURY dans le sol : ne flotte pas au bord d'une pente
+    post = box((0, (POST_H - POST_BURY) / 2, -0.06), (0.09, POST_H + POST_BURY, 0.09))
     post += box((0, POST_H + 0.0175, 0.0), (0.15, 0.035, 0.36))          # planchette
-    post += box((0, POST_H - 0.12, -0.06 + 0.07), (0.05, 0.05, 0.14))    # jambe de force
+    # jambe de force : en biais, de l'avant du poteau au-dessous de la planchette
+    post += beam((0, POST_H - 0.17, -0.03), (0, POST_H - 0.01, 0.13), 0.04)
     m.part("Post", (0, 0, 0), {wood: post})
     prof = tunnel_profile(BOX_W, BOX_WALL_H)
     z0, z1 = -BOX_L / 2, BOX_L / 2

@@ -12,8 +12,14 @@ extends Node3D
 # Visible aussi dans l'éditeur ; changer la graine régénère le décor.
 
 @export var seed_value: int = 1337: set = _set_seed
-## Densité de la végétation (1 = normal ; baisser si le casque rame).
+## Densité de la végétation (1 = normal).
 @export_range(0.1, 2.0) var density: float = 1.0
+## Densité sur le casque (Quest) : la version PC fait ~1 million de triangles, trop pour lui.
+@export_range(0.1, 2.0) var density_mobile: float = 0.4
+## Distance (m) au-delà de laquelle les petites plantes (fleurs, herbes, cailloux) ne
+## sont plus dessinées, et celle des cultures.
+@export var small_view_distance := 45.0
+@export var crop_view_distance := 140.0
 @export var horizon_mountains := true
 
 const ROAD_HALF_WIDTH := 4.0
@@ -28,18 +34,37 @@ const Z_RANGE := Vector2(-270.0, 150.0)
 const CELL := 70.0
 ## Champs : côté (+1 droite, -1 gauche), z début/fin, culture proche (13-25 m) et lointaine (25-45 m).
 const FIELDS := [
-	{"side": 1, "z": Vector2(-95.0, -18.0), "near": "crop_colza", "far": "crop_wheat", "row": Vector2(0.85, 0.8), "wx": Vector2(1.6, 1.9), "seg": 2.0, "fence": true},
-	{"side": -1, "z": Vector2(-70.0, -14.0), "near": "crop_lavender", "far": "crop_lavender", "row": Vector2(1.5, 1.5), "wx": Vector2(1.0, 1.0), "seg": 1.8, "fence": false},
-	{"side": -1, "z": Vector2(-150.0, -84.0), "near": "crop_sunflower", "far": "stubble", "row": Vector2(1.0, 0.7), "wx": Vector2(1.0, 1.0), "seg": 1.5, "fence": true},
+	{"side": 1, "z": Vector2(-95.0, -18.0), "near": "crop_colza", "far": "crop_wheat", "fence": true},
+	{"side": -1, "z": Vector2(-70.0, -14.0), "near": "crop_lavender", "far": "crop_lavender", "fence": false},
+	{"side": -1, "z": Vector2(-150.0, -84.0), "near": "crop_sunflower", "far": "stubble", "fence": true},
 ]
+## Sur le casque : cultures légères (labour, chaume : ~40 triangles) au lieu du blé,
+## des tournesols et de la moitié de la lavande (120 à 300 triangles par morceau de rang).
+const FIELDS_MOBILE := [
+	{"side": 1, "z": Vector2(-95.0, -18.0), "near": "crop_colza", "far": "furrow", "fence": true},
+	{"side": -1, "z": Vector2(-70.0, -14.0), "near": "crop_lavender", "far": "stubble", "fence": false},
+	{"side": -1, "z": Vector2(-150.0, -84.0), "near": "stubble", "far": "stubble", "fence": true},
+]
+## Cultures : espacement des rangs (m), longueur d'un morceau de rang (m), élargissement
+## du modèle (pour que les rangs se touchent) ; mêmes valeurs que FIELD_CROPS du jeu.
+const CROPS := {
+	"crop_wheat": {"row": 0.8, "seg": 2.0, "wx": 1.9},
+	"crop_colza": {"row": 0.85, "seg": 2.0, "wx": 1.6},
+	"crop_sunflower": {"row": 1.0, "seg": 1.5, "wx": 1.0},
+	"crop_lavender": {"row": 1.5, "seg": 1.8, "wx": 1.0},
+	"furrow": {"row": 0.7, "seg": 4.0, "wx": 1.0},
+	"stubble": {"row": 0.7, "seg": 4.0, "wx": 1.0},
+}
 ## Couleur du sol sous chaque culture.
 const SOIL := {
 	"crop_colza": Color(0.16, 0.30, 0.08), "crop_wheat": Color(0.42, 0.33, 0.13),
 	"crop_lavender": Color(0.30, 0.24, 0.17), "crop_sunflower": Color(0.27, 0.19, 0.11),
-	"stubble": Color(0.52, 0.44, 0.22),
+	"stubble": Color(0.52, 0.44, 0.22), "furrow": Color(0.22, 0.14, 0.08),
 }
 
 var _built := false
+var _fields: Array = FIELDS
+var _density := 1.0
 var _rng := RandomNumberGenerator.new()
 var _noise := FastNoiseLite.new()
 var _noise_small := FastNoiseLite.new()
@@ -79,6 +104,9 @@ func _rebuild() -> void:
 		remove_child(c)
 		c.queue_free()
 	_buckets.clear()
+	var mobile := OS.has_feature("mobile") and not Engine.is_editor_hint()
+	_fields = FIELDS_MOBILE if mobile else FIELDS
+	_density = density_mobile if mobile else density
 	_rng.seed = seed_value
 	_noise.seed = seed_value
 	_noise.frequency = 0.012
@@ -164,7 +192,7 @@ func _field_at(z: float, lat: float) -> String:
 	var a := absf(lat)
 	if a < 13.0 or a > 45.0:
 		return ""
-	for f in FIELDS:
+	for f in _fields:
 		if signf(lat) == f["side"] and z >= f["z"].x and z <= f["z"].y:
 			return f["near"] if a < 25.0 else f["far"]
 	return ""
@@ -338,25 +366,25 @@ func _ground_color(centre: Vector3, z: float, lat: float, nrm: Vector3) -> Color
 # ------------------------------------------------------------------ Végétation
 
 func _build_fields() -> void:
-	for f in FIELDS:
+	for f in _fields:
 		var side: float = f["side"]
 		for band in 2:
 			var crop: String = f["near"] if band == 0 else f["far"]
 			var x0 := 13.5 if band == 0 else 25.4
 			var x1 := 24.6 if band == 0 else 44.0
-			var spacing: float = f["row"][band]
-			var seg: float = f["seg"]
+			var cd: Dictionary = CROPS[crop]
+			var spacing: float = cd["row"]
+			var seg: float = cd["seg"]
 			var rows := int((x1 - x0) / spacing)
 			for j in rows:
 				var lat := (x0 + spacing * (j + 0.5)) * side
 				var zz: float = f["z"].x + seg * 0.5 + (j % 2) * seg * 0.5
 				while zz < f["z"].y - seg * 0.5:
-					if _rng.randf() < density + 0.15:
-						var sc := Vector3(_rng.randf_range(0.92, 1.08) * f["wx"][band], _rng.randf_range(0.88, 1.1), 1.0)
-						_place(crop, zz, lat + _rng.randf_range(-0.06, 0.06), _rng.randf_range(-0.03, 0.03), sc, true)
-						# coquelicots dans le blé
-						if crop == "crop_wheat" and _rng.randf() < 0.03:
-							_place("flower_poppy", zz + _rng.randf_range(-1.0, 1.0), lat, _rng.randf() * TAU, Vector3.ONE * _rng.randf_range(1.0, 1.4))
+					var sc := Vector3(_rng.randf_range(0.92, 1.08) * cd["wx"], _rng.randf_range(0.88, 1.1), 1.0)
+					_place(crop, zz, lat + _rng.randf_range(-0.06, 0.06), _rng.randf_range(-0.03, 0.03), sc, true)
+					# coquelicots dans le blé
+					if crop == "crop_wheat" and _rng.randf() < 0.03:
+						_place("flower_poppy", zz + _rng.randf_range(-1.0, 1.0), lat, _rng.randf() * TAU, Vector3.ONE * _rng.randf_range(1.0, 1.4))
 					zz += seg
 			if crop == "stubble":
 				for b in 6:
@@ -376,7 +404,7 @@ func _build_meadow() -> void:
 	var ground := ["grass_tuft", "grass_tuft", "grass_tuft", "grass_dry", "rock_pebbles"]
 	var bushes := ["bush_flowers", "bush_flowers", "bush_round", "bush_yellow", "bush_berries", "fern"]
 	# fleurs : en touffes, surtout près du joueur (au loin elles ne se voient plus)
-	var n_flowers := int(900 * density)
+	var n_flowers := int(900 * _density)
 	for i in n_flowers:
 		var z := _near_z(60.0)
 		var lat := _verge_lat(30.0)
@@ -386,13 +414,13 @@ func _build_meadow() -> void:
 		var patch := _noise_small.get_noise_2d(z * 0.6, lat * 0.6)
 		var sp: String = flowers[int((patch * 0.5 + 0.5) * flowers.size() + _rng.randf_range(-1.0, 1.0)) % flowers.size()]
 		_place(sp, z, lat, _rng.randf() * TAU, Vector3.ONE * _rng.randf_range(0.8, 1.4))
-	for i in int(1100 * density):
+	for i in int(1100 * _density):
 		var z := _near_z(110.0)
 		var lat := _verge_lat(45.0)
 		if _field_at(z, lat) != "":
 			continue
 		_place(ground[_rng.randi() % ground.size()], z, lat, _rng.randf() * TAU, Vector3.ONE * _rng.randf_range(0.8, 1.6))
-	for i in int(140 * density):
+	for i in int(140 * _density):
 		var z := _rng.randf_range(-170.0, 120.0)
 		var lat := _verge_lat(55.0, 7.5)
 		if _field_at(z, lat) != "" or absf(absf(lat) - 12.7) < 1.5:
@@ -405,7 +433,7 @@ func _build_woods() -> void:
 	var mixed := ["tree_oak", "tree_oak", "tree", "birch", "birch", "tree_autumn", "poplar", "pine_small"]
 	var pines := ["pine_tall", "pine_tall", "pine_small", "spruce", "spruce", "larch", "birch"]
 	var rocks := ["rock_boulder", "rock_mossy", "rock_cluster", "rock_flat", "stump"]
-	var count := int(950 * density)
+	var count := int(950 * _density)
 	var tries := 0
 	var placed := 0
 	while placed < count and tries < count * 6:
@@ -433,7 +461,7 @@ func _build_woods() -> void:
 		var lat := _verge_lat(45.0, 9.0)
 		if _field_at(z, lat) == "" and absf(absf(lat) - 12.7) > 1.5:
 			_place(["tree_oak", "poplar", "birch", "tree"][i % 4], z, lat, _rng.randf() * TAU, Vector3.ONE * _rng.randf_range(0.9, 1.3))
-	for i in int(70 * density):
+	for i in int(70 * _density):
 		var z := _rng.randf_range(-200.0, 140.0)
 		var lat := _verge_lat(120.0, 8.0)
 		if _field_at(z, lat) == "":
@@ -507,7 +535,7 @@ func _flush_buckets() -> void:
 	var root := Node3D.new()
 	root.name = "Nature"
 	add_child(root)
-	var small := ["flower", "grass", "rock_pebbles", "fern", "crop", "stubble"]
+	var small := ["flower", "grass", "rock_pebbles", "fern", "crop", "stubble", "furrow"]
 	for key in _buckets:
 		var bk: Dictionary = _buckets[key]
 		var mname: String = bk["name"]
@@ -527,4 +555,8 @@ func _flush_buckets() -> void:
 				is_small = true
 		if is_small:
 			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			# case entière cachée au-delà (distance à son centre) : fleurs et herbes ne se
+			# voient plus de loin, les cultures restent visibles plus loin
+			var crop := mname.begins_with("crop") or mname in ["stubble", "furrow"]
+			mmi.visibility_range_end = (crop_view_distance if crop else small_view_distance) + CELL * 0.5
 		root.add_child(mmi)

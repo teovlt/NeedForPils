@@ -56,6 +56,7 @@ var _mouth_t := 0.0        # temps passé à la bouche (bouffée en cours)
 var _auto_puff := 0.0      # bouffée simulée (F sans casque)
 var _auto_puff_remote := false   # ... demandée par l'autre joueur (partie à deux)
 var _puff_head: Node3D     # tête de celui qui tire dessus (souffle recraché par sa bouche)
+var _net_feed_t := 0.0     # partie à deux : bouffée que l'autre joueur nous fait tirer (s restantes)
 var _t := 0.0
 
 
@@ -92,6 +93,20 @@ func toggle() -> void:
 	_auto_puff_remote = Net.applying_remote
 
 
+## Partie à deux : l'autre joueur nous fait tirer une bouffée (`amount` : part d'une
+## bouffée complète), c'est nous qui fumons.
+func net_feed(amount: float) -> void:
+	if burnt_out:
+		return
+	if not lit:
+		light()
+	_net_feed_t = 0.25
+	_puff_head = get_viewport().get_camera_3d()
+	var add := get_tree().get_first_node_in_group(PillAddiction.GROUP)
+	if add:
+		add.call("smoke", kind, amount)
+
+
 func light() -> void:
 	if lit or burnt_out:
 		return
@@ -119,13 +134,22 @@ func _process(delta: float) -> void:
 		return
 	# bouffée : le filtre à la bouche, en le tenant (ou F sans casque)
 	var at_mouth := false
-	var remote := Net.is_online() and Net.held_by_remote(self)   # l'autre joueur fume
-	if is_grabbed():
+	# tenue par l'autre joueur : c'est sa machine qui cherche une bouche ; si c'est la
+	# nôtre, elle nous envoie les bouffées (net_feed)
+	var remote_held := Net.is_online() and Net.held_by_remote(self)
+	var remote := remote_held
+	var feed_other := false
+	if is_grabbed() and not remote_held:
 		var m := EdiblePickable.mouth_near(get_tree(), butt_position(), MOUTH_RADIUS)
 		if not m.is_empty():
 			at_mouth = true
 			remote = not m[2]   # à la bouche de l'autre joueur : c'est lui qui fume
+			feed_other = remote
 			_puff_head = m[1]
+	if _net_feed_t > 0.0:
+		_net_feed_t -= delta
+		at_mouth = true
+		remote = true   # effet déjà appliqué par net_feed
 	if _auto_puff > 0.0:
 		_auto_puff -= delta
 		at_mouth = true
@@ -140,6 +164,8 @@ func _process(delta: float) -> void:
 		var add := get_tree().get_first_node_in_group(PillAddiction.GROUP)
 		if add and not remote:
 			add.call("smoke", kind, delta / puff_time)
+		if feed_other:
+			Net.feed(self, delta / puff_time)
 		if _sizzle and not _sizzle.playing:
 			_sizzle.play()
 	else:

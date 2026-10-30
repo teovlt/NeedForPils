@@ -7,11 +7,18 @@ extends Node
 ## des animaux. Le copilote desserre le frein à main (main souris + F), éteint la radio,
 ## prend le briquet, tourne à gauche au clavier (Q) puis passe au point mort (N).
 ## Chacun écrit chaque seconde ce qu'il voit dans la console (« NETTEST »).
+## Ensuite (17-29 s) : le conducteur fait avaler une pilule puis boire une bière au
+## copilote, le copilote fait fumer un joint au conducteur, puis roule un joint (le
+## conducteur doit le voir) ; on compare la radio et les
+## objets chez les deux, et la régularité du mouvement de la voiture (« à-coups » :
+## écart moyen d'une image à l'autre de la vitesse, en mm). Avec `--net-jitter=60`,
+## les messages de position arrivent avec 0 à 60 ms de retard aléatoire (Wi-Fi).
 
 var session: NetSession
 var _t := 0.0
 var _next_log := 0.0
 var _done := {}
+var _track: Array[Vector3] = []   # positions absolues de la voiture (à-coups)
 
 
 func _physics_process(delta: float) -> void:
@@ -25,6 +32,8 @@ func _physics_process(delta: float) -> void:
 			car.engine_state = 2   # (pas de clé dans le contact)
 		_once("demarre", 1.0, func(): car.gear_lever.set_notch(SUV4x4.Gear.D, true))
 		_once("accelere", 5.5, func(): _key(KEY_Z, true))
+		# arrêt avant les échanges d'objets (sinon la voiture finit dans le décor)
+		_once("freine", 16.5, func(): _key(KEY_Z, false); _key(KEY_S, true))
 		_once("texte", 4.0, func(): session.get_parent().get_node("ChaseDirector").call("_say", "TEST", "Texte du conducteur", 2.0))
 	else:
 		_once("frein", 4.0, func(): _hand_toggle(car.handbrake_lever))
@@ -33,7 +42,7 @@ func _physics_process(delta: float) -> void:
 		_once("z_copilote", 4.3, func(): _key(KEY_Z, true))
 		_once("z_copilote_fin", 5.3, func(): _key(KEY_Z, false))
 		_once("gauche", 9.5, func(): _key(KEY_Q, true))
-		_once("gauche_fin", 11.0, func(): _key(KEY_Q, false))
+		_once("gauche_fin", 10.0, func(): _key(KEY_Q, false))
 		_once("neutre", 12.5, func(): _key(KEY_N, true); _key(KEY_N, false))
 		_finger_presses(car)
 	if Net.is_driver():
@@ -112,7 +121,10 @@ func _physics_process(delta: float) -> void:
 		print("NETTEST %s menu : ouvert=%s jeu en pause=%s REJOUER proposé=%s" % ["conducteur" if Net.is_driver() else "copilote",
 			menu.is_open, get_tree().paused, menu._ui.restart_button.visible])
 		menu.close())
-	if _t > 16.5 and not _done.has("fin"):
+	_smooth_sample(car)
+	_feed_scenario(car)
+	_roll_scenario(car)
+	if _t > 29.5 and not _done.has("fin"):
 		_done["fin"] = true
 		get_tree().quit()
 
@@ -194,3 +206,172 @@ func _radio_power_grip(car: SUV4x4) -> VRInteractable:
 		if g.get("kind") == "power":
 			return g
 	return null
+
+
+# --- Régularité du mouvement ------------------------------------------------------------
+
+func _smooth_sample(car: SUV4x4) -> void:
+	if _t < 7.0:
+		return
+	var road := session._road
+	_track.append(car.global_position + (road.world_offset if road else Vector3.ZERO))
+	for at in [16.0, 28.0]:
+		_once("acoups%.0f" % at, at, func():
+			var sum := 0.0
+			var worst := 0.0
+			for i in range(2, _track.size()):
+				var d2 := (_track[i] - 2.0 * _track[i - 1] + _track[i - 2]).length()
+				sum += d2
+				worst = maxf(worst, d2)
+			var n := maxi(_track.size() - 2, 1)
+			print("NETTEST %s à-coups t=%.0f : moyen %.2f mm, pire %.1f mm (%d images)" % [_who(), at, 1000.0 * sum / n, 1000.0 * worst, n])
+			_track.clear())
+
+
+# --- Faire consommer l'autre joueur -----------------------------------------------------
+
+func _who() -> String:
+	return "conducteur" if Net.is_driver() else "copilote"
+
+
+func _feed_scenario(car: SUV4x4) -> void:
+	_once("partie_finie", 17.0, func():
+		if session.get_parent().get_node("ChaseDirector").get("game_over"):
+			print("NETTEST %s ATTENTION partie déjà finie (accident) : échanges d'objets non significatifs" % _who()))
+	# mêmes objets, même nom, même place chez les deux joueurs
+	_once("objets_test", 17.0, func():
+		for k in [["pill_smiley_item", "TestPill", Vector3(0.0, 1.0, 0.3)], ["beer_can_item", "TestBeer", Vector3(0.1, 1.0, 0.3)],
+				["joint_item", "TestJoint", Vector3(0.2, 1.0, 0.3)]]:
+			var it := (load("res://props/items/%s.tscn" % k[0]) as PackedScene).instantiate() as RigidBody3D
+			it.name = k[1]
+			car.add_child(it)
+			it.freeze = true
+			it.position = k[2]
+			_done[k[1]] = it.get_node("Grab")
+		(_done["TestBeer"] as BeerCan).opened = true
+		(_done["TestBeer"] as BeerCan)._apply_open(true))
+	if not _done.has("objets_test"):
+		return
+	var add := get_tree().get_first_node_in_group(PillAddiction.GROUP)
+	var other := Net.other_head()
+	if other == null or add == null:
+		return
+	var mouth := other.global_transform * EdiblePickable.MOUTH_OFFSET
+	# main tenue au loin (celle du doigt, à 13 s, pose ses points sur la radio)
+	_once("main_test", 17.2, func():
+		var holder := Node3D.new()
+		car.add_child(holder)
+		var nh := VRHandInteractor.new()
+		nh.name = "TestFeedHand"
+		nh.hand_collision = false   # (téléportée d'un objet à une bouche : ne bute pas sur les sièges)
+		holder.add_child(nh)
+		nh.debug_points = [Vector3(0, -100, 0), Vector3(0, -100, 0)]
+		_done["dh"] = nh)
+	if Net.is_driver():
+		var h: VRHandInteractor = _done.get("dh")
+		if h == null:
+			return
+		var holder := h.get_parent() as Node3D
+		var pill = _done["TestPill"]
+		_once("pilule_prise", 17.5, func(): _test_grab(h, pill))
+		if _t > 17.5 and _t < 18.8 and is_instance_valid(pill) and pill.is_grabbed():
+			holder.global_position = holder.global_position.lerp(mouth, 0.2)
+			pill.grab_update(h)
+		var can: BeerCan = _done["TestBeer"]
+		_once("biere_prise", 19.5, func(): _test_grab(h, can))
+		if _t > 19.5 and _t < 22.0 and can.is_grabbed():
+			var tilt := Basis(car.global_basis.x, deg_to_rad(60.0)) * car.global_basis
+			var xf := Transform3D(tilt, Vector3.ZERO)
+			xf.origin = mouth - xf.basis * Vector3(0, BeerCan.HEIGHT, 0.012)
+			# la main avance vers la bouche (un objet tenu ne traverse pas l'habitacle)
+			holder.global_transform = holder.global_transform.interpolate_with(xf * can._offset.affine_inverse(), 0.15)
+			can.grab_update(h)
+		_once("biere_lachee", 22.0, func(): _test_release(h, can))
+	else:
+		var h: VRHandInteractor = _done.get("dh")
+		if h == null:
+			return
+		var holder := (h as Node3D).get_parent() as Node3D
+		var joint: Smokable = _done["TestJoint"]
+		_once("joint_pris", 22.5, func():
+			_test_grab(h, joint)
+			joint.light())
+		if _t > 22.5 and _t < 25.5 and joint.is_grabbed():
+			holder.global_position += (mouth - joint.butt_position()) * 0.2
+			joint.grab_update(h)
+		_once("joint_lache", 25.5, func(): _test_release(h, joint))
+	_once("bilan_pilule", 19.2, func():
+		print("NETTEST %s pilule portée par le conducteur à la bouche du copilote : pilules avalées ici = %d, pilule encore là = %s" % [
+			_who(), add.pills_taken, is_instance_valid(_done["TestPill"])]))
+	_once("bilan_biere", 22.4, func():
+		print("NETTEST %s bière tenue par le conducteur à la bouche du copilote : alcool ici = %.3f, canette pleine à %.2f" % [
+			_who(), add.alcohol, (_done["TestBeer"] as BeerCan).fill]))
+	_once("bilan_joint", 26.0, func():
+		print("NETTEST %s joint tenu par le copilote à la bouche du conducteur : défonce ici = %.3f" % [_who(), add.stoned]))
+	# radio allumée sur la même station chez les deux : le copilote doit se caler
+	_once("radio_on", 23.5, func():
+		car.radio.set("car", null)   # (pas de clé de contact dans le test : marche quand même)
+		car.radio.power = true
+		car.radio.station = 1)
+	_once("bilan_radio", 26.5, func():
+		var r := car.radio
+		var sp: AudioStreamPlayer3D = r.speakers[0] if not r.speakers.is_empty() else null
+		print("NETTEST %s radio : marche=%s station=%d morceau=%d position=%.2f s à %.3f" % [_who(), r.is_on(), r.station,
+			r.get("_track"), sp.get_playback_position() if sp and sp.playing else -1.0, Time.get_unix_time_from_system()]))
+	_once("bilan_objets", 27.0, func():
+		for n in ["Lighter", "TestBeer"]:
+			var it := car.find_child(n, true, false) as Node3D
+			if it:
+				var p := car.to_local(it.global_position)
+				print("NETTEST %s objet %s dans %s à (%.3f, %.3f, %.3f)" % [_who(), n, it.get_parent().name, p.x, p.y, p.z]))
+
+
+## Saisie / lâcher par la main de test, signalés comme le fait la vraie main.
+func _test_grab(h: VRHandInteractor, it: VRInteractable) -> void:
+	(h.get_parent() as Node3D).global_position = it.item.global_position
+	it.grab(h)
+	h.interacted.emit(NetSession.HandEvent.GRAB, it)
+
+
+func _test_release(h: VRHandInteractor, it: VRInteractable) -> void:
+	it.release(h)
+	h.interacted.emit(NetSession.HandEvent.RELEASE, it)
+
+
+# --- Rouler un joint (copilote) : le conducteur doit le voir ------------------------------
+
+func _roll_scenario(car: SUV4x4) -> void:
+	var sheet_pos := Vector3(-0.3, 1.0, 0.0)
+	_once("roulage_objets", 26.8, func():
+		for k in [["sheet_item", "TestSheet", sheet_pos], ["pinch_item", "TestWeed", Vector3(-0.1, 1.0, 0.0)],
+				["filter_item", "TestFilter", Vector3(0.0, 1.0, 0.0)]]:
+			var it := (load("res://props/items/%s.tscn" % k[0]) as PackedScene).instantiate() as RigidBody3D
+			it.name = k[1]
+			car.add_child(it)
+			it.freeze = true
+			it.position = k[2]
+			_done[k[1]] = it.get_node("Grab"))
+	if Net.is_copilot():
+		var h: VRHandInteractor = _done.get("dh")
+		if h == null or not _done.has("TestSheet"):
+			return
+		var holder := h.get_parent() as Node3D
+		var over := car.to_global(sheet_pos + Vector3(0, 0.01, 0))
+		_once("pincee_prise", 27.0, func(): _test_grab(h, _done["TestWeed"]))
+		_once("pincee_posee", 27.4, func():
+			holder.global_position = over
+			(_done["TestWeed"] as VRInteractable).grab_update(h)
+			_test_release(h, _done["TestWeed"]))
+		_once("filtre_pris", 27.7, func(): _test_grab(h, _done["TestFilter"]))
+		_once("filtre_pose", 28.0, func():
+			holder.global_position = over
+			(_done["TestFilter"] as VRInteractable).grab_update(h)
+			_test_release(h, _done["TestFilter"]))
+		_once("roule", 28.3, func():
+			var sh: RollingSheet = _done["TestSheet"]
+			print("NETTEST copilote roule la feuille : herbe=%.2f filtre=%s" % [sh.weed, sh.has_filter])
+			sh.toggle())
+	_once("bilan_roulage", 28.9, func():
+		var rolled := car.find_child("TestSheet_Rolled", true, false)
+		print("NETTEST %s joint roulé par le copilote : visible ici = %s, feuille encore là = %s" % [
+			_who(), rolled != null, is_instance_valid(_done.get("TestSheet"))]))

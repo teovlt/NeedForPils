@@ -23,8 +23,7 @@ var palm_global := Vector3.ZERO
 
 
 func _ready() -> void:
-	add_to_group(GROUP)
-	top_level = true
+	add_to_group(GROUP)   # (placée par la NetSession, dans la voiture : la suit)
 	if index == 2:
 		# objets qui se manipulent autrement à la souris (clé, ceinture, volume)
 		add_to_group(MouseHand.GROUP)

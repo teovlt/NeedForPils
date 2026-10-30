@@ -2,7 +2,10 @@ class_name EdiblePickable
 extends VRPickable
 ## Pilule qu'on peut avaler : en VR, la porter à la bouche (sous les yeux) ; sans
 ## casque, la viser et appuyer sur F. En partie à deux, on peut aussi la porter à la
-## bouche de l'autre joueur : c'est lui qui l'avale (mouth_near).
+## bouche de l'autre joueur : c'est lui qui l'avale (mouth_near). Seule la machine de la
+## main qui la tient cherche une bouche (chez l'autre, cette main n'est qu'un reflet en
+## retard : les deux machines ne tombaient pas d'accord) ; si c'est celle de l'autre
+## joueur, elle le prévient (Net.feed -> net_feed).
 ## Avaler appelle PillAddiction.take_pill() (boost, effet, manque à zéro, assimilation).
 
 const GROUP_ADDICTION := "pill_addiction"
@@ -53,9 +56,18 @@ func _on_grab_update(hand: Node3D) -> void:
 	super._on_grab_update(hand)
 	if _eaten or not is_inside_tree():
 		return
+	if Net.is_online() and Net.held_by_remote(self):
+		return   # tenue par l'autre joueur : sa machine décide (net_feed)
 	var m := mouth_near(get_tree(), item.global_position, MOUTH_RADIUS)
 	if not m.is_empty():
+		if not m[2]:
+			Net.feed(self, 0.0, true)   # avant qu'elle disparaisse
 		eat(m[2])
+
+
+## Partie à deux : l'autre joueur nous l'a mise dans la bouche.
+func net_feed(_amount: float) -> void:
+	eat(true)
 
 
 func _on_grab_end(hand: Node3D) -> void:

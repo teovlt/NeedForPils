@@ -47,6 +47,17 @@ var remote_camera: Node3D
 var session: Node
 ## Raison de la dernière déconnexion (affichée par le menu à son retour).
 var last_message := ""
+## Temps de simulation (s) : avance d'un pas à chaque image physique. Date les messages
+## de position : régulier même quand une image arrive en retard (l'heure système, elle,
+## faisait accélérer et ralentir la voiture du copilote).
+var sim_time := 0.0
+## Consommations à envoyer à l'autre joueur (chemin de l'objet -> quantité), voir feed().
+var _feeds := {}
+var _feed_timer := 0.0
+## Tests : retard aléatoire (s) des messages de position reçus (option `--net-jitter=ms`),
+## pour simuler un Wi-Fi irrégulier sur une seule machine.
+var _jitter := 0.0
+var _jitter_queue: Array = []   # [instant de remise, méthode, arguments]
 
 var _udp: PacketPeerUDP          # écoute (annonces ou recherches)
 var _udp_send: PacketPeerUDP
@@ -93,7 +104,8 @@ func world_seed(salt: String) -> int:
 func other_head() -> Node3D:
 	if session == null or not is_instance_valid(session):
 		return null
-	return session.get("remote_eyes") as Node3D
+	var eyes = session.get("remote_eyes")
+	return eyes as Node3D if is_instance_valid(eyes) else null
 
 
 ## L'objet est-il tenu par une main de l'autre joueur ?
@@ -115,9 +127,40 @@ func camera_for(it: VRInteractable) -> Node3D:
 	return get_viewport().get_camera_3d()
 
 
+## Partie à deux : l'objet `node`, tenu par une main du joueur local, est à la bouche
+## de l'autre joueur, qui en consomme `amount` (bouffée, gorgée ; 0 pour une pilule).
+## Seule la machine de la main qui tient l'objet cherche une bouche (chez l'autre, la
+## main n'est qu'un reflet en retard) ; l'autre machine applique l'effet à son joueur
+## (session.on_feed -> net_feed de l'objet). Regroupé par dixièmes de seconde ;
+## `now` : envoyé tout de suite (pilule avalée, objet qui va disparaître).
+func feed(node: Node, amount := 0.0, now := false) -> void:
+	if not is_online() or session == null or not is_instance_valid(session):
+		return
+	var path := String(session.get_parent().get_path_to(node))
+	_feeds[path] = float(_feeds.get(path, 0.0)) + amount
+	if now:
+		_flush_feeds()
+	elif _feed_timer <= 0.0:
+		_feed_timer = 0.1
+
+
+func _flush_feeds() -> void:
+	for path in _feeds:
+		rx_feed.rpc(path, _feeds[path])
+	_feeds.clear()
+	_feed_timer = 0.0
+
+
 ## Action clavier (raccourci) : faite chez soi et rejouée chez l'autre joueur.
 func perform(node: Node, method: StringName, args: Array = []) -> void:
 	node.callv(method, args)
+	if is_online() and session and is_instance_valid(session) and not applying_remote:
+		rx_call.rpc(String(session.get_parent().get_path_to(node)), String(method), args)
+
+
+## Fait faire `method` au même objet chez l'autre joueur seulement (le résultat d'une
+## action qui vient d'avoir lieu chez soi). Méthode à ajouter à NetSession.ALLOWED_CALLS.
+func remote_call(node: Node, method: StringName, args: Array = []) -> void:
 	if is_online() and session and is_instance_valid(session) and not applying_remote:
 		rx_call.rpc(String(session.get_parent().get_path_to(node)), String(method), args)
 
@@ -180,6 +223,18 @@ func _start_join(ip: String) -> void:
 	role = Role.COPILOT
 	state = State.JOINING
 	_status("Partie trouvée (%s), connexion..." % ip, "reseau_trouvee")
+
+
+func _physics_process(delta: float) -> void:
+	sim_time += delta
+	var now := Time.get_ticks_msec() / 1000.0
+	while not _jitter_queue.is_empty() and _jitter_queue[0][0] <= now:
+		var e: Array = _jitter_queue.pop_front()
+		_to_session(e[1], e[2])
+	if not _feeds.is_empty():
+		_feed_timer -= delta
+		if _feed_timer <= 0.0:
+			_flush_feeds()
 
 
 func _process(delta: float) -> void:
@@ -319,6 +374,8 @@ func _check_command_line() -> void:
 			find_or_host()   # comme le bouton JOUER À DEUX
 		elif arg.begins_with("--join="):
 			_start_join(arg.trim_prefix("--join="))
+		elif arg.begins_with("--net-jitter="):
+			_jitter = float(arg.trim_prefix("--net-jitter=")) / 1000.0
 		elif arg == "--perftest":
 			# banc de mesure sur le casque (tools/perf_cycle.gd), avec --solo
 			var pc: Node = load("res://tools/perf_cycle.gd").new()
@@ -375,7 +432,7 @@ func _to_session(method: StringName, args: Array) -> void:
 
 @rpc("authority", "unreliable_ordered", "call_remote", 1)
 func rx_car(data: Array) -> void:
-	_to_session(&"on_car", [data])
+	_to_session_jittered(&"on_car", [data])
 
 
 @rpc("authority", "reliable", "call_remote", 2)
@@ -385,12 +442,35 @@ func rx_world(data: Dictionary) -> void:
 
 @rpc("any_peer", "unreliable_ordered", "call_remote", 3)
 func rx_pose(data: Array) -> void:
-	_to_session(&"on_pose", [data])
+	_to_session_jittered(&"on_pose", [data])
+
+
+func _to_session_jittered(method: StringName, args: Array) -> void:
+	if _jitter <= 0.0:
+		_to_session(method, args)
+		return
+	# dans l'ordre d'arrivée (comme unreliable_ordered), chacun plus ou moins en retard
+	var at := Time.get_ticks_msec() / 1000.0 + randf() * _jitter
+	if not _jitter_queue.is_empty():
+		at = maxf(at, _jitter_queue[-1][0])
+	_jitter_queue.append([at, method, args])
 
 
 @rpc("any_peer", "reliable", "call_remote", 2)
-func rx_hand(hand: int, kind: int, path: String, local_xf: Transform3D) -> void:
-	_to_session(&"on_hand", [hand, kind, path, local_xf])
+func rx_hand(hand: int, kind: int, path: String, local_xf: Transform3D, t: float, vel: Vector3) -> void:
+	_to_session(&"on_hand", [hand, kind, path, local_xf, t, vel])
+
+
+## L'autre joueur nous fait consommer l'objet `path` (voir feed()).
+@rpc("any_peer", "reliable", "call_remote", 2)
+func rx_feed(path: String, amount: float) -> void:
+	_to_session(&"on_feed", [path, amount])
+
+
+## Objets en vrac dans la voiture qui ont bougé chez le conducteur (voir NetSession).
+@rpc("authority", "unreliable_ordered", "call_remote", 6)
+func rx_items(list: Array) -> void:
+	_to_session(&"on_items", [list])
 
 
 @rpc("any_peer", "reliable", "call_remote", 2)

@@ -46,7 +46,7 @@ var busy := false
 ## Avancement 0..1 du chargement en cours (lecture du fichier puis préparation).
 var progress := 0.0
 
-var _packed := {}       # chemin -> PackedScene déjà chargée
+var _packed := {}       # chemin -> PackedScene préchargée, vidé à chaque changement de scène
 var _requested := {}    # chemin -> true (chargement en arrière-plan lancé)
 var _veil: Node3D
 var _sphere: MeshInstance3D
@@ -100,6 +100,10 @@ func change_scene(path: String, fade_in := 0.4) -> void:
 		_update_veil()
 	get_tree().paused = false
 	get_tree().change_scene_to_packed(packed)
+	# On ne garde aucune scène en cache : sinon le menu (scène, interface, musique)
+	# restait en mémoire pendant la partie, et la partie pendant le menu.
+	packed = null
+	_packed.clear()
 	await _cover_new_scene()
 	busy = false
 	loading_finished.emit(path)

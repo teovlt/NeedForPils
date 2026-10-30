@@ -35,6 +35,7 @@ var _foam: CPUParticles3D
 var _gulp_t := 0.0
 var _auto_drink := false
 var _auto_remote := false
+var _net_drink_t := 0.0          # partie à deux : l'autre joueur nous fait boire (s restantes)
 
 
 func _ready() -> void:
@@ -146,30 +147,33 @@ func _apply_open(instant: bool) -> void:
 
 
 func _process(delta: float) -> void:
+	_net_drink_t = maxf(_net_drink_t - delta, 0.0)
 	if item == null or not opened or fill <= 0.0:
 		return
 	var up := item.global_basis.y.normalized().dot(Vector3.UP)
 	var rate := 0.0
-	var remote := Net.is_online() and Net.held_by_remote(self)
+	# tenue par l'autre joueur : c'est sa machine qui cherche une bouche ; si c'est la
+	# nôtre, elle nous envoie les gorgées (net_feed)
+	var remote_held := Net.is_online() and Net.held_by_remote(self)
+	var remote := remote_held
+	var feed_other := false
 	if _auto_drink:
 		rate = drink_rate * 1.5
 		remote = remote or _auto_remote
-	elif is_grabbed():
+	elif is_grabbed() and not remote_held:
 		var m := EdiblePickable.mouth_near(get_tree(), mouth_point(), MOUTH_RADIUS)
 		if not m.is_empty() and up < 0.97:
 			rate = drink_rate * lerpf(0.4, 1.0, clampf((0.95 - up) / 0.6, 0.0, 1.0))
 			remote = not m[2]   # à la bouche de l'autre joueur : c'est lui qui boit
+			feed_other = remote
 	if rate > 0.0:
 		var q := minf(rate * delta, fill)
 		fill -= q
 		drunk_amount += q
 		if not remote:
-			var add := get_tree().get_first_node_in_group(PillAddiction.GROUP)
-			if add and add.has_method("drink_beer"):
-				add.drink_beer(q)
-			var f := get_tree().get_first_node_in_group(Fatigue.GROUP)
-			if f and f.has_method("drink_beer"):
-				f.drink_beer(q)
+			_drink_effect(q)
+		if feed_other:
+			Net.feed(self, q)
 		_gulp_t -= delta
 		if _gulp_t <= 0.0:
 			_gulp_t = 0.8
@@ -178,7 +182,7 @@ func _process(delta: float) -> void:
 			for h in _grab_hands:
 				if h.has_method("pulse"):
 					h.pulse(0.15, 0.05)
-	else:
+	elif _net_drink_t <= 0.0:   # (à notre bouche par l'autre joueur : on boit, voir net_feed)
 		_gulp_t = 0.0
 		# penchée sans boire : la bière se renverse
 		var thresh := lerpf(-0.2, 0.4, fill)
@@ -187,6 +191,32 @@ func _process(delta: float) -> void:
 	if fill <= 0.001:
 		fill = 0.0
 		_auto_drink = false
+
+
+func _drink_effect(q: float) -> void:
+	var add := get_tree().get_first_node_in_group(PillAddiction.GROUP)
+	if add and add.has_method("drink_beer"):
+		add.drink_beer(q)
+	var f := get_tree().get_first_node_in_group(Fatigue.GROUP)
+	if f and f.has_method("drink_beer"):
+		f.drink_beer(q)
+
+
+## Partie à deux : l'autre joueur nous fait boire une gorgée `q` de la canette.
+func net_feed(q: float) -> void:
+	if not opened:
+		opened = true
+		_apply_open(true)
+	q = minf(q, fill)
+	if q <= 0.0:
+		return
+	fill -= q
+	drunk_amount += q
+	_drink_effect(q)
+	if _net_drink_t <= 0.0 and _gulp:
+		_gulp.pitch_scale = randf_range(0.85, 1.05)
+		_gulp.play()
+	_net_drink_t = 0.3
 
 
 ## « Pschitt » de l'ouverture : bruit blanc filtré qui retombe.
