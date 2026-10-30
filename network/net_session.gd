@@ -944,7 +944,8 @@ func _ensure_remote_player() -> void:
 	remote_player.set_meta("no_held_collision", true)
 	car.add_child(remote_player)
 	# corps assis simple ; haut rouge pour le conducteur, bleu pour le copilote
-	_avatar = NetAvatar.new(Color(0.55, 0.22, 0.18) if Net.is_copilot() else Color(0.18, 0.32, 0.55))
+	# (l'autre est le conducteur chez le copilote : barbe rousse)
+	_avatar = NetAvatar.new(Color(0.55, 0.22, 0.18) if Net.is_copilot() else Color(0.18, 0.32, 0.55), Net.is_copilot())
 	_avatar.name = "Avatar"
 	remote_player.add_child(_avatar)
 	_remote_head = _avatar.head

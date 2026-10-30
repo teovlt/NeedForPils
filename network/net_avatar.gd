@@ -3,12 +3,14 @@ extends Node3D
 ## Corps très simple de l'autre joueur (partie à deux), assis sur son siège : tête avec
 ## cheveux, nez et deux yeux qui clignent, cou, buste, bras qui rejoignent ses mains
 ## (coude plié vers le bas et l'extérieur), cuisses et tibias jusqu'au plancher.
+## Le conducteur a une barbe rousse (collier, favoris, moustache, pointe au menton).
 ## Tout est en formes de base, posé à chaque image par `pose()` (repère de la voiture).
 
 const SKIN := Color(0.86, 0.67, 0.53)
 const HAIR := Color(0.2, 0.13, 0.08)
 const PANTS := Color(0.16, 0.18, 0.24)
 const SHOES := Color(0.08, 0.08, 0.09)
+const BEARD := Color(0.72, 0.30, 0.10)
 const UPPER_ARM := 0.29
 const FOREARM := 0.27
 const LIMB_RADIUS := 0.045
@@ -17,14 +19,16 @@ const LIMB_RADIUS := 0.045
 var head: Node3D
 
 var _shirt: Color
+var _beard := false
 var _parts := {}             # nom -> MeshInstance3D posés chaque image
 var _eyes: Array[Node3D] = []
 var _blink_t := 3.0
 var _blink := 0.0
 
 
-func _init(shirt: Color) -> void:
+func _init(shirt: Color, beard := false) -> void:
 	_shirt = shirt
+	_beard = beard
 
 
 func _ready() -> void:
@@ -45,6 +49,8 @@ func _ready() -> void:
 		_sphere(eye, 0.011, Vector3(0, 0, -0.016), _mat(Color(0.06, 0.05, 0.05)))
 		_sphere(head, 0.012, Vector3(0.06 * side, 0.0, 0.025), skin)   # oreille
 		_eyes.append(eye)
+	if _beard:
+		_add_beard()
 	var shirt := _mat(_shirt)
 	var pants := _mat(PANTS)
 	_limb("Neck", 0.04, skin)
@@ -119,6 +125,18 @@ static func _elbow(shoulder: Vector3, hand: Vector3, pole: Vector3) -> Vector3:
 
 
 # --- Formes ----------------------------------------------------------------------------
+
+## Barbe rousse : collier qui épouse la mâchoire, pointe sous le menton, favoris qui
+## rejoignent les cheveux, moustache (tête : visage vers -Z).
+func _add_beard() -> void:
+	var m := _mat(BEARD)
+	m.roughness = 1.0
+	_sphere(head, 0.078, Vector3(0, -0.058, -0.022), m, Vector3(1.08, 0.82, 0.86))   # collier
+	_sphere(head, 0.036, Vector3(0, -0.1, -0.055), m, Vector3(1.1, 1.0, 0.85))      # pointe
+	for side in [-1.0, 1.0]:
+		_sphere(head, 0.024, Vector3(0.08 * side, -0.005, 0.0), m, Vector3(0.6, 1.9, 1.2))       # favori
+		_sphere(head, 0.02, Vector3(0.019 * side, -0.043, -0.086), m, Vector3(1.5, 0.55, 0.7))   # moustache
+
 
 func _mat(c: Color) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
