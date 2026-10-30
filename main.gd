@@ -16,7 +16,7 @@ func _ready():
 	if xr and xr.is_initialized():
 		super._ready()
 		# Initialise le casque VR quand la session démarre
-		if xr_interface and xr_interface.is_initialized():
+		if xr_interface and xr_interface.is_initialized() 				and not xr_interface.session_begun.is_connected(_on_openxr_session_begun):
 			xr_interface.session_begun.connect(_on_openxr_session_begun)
 	else:
 		_start_desktop_mode()

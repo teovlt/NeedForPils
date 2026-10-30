@@ -61,8 +61,8 @@ func _ready() -> void:
 	add_to_group(GROUP)
 	_road = get_node_or_null(road_path) as RoadGenerator
 	_car = get_node_or_null(car_path) as Node3D
-	_creak = _make_creak()
-	_crash = _make_crash()
+	GeneratedSound.make_later(_make_creak, self, &"_creak")
+	GeneratedSound.make_later(_make_crash, self, &"_crash")
 	if _road:
 		_road.origin_shifted.connect(func(off: Vector3): _last_pos -= off)
 

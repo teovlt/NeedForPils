@@ -319,6 +319,15 @@ func _check_command_line() -> void:
 			find_or_host()   # comme le bouton JOUER À DEUX
 		elif arg.begins_with("--join="):
 			_start_join(arg.trim_prefix("--join="))
+		elif arg == "--perftest":
+			# banc de mesure sur le casque (tools/perf_cycle.gd), avec --solo
+			var pc: Node = load("res://tools/perf_cycle.gd").new()
+			pc.name = "PerfCycle"
+			add_child(pc)
+		elif arg == "--solo":
+			# partie solo tout de suite, sans le menu (tests sur le casque par adb :
+			# am start ... --esa command_line_params "++,--solo")
+			change_scene_async.call_deferred(GAME_SCENE)
 
 
 # --- Démarrage de la partie --------------------------------------------------------
@@ -328,6 +337,13 @@ func _rpc_start_game(seed_value: int) -> void:
 	game_seed = seed_value
 	state = State.IN_GAME
 	SceneLoader.change_scene(GAME_SCENE)
+
+
+## Passe à une scène en la chargeant dans un fil de travail, derrière l'écran de
+## chargement (voir menu/scene_loader.gd) : l'image ne fige pas pendant la lecture
+## des fichiers (~1 s sur PC, bien plus sur le casque).
+func change_scene_async(path: String) -> void:
+	SceneLoader.change_scene(path)
 
 
 ## Le conducteur relance la partie (rejouer) : le copilote recharge aussi.

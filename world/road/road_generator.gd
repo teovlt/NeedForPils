@@ -238,13 +238,19 @@ func _ready() -> void:
 		dm.road = self
 		dm.car = _target
 		add_child(dm)
-	# Premiers tronçons tout de suite (synchrone) pour que la voiture ait un sol :
-	# jusqu'à 80 m devant la voiture (la route peut commencer loin derrière elle).
+	# Premiers tronçons tout de suite pour que la voiture ait un sol : jusqu'à 80 m
+	# devant la voiture (la route peut commencer loin derrière elle). Calculés en
+	# parallèle sur les fils de travail (un par cœur) puis attendus : le démarrage
+	# bloque bien moins longtemps qu'en les calculant l'un après l'autre.
 	var t0 := _target.global_position if _target else global_position
 	var n := 0
 	while n < 3 or ((to_global(_pos) - global_position).length() < (t0 - global_position).length() + 80.0 and n < 40):
-		_finalize(_queue_chunk(false))
+		_queue_chunk(true)
 		n += 1
+	for job in _pending:
+		WorkerThreadPool.wait_for_task_completion(job["task"])
+		_finalize(job)
+	_pending.clear()
 	# Collisions des premiers tronçons tout de suite.
 	while not _collision_queue.is_empty():
 		var item: Dictionary = _collision_queue.pop_front()

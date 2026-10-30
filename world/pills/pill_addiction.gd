@@ -149,12 +149,12 @@ func _ready() -> void:
 	_car = get_node_or_null(car_path)
 	_heart = AudioStreamPlayer.new()
 	_heart.name = "Heartbeat"
-	_heart.stream = _make_heartbeat()
+	GeneratedSound.make_later(_make_heartbeat, _heart, &"stream")
 	_heart.volume_db = -80.0
 	add_child(_heart)
 	_gulp = AudioStreamPlayer.new()
 	_gulp.name = "PillSound"
-	_gulp.stream = _make_pill_sound()
+	GeneratedSound.make_later(_make_pill_sound, _gulp, &"stream")
 	_gulp.volume_db = -4.0
 	add_child(_gulp)
 	_voice = AudioStreamPlayer.new()
@@ -165,7 +165,7 @@ func _ready() -> void:
 	add_child(_voice)
 	_hiccup = AudioStreamPlayer.new()
 	_hiccup.name = "Hiccup"
-	_hiccup.stream = _make_hiccup()
+	GeneratedSound.make_later(_make_hiccup, _hiccup, &"stream")
 	_hiccup.volume_db = -3.0
 	add_child(_hiccup)
 	RenderingServer.global_shader_parameter_set("pill_assimilation", 0.0)

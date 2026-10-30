@@ -27,6 +27,9 @@ extends Node3D
 ##   haut-parleur : l'image saccadait et les 4 haut-parleurs partaient décalés (son
 ##   décalé entre gauche et droite). Un WAV se cale instantanément : ils partent
 ##   ensemble. Tant que le morceau n'est pas prêt (début de partie), grésillement.
+##   Les fichiers ne sont pas chargés au démarrage (~56 Mo pour 10 morceaux : ça
+##   figeait le lancement) : le fil de travail charge celui qu'il décode. D'ici là, la
+##   durée d'un morceau est estimée (`PLAYLIST_GUESS_LENGTH`), puis corrigée.
 ## - La nuit, l'écran allumé laisse échapper une légère lueur bleutée sur la console et
 ##   le tableau de bord (rien en plein jour : elle suit l'obscurité de la météo).
 ## Clavier (test) : F2 / F3 station précédente / suivante, F4 marche / arrêt,
@@ -244,7 +247,12 @@ func _label(text: String, size: int, color: Color) -> Label3D:
 	return l
 
 
-## Charge les musiques d'un dossier (ordre aléatoire, sans boucle).
+## Durée supposée d'un morceau pas encore chargé (s).
+const PLAYLIST_GUESS_LENGTH := 210.0
+
+
+## Liste les musiques d'un dossier (ordre aléatoire, sans boucle) ; elles sont
+## chargées plus tard, une à une, par le fil de décodage.
 func _load_playlist(dir: String) -> void:
 	var files := PackedStringArray()
 	if ResourceLoader.has_method("list_directory"):
@@ -258,18 +266,8 @@ func _load_playlist(dir: String) -> void:
 			names.append(f)
 	names.shuffle()
 	for f in names:
-		var st := load(dir.path_join(f)) as AudioStream
-		if st == null:
-			continue
-		if st is AudioStreamWAV:
-			(st as AudioStreamWAV).loop_mode = AudioStreamWAV.LOOP_DISABLED
-		elif "loop" in st:
-			st.set("loop", false)
-		var length := st.get_length()
-		if length < 1.0:
-			continue
-		_playlist.append({"title": f.get_basename(), "stream": st, "length": length})
-		_playlist_total += length
+		_playlist.append({"title": f.get_basename(), "path": dir.path_join(f), "length": PLAYLIST_GUESS_LENGTH})
+		_playlist_total += PLAYLIST_GUESS_LENGTH
 
 
 ## Décodage en mémoire des morceaux de la playlist (voir l'en-tête) : celui en cours et
@@ -285,7 +283,9 @@ func _update_decoding() -> void:
 		if _decode_out:
 			_decoded[_decode_track] = _decode_out
 			# durée exacte (celle annoncée par un mp3 est approximative)
+			var old_len: float = _playlist[_decode_track]["length"]
 			_playlist[_decode_track]["length"] = _decode_out.get_length()
+			_playlist_total += _decode_out.get_length() - old_len
 		_decode_out = null
 		# morceau attendu (grésillement en attendant) : on le lance
 		if _is_playlist(_loaded) and _track < 0 and _decoded.has(_playlist_now()[0]):
@@ -297,12 +297,8 @@ func _update_decoding() -> void:
 			_decoded.erase(k)   # libère la mémoire des morceaux passés
 	for i in wanted:
 		if not _decoded.has(i):
-			var src: AudioStream = _playlist[i]["stream"]
-			if src is AudioStreamWAV:
-				_decoded[i] = src   # déjà en mémoire
-				continue
 			_decode_track = i
-			_decode_task = WorkerThreadPool.add_task(_decode_job.bind(src, AudioServer.get_mix_rate()), false, "Radio : décodage")
+			_decode_task = WorkerThreadPool.add_task(_decode_job.bind(_playlist[i]["path"], AudioServer.get_mix_rate()), false, "Radio : décodage")
 			return
 
 
@@ -310,7 +306,17 @@ func _update_decoding() -> void:
 ## Par tranches de ~1,5 s converties tout de suite en 16 bits : la mémoire ne dépasse
 ## pas la taille du WAV final (~65 Mo pour 6 min ; tout décoder en flottants d'abord
 ## montait à ~330 Mo, risqué sur le casque).
-func _decode_job(src: AudioStream, rate: float) -> void:
+func _decode_job(path: String, rate: float) -> void:
+	var src := load(path) as AudioStream
+	if src == null:
+		_decode_out = null
+		return
+	if src is AudioStreamWAV:
+		(src as AudioStreamWAV).loop_mode = AudioStreamWAV.LOOP_DISABLED
+		_decode_out = src   # déjà décodé
+		return
+	if "loop" in src:
+		src.set("loop", false)
 	var pb := src.instantiate_playback()
 	pb.start(0.0)
 	var need := int(src.get_length() * rate)
