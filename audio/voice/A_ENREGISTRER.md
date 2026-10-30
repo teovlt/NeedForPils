@@ -18,10 +18,11 @@ En partie à deux, le copilote entend les mêmes répliques que le conducteur.
 
 | Fait | Fichier                      | Réplique                                             | Quand c'est joué                                                                                        | Réglage                            |
 | ---- | ---------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ---------------------------------- |
-| [ ]  | `audio/voice/demarre.wav`    | (intro : trouver les clés et démarrer, texte libre)  | 1 s après le début de la partie, voiture garée moteur coupé                                             | `ChaseDirector.start_voice_path`   |
-| [ ]  | `audio/voice/manque.wav`     | « Je suis en manque bordel, il me faut un truc là. » | Quand le manque atteint 45 % (une fois, jusqu'à la pilule suivante)                                     | `PillAddiction.craving_voice_path` |
-| [ ]  | `audio/voice/baillement.wav` | (un long bâillement, 3 à 4 s, sans parole)           | Quand le conducteur est fatigué : de plus en plus souvent avec la fatigue (toutes les ~75 s puis ~22 s) | `Fatigue.yawn_voice_path`          |
-| [ ]  | `audio/voice/bourre.wav`     | je suis bourré de rok                                | Quand on devient bien bourré (vers 2 canettes et demie), une fois par cuite                             | `PillAddiction.drunk_voice_id`     |
+| [x]  | `audio/voice/demarre.wav`    | (intro : trouver les clés et démarrer, texte libre)  | 1 s après le début de la partie, voiture garée moteur coupé                                             | `ChaseDirector.start_voice_path`   |
+| [x]  | `audio/voice/manque.wav`     | « Je suis en manque bordel, il me faut un truc là. » | Quand le manque atteint 45 % (une fois, jusqu'à la pilule suivante)                                     | `PillAddiction.craving_voice_path` |
+| [x]  | `audio/voice/baillement.wav` | (un long bâillement, 3 à 4 s, sans parole)           | Quand le conducteur est fatigué : de plus en plus souvent avec la fatigue (toutes les ~75 s puis ~22 s) | `Fatigue.yawn_voice_path`          |
+| [x]  | `audio/voice/bourre.wav`     | je suis bourré de rok                                | Quand on devient bien bourré (vers 2 canettes et demie), une fois par cuite                             | `PillAddiction.drunk_voice_id`     |
+| [x]  | `audio/voice/intro_telephone.wav` | (conversation téléphonique de l'intro, enregistrée) | Début de partie : le téléphone sonne et réveille le joueur ; joué quand on décroche (téléphone en main, bouton vert appuyé avec l'autre main ; F sans casque) | `Phone.call_voice` |
 
 ## Narrateur (textes affichés devant les yeux)
 
@@ -45,40 +46,40 @@ seulement la phrase. `{n}` : nombre affiché à l'écran, pas besoin de le dire.
 
 | Fait | Fichier                 | Réplique                                                      | Quand c'est joué         |
 | ---- | ----------------------- | ------------------------------------------------------------- | ------------------------ |
-| [ ]  | `conseil_manque.wav`    | « Nous sommes trop lent, il me faudrait un cacheton »         | Manque au-dessus de 65 % |
-| [ ]  | `conseil_proche.wav`    | « Ils nous collent au cul mec »                               | Police à moins de 45 m   |
-| [ ]  | `conseil_inversion.wav` | « Woa c'est trop le kiff »                                    | Assimilation à 45 %      |
-| [ ]  | `conseil_presque.wav`   | « Chui cuit gros jgamberge » (écran : « ASSIMILATION {n} % ») | Assimilation à 80 %      |
+| [x]  | `conseil_manque.wav`    | « Nous sommes trop lent, il me faudrait un cacheton »         | Manque au-dessus de 65 % |
+| [x]  | `conseil_proche.wav`    | « Ils nous collent au cul mec »                               | Police à moins de 45 m   |
+| [x]  | `conseil_inversion.wav` | « Woa c'est trop le kiff »                                    | Assimilation à 45 %      |
+| [x]  | `conseil_presque.wav`   | « Chui cuit gros jgamberge » (écran : « ASSIMILATION {n} % ») | Assimilation à 80 %      |
 
 ### Événements
 
 | Fait | Fichier                  | Réplique                                    | Quand c'est joué                        |
 | ---- | ------------------------ | ------------------------------------------- | --------------------------------------- |
-| [ ]  | `pilule_boost.wav`       | « La on est bieng »                         | Première pilule avalée                  |
-| [ ]  | `police_debut.wav`       | « Y a les hendeks qui arrivent »            | Première poursuite                      |
-| [ ]  | `police_barrage.wav`     | « Oh non ils ont vu les bières fais gaffe » | Première poursuite, partie d'un barrage |
-| [ ]  | `police_semee.wav`       | nik les keufs                               | Police semée (chaque fois)              |
-| [ ]  | `rivaux_debut.wav`       | « No heisenberg »                           | Première apparition du camping-car      |
-| [ ]  | `rivaux_retour.wav`      | « Le retour de la meth mobile putaing »     | Apparitions suivantes                   |
-| [ ]  | `rivaux_semes.wav`       | « Tchao le chauve »                         | Camping-car semé                        |
-| [ ]  | `rivaux_tir_premier.wav` | « Les enculés ils ont des fers »            | Première balle reçue                    |
-| [ ]  | `rivaux_tir_2.wav`       | « Encore deux balles et ca lâche »          | Il reste 2 balles                       |
-| [ ]  | `rivaux_tir_1.wav`       | « Nique zebi roule »                        | Il reste 1 balle                        |
+| [x]  | `pilule_boost.wav`       | « La on est bieng »                         | Première pilule avalée                  |
+| [x]  | `police_debut.wav`       | « Y a les hendeks qui arrivent »            | Première poursuite                      |
+| [x]  | `police_barrage.wav`     | « Oh non ils ont vu les bières fais gaffe » | Première poursuite, partie d'un barrage |
+| [x]  | `police_semee.wav`       | nik les keufs                               | Police semée (chaque fois)              |
+| [x]  | `rivaux_debut.wav`       | « No heisenberg »                           | Première apparition du camping-car      |
+| [x]  | `rivaux_retour.wav`      | « Le retour de la meth mobile putaing »     | Apparitions suivantes                   |
+| [x]  | `rivaux_semes.wav`       | « Tchao le chauve »                         | Camping-car semé                        |
+| [x]  | `rivaux_tir_premier.wav` | « Les enculés ils ont des fers »            | Première balle reçue                    |
+| [x]  | `rivaux_tir_2.wav`       | « Encore deux balles et ca lâche »          | Il reste 2 balles                       |
+| [x]  | `rivaux_tir_1.wav`       | « Nique zebi roule »                        | Il reste 1 balle                        |
 
 ### Livraisons
 
 | Fait | Fichier                     | Réplique                          | Quand c'est joué                     |
 | ---- | --------------------------- | --------------------------------- | ------------------------------------ |
-| [ ]  | `livraison_encore.wav`      | « Mets en deuxième »              | Commande de 2 : premier sachet livré |
-| [ ]  | `livraison_ok.wav`          | « Lezzgo direction la prochaine » | Livraison réussie                    |
-| [ ]  | `livraison_ok_sac_vide.wav` | « On a pu de came zebi »          | Dernier sachet livré                 |
-| [ ]  | `livraison_ratee.wav`       | « Putaing on l'a raté »           | Adresse dépassée                     |
+| [x]  | `livraison_encore.wav`      | « Mets en deuxième »              | Commande de 2 : premier sachet livré |
+| [x]  | `livraison_ok.wav`          | « Lezzgo direction la prochaine » | Livraison réussie                    |
+| [x]  | `livraison_ok_sac_vide.wav` | « On a pu de came zebi »          | Dernier sachet livré                 |
+| [x]  | `livraison_ratee.wav`       | « Putaing on l'a raté »           | Adresse dépassée                     |
 
 ### Fins de partie
 
 | Fait | Fichier          | Réplique                                  | Quand c'est joué       |
 | ---- | ---------------- | ----------------------------------------- | ---------------------- |
-| [ ]  | `fin_police.wav` | « Ils t'ont rattrapé. La police t'a eu. » | Rattrapé par la police |
+| [x]  | `fin_police.wav` | « Ils t'ont rattrapé. La police t'a eu. » | Rattrapé par la police |
 | [ ]  |                  |                                           |                        |
 | [ ]  |                  |                                           |                        |
 | [ ]  |                  |                                           |                        |

@@ -2,18 +2,22 @@ class_name Phone
 extends VRPickable
 ## Téléphone posé sur le tableau de bord : c'est l'intro de la partie.
 ##
-## Au début (ChaseDirector -> ring()), il sonne et vibre : sonnerie et bourdonnement
-## (fabriqués par le code), écran « APPEL ENTRANT », téléphone qui tremble sur le
-## tableau de bord, et les manettes vibrent en même temps. On décroche en le prenant
-## (ou A / X, ou F sans casque en le visant) : l'appel joue audio/voice/appel_intro
-## (.ogg, .mp3 ou .wav, voir VoiceLine ; en attendant, 0,5 s de silence). Sans réponse
+## Au début (ChaseDirector -> ring()), il sonne et vibre et réveille le joueur
+## (ringing_started) : sonnerie et bourdonnement (fabriqués par le code), écran
+## « APPEL ENTRANT » avec un bouton vert « DÉCROCHER », téléphone qui tremble sur le
+## tableau de bord, et les manettes vibrent en même temps.
+## Pour décrocher, il faut le tenir en main et appuyer sur le bouton vert avec l'index
+## de l'autre main (sans casque : le tenir à la souris et appuyer sur F). L'appel joue
+## alors audio/voice/intro_telephone (.ogg, .mp3 ou .wav, voir VoiceLine). Sans réponse
 ## au bout de `max_ring_time`, appel manqué. Dans les deux cas, call_finished est émis
 ## à la fin (la voix « trouve les clés, démarre » suit).
 ## Partie à deux : la sonnerie part chez les deux ; celui qui décroche décroche chez les
-## deux (la saisie est rejouée chez l'autre).
+## deux (l'appui sur le bouton est rejoué chez l'autre : Net.perform → press).
 ## Repère du modèle : écran sur la face +Y, haut du téléphone vers -Z.
 
 signal call_finished
+## Première sonnerie : le joueur se réveille (ChaseDirector).
+signal ringing_started
 
 const PHONE_GROUP := "phone"
 const RATE := 22050
@@ -22,9 +26,15 @@ const RING_CYCLE := 2.6
 const RING_ON := 1.3
 const SCREEN_Y := 0.0047
 const SCREEN_SIZE := Vector2(0.069, 0.15)
+## Bouton vert « DÉCROCHER » sur l'écran (repère du modèle) et distances (m) de
+## l'index de l'autre main : surbrillance et appui.
+const BUTTON_POS := Vector3(0.0, SCREEN_Y + 0.0004, 0.05)
+const BUTTON_RADIUS := 0.013
+const BUTTON_HOVER := 0.045
+const BUTTON_PRESS := 0.016
 
 ## Identifiant de la voix de l'appel (audio/voice/<id>.ogg / .mp3 / .wav).
-@export var call_voice := "appel_intro"
+@export var call_voice := "intro_telephone"
 @export var caller_name := "NUMÉRO MASQUÉ"
 ## Délai (s) entre le début de la partie et la première sonnerie.
 @export var ring_delay := 2.0
@@ -52,6 +62,9 @@ var _lbl_name: Label3D
 var _lbl_bottom: Label3D
 var _model: Node3D
 var _model_xf := Transform3D.IDENTITY
+var _button: MeshInstance3D
+var _button_mat: StandardMaterial3D
+var _button_hover := false
 
 
 func _ready() -> void:
@@ -87,19 +100,51 @@ func is_ringing() -> bool:
 
 # --- Décrocher -------------------------------------------------------------------
 
-func _on_grab_begin(hand: Node3D) -> void:
-	super._on_grab_begin(hand)
+## Appui sur le bouton vert (index de l'autre main, ou rejoué en partie à deux).
+func press() -> void:
 	if state == State.RINGING:
 		answer()
 
 
+## Sans casque : téléphone tenu à la souris, F appuie sur le bouton.
 func toggle() -> void:
-	if state == State.RINGING:
-		answer()
+	if state == State.RINGING and is_grabbed():
+		press()
 
 
+## A/X de la main qui le tient : rien (on décroche avec l'autre main).
 func vr_button() -> void:
-	toggle()
+	pass
+
+
+## Index d'une main VR qui ne tient pas le téléphone, près du bouton : surbrillance,
+## puis appui.
+func _update_button() -> void:
+	if _button == null:
+		return
+	var pos := item.global_transform * BUTTON_POS
+	var hover := false
+	if is_grabbed():
+		for n in get_tree().get_nodes_in_group(VRHandInteractor.GROUP):
+			var h := n as VRHandInteractor
+			if h in _grab_hands or not h.can_touch():
+				continue
+			var d := h.fingertip_position().distance_to(pos)
+			if d < BUTTON_HOVER:
+				hover = true
+			if d < BUTTON_PRESS:
+				h.pulse(0.6, 0.05)
+				Net.perform(self, &"press")
+				return
+	if hover != _button_hover:
+		_button_hover = hover
+		if hover:
+			for n in get_tree().get_nodes_in_group(VRHandInteractor.GROUP):
+				if not n in _grab_hands:
+					(n as VRHandInteractor).pulse(0.15, 0.02)
+	var glow := 0.8 + 0.6 * absf(sin(_ring_t * 3.5))
+	_button_mat.emission_energy_multiplier = 3.0 if _button_hover else glow
+	_button.scale = Vector3.ONE * (1.15 if _button_hover else 1.0)
 
 
 func answer() -> void:
@@ -135,6 +180,8 @@ func _finish(text: String) -> void:
 
 func _stop_ringing() -> void:
 	_ring_player.stop()
+	if _button:
+		_button.visible = false
 	if _model:
 		_model.transform = _model_xf
 
@@ -154,10 +201,13 @@ func _process(delta: float) -> void:
 				_lbl_bottom.text = "DÉCROCHER"
 				_lbl_bottom.modulate = Color(0.35, 1.0, 0.45)
 				_ring_player.play()
+				_button.visible = true
 				print("Téléphone : appel entrant")
+				ringing_started.emit()
 		State.RINGING:
 			_ring_t += delta
 			_update_ringing(delta)
+			_update_button()
 			if _ring_t >= max_ring_time:
 				_stop_ringing()
 				_lbl_name.text = caller_name
@@ -218,6 +268,39 @@ func _build_screen() -> void:
 	_lbl_top = _label(0.0011, -0.058, Color(0.75, 0.85, 0.95))
 	_lbl_name = _label(0.0021, -0.022, Color(1, 1, 1))
 	_lbl_bottom = _label(0.0016, 0.055, Color(0.35, 1.0, 0.45))
+	_lbl_bottom.position.z = 0.03   # au-dessus du bouton
+	# bouton vert rond (à appuyer avec l'index de l'autre main), combiné blanc dessus
+	_button = MeshInstance3D.new()
+	_button.name = "AnswerButton"
+	var cm := CylinderMesh.new()
+	cm.top_radius = BUTTON_RADIUS
+	cm.bottom_radius = BUTTON_RADIUS
+	cm.height = 0.0012
+	cm.radial_segments = 20
+	cm.rings = 1
+	_button.mesh = cm
+	_button_mat = StandardMaterial3D.new()
+	_button_mat.albedo_color = Color(0.15, 0.85, 0.3)
+	_button_mat.emission_enabled = true
+	_button_mat.emission = Color(0.15, 0.9, 0.3)
+	_button_mat.emission_energy_multiplier = 1.2
+	_button.material_override = _button_mat
+	_button.position = BUTTON_POS
+	_button.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_button.set_meta("_vr_outline", true)
+	var icon := Label3D.new()
+	icon.text = "✆"
+	icon.font_size = 64
+	icon.pixel_size = 0.0003
+	icon.outline_size = 0
+	icon.modulate = Color(1, 1, 1)
+	icon.shaded = false
+	icon.rotation = Vector3(-PI * 0.5, 0, 0)
+	icon.position = Vector3(0, 0.0008, 0)
+	icon.set_meta("_vr_outline", true)
+	_button.add_child(icon)
+	_button.visible = false
+	item.add_child.call_deferred(_button)
 
 
 func _label(pixel: float, z: float, col: Color) -> Label3D:

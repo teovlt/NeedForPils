@@ -199,6 +199,8 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_carry_backpack(delta)
 		elif autotest_scenario == "gestes":
 			_run_autotest_gestures(delta)
+		elif autotest_scenario == "telephone":
+			_run_autotest_phone(delta)
 		elif autotest_scenario == "faire_consommer":
 			_run_autotest_feed_other(delta)
 		else:
@@ -6920,4 +6922,64 @@ func _run_autotest_crash(delta: float, belted: bool) -> void:
 			get_tree().quit()
 	if _t > 12.0:
 		_log("AUTOTEST pas de choc détecté (vitesse %.0f km/h)" % (car.forward_speed * 3.6))
+		get_tree().quit()
+
+
+# --- Intro : téléphone qui sonne, pris en main, décroché avec l'index de l'autre main ---
+
+var _tp := {}
+
+
+func _run_autotest_phone(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = false
+	var ph := car.find_child("Phone", true, false).get_node("Grab") as Phone
+	if at.call(0.05):
+		for k in ["a", "b"]:
+			var holder := Node3D.new()
+			add_child(holder)
+			var h := VRHandInteractor.new()
+			holder.add_child(h)
+			h.debug_points = [Vector3(0, -100, 0), Vector3(0, -100, 0)]
+			_tp[k] = h
+		ph.ringing_started.connect(func(): _log("AUTOTEST [%.1f s] signal : sonnerie (réveil)" % _t))
+		ph.call_finished.connect(func(): _log("AUTOTEST [%.1f s] signal : appel terminé" % _t))
+		ph.ring_delay = 0.5
+		ph.ring()
+		_log("AUTOTEST voix de l'appel : %s, enregistrée=%s (%.1f s)" % [ph.call_voice, VoiceLine.has_recording(ph.call_voice), VoiceLine.length(ph.call_voice)])
+	var ha: VRHandInteractor = _tp.get("a")
+	var hb: VRHandInteractor = _tp.get("b")
+	if ha == null:
+		return
+	var eye := car.driver_seat.global_position
+	if at.call(1.0):
+		# prise en main : ne décroche pas
+		ha.get_parent().global_position = ph.item.global_position
+		ph.grab(ha)
+		_log("AUTOTEST téléphone saisi : sonne=%s" % ph.is_ringing())
+		ph.vr_button()
+		_log("AUTOTEST A/X de la main qui le tient : sonne=%s" % ph.is_ringing())
+	if ph.is_grabbed() and _t < 4.0:
+		ph.grab_update(ha)
+		cam.global_position = eye + car.global_basis.z * 0.25 + car.global_basis.y * 0.05
+		cam.look_at(ph.item.global_position)
+	var btn := ph.item.global_transform * Phone.BUTTON_POS
+	var up := ph.item.global_basis.y
+	if _t > 1.6 and _t < 2.2:
+		hb.debug_points = [btn + up * 0.035, btn]
+	elif _t >= 2.2 and _t < 2.4:
+		hb.debug_points = [btn + up * 0.004, btn]
+	if at.call(1.6):
+		_shot("telephone_1_sonne")
+	if at.call(1.9):
+		_log("AUTOTEST index de l'autre main à 3,5 cm du bouton : surbrillance=%s, sonne=%s" % [ph._button_hover, ph.is_ringing()])
+		_shot("telephone_2_doigt")
+	if at.call(2.5):
+		_log("AUTOTEST appui sur le bouton : état %d (EN APPEL=%d, TERMINÉ=%d), texte « %s »" % [ph.state, Phone.State.IN_CALL, Phone.State.DONE, ph._lbl_top.text])
+		_shot("telephone_3_decroche")
+	if at.call(4.5):
 		get_tree().quit()

@@ -119,10 +119,9 @@ func _run_intro() -> void:
 		return
 	if not play_intro:
 		_set_paused(true)
-		# arrivée en fondu depuis le noir : les premières images (compilation des
-		# shaders, route) saccadent, on ne les voit pas
+		# on dort (noir) ; le téléphone qui sonne réveille le joueur (_wake_up). Les
+		# premières images (compilation des shaders, route) saccadent : on ne les voit pas
 		_set_curtain(1.0)
-		_fade_curtain(0.0, 1.0)
 		await _wait_engine_start()
 		if not is_inside_tree():
 			return   # partie quittée (rejouer, menu) avant le démarrage
@@ -168,16 +167,29 @@ func _wait_engine_start() -> void:
 		await get_tree().process_frame
 
 
-## Intro : le téléphone sonne sur le tableau de bord (Phone) ; décroché, il joue
-## l'appel (audio/voice/appel_intro). La voix de départ suit la fin de l'appel (ou
-## l'appel manqué). Sans téléphone, elle part tout de suite.
+## Intro : on dort, réveillé par le téléphone qui sonne sur le tableau de bord (Phone) ;
+## on le prend et on décroche avec l'autre main : il joue l'appel
+## (audio/voice/intro_telephone). La voix de départ suit la fin de l'appel (ou l'appel
+## manqué). Sans téléphone, réveil et voix tout de suite.
 func _start_intro_call() -> void:
 	var phone := get_tree().get_first_node_in_group(Phone.PHONE_GROUP) as Phone
 	if phone == null:
+		_wake_up()
 		_play_start_voice()
 		return
+	phone.ringing_started.connect(_wake_up, CONNECT_ONE_SHOT)
 	phone.call_finished.connect(_play_start_voice, CONNECT_ONE_SHOT)
 	phone.ring()
+
+
+## Réveil en sursaut : les paupières s'ouvrent, retombent, se rouvrent.
+func _wake_up() -> void:
+	if net_puppet:
+		return   # le rideau vient du conducteur
+	for step in [[0.5, 0.45], [0.92, 0.3], [0.3, 0.55], [0.8, 0.25], [0.12, 0.6], [0.45, 0.3], [0.0, 0.9]]:
+		await _fade_curtain(step[0], step[1])
+		if not is_inside_tree():
+			return
 
 
 ## Voix du début (« trouve les clés, démarre… ») : à remplacer par ton enregistrement

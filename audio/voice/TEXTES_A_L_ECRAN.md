@@ -149,6 +149,7 @@ l'écran en continu.
 - Combiné d'instruments : vitesse, compte-tours, voyants (`cars/SUV4x4/cluster_display.gd`).
 - Levier de vitesses R N D 2 1 (`suv_4x4.tscn:192-224`), contacteur 0 I II III (`ignition.gd:39`).
 - Paquet « ROUTE LIBRE / FUMER TUE » (`interaction/cigarette_pack.gd:148-152`), feuilles « SLIM LIBRE / feuilles à rouler », « FILTRES » (`interaction/rolling/roll_dispenser.gd:112-125`), sachet de tabac (`interaction/rolling/tobacco_pouch.gd:89`), canettes « PILS DU BITUME » (`interaction/drinks/beer_can.gd:53`), sachets « :) x{n} » (`interaction/deal/dealer_bag.gd:29`).
+- Téléphone de l'intro : « APPEL ENTRANT », « NUMÉRO MASQUÉ », bouton « DÉCROCHER », « EN APPEL 00:12 », « APPEL TERMINÉ », « 1 APPEL MANQUÉ » (`interaction/phone.gd`) ; la conversation est la voix `intro_telephone`.
 - Voiture de police « POLICE » (`world/chase/pursuer.gd:692`).
 - Points de livraison : carton « :) / ICI :) / FRAGILE / COLIS », numéro de boîte aux lettres, balise « :) x{n} » (`world/delivery/delivery_drop.gd:72-164`).
 - Enseignes et tags des lieux (supérette, motel, aire, camp, station-service : « SUP  RETTE », « FERMÉ », « MOTEL », « CHAMBRES LIBRES », « RÉCEPTION », « CARBU 24 », prix, « OUVERT 24/24 », « PILS », « NO LIMIT »…) (`world/start/start_site.gd`, appels à `label(...)`).
