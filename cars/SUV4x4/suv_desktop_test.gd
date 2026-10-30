@@ -201,6 +201,8 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_gestures(delta)
 		elif autotest_scenario == "faire_consommer":
 			_run_autotest_feed_other(delta)
+		elif autotest_scenario == "bonnet":
+			_run_autotest_cap(delta)
 		else:
 			_run_autotest_items(delta)
 		if not _inside:
@@ -6920,4 +6922,121 @@ func _run_autotest_crash(delta: float, belted: bool) -> void:
 			get_tree().quit()
 	if _t > 12.0:
 		_log("AUTOTEST pas de choc détecté (vitesse %.0f km/h)" % (car.forward_speed * 3.6))
+		get_tree().quit()
+
+
+# --- Bonnet de docker : sur la tête de l'autre joueur, puis sur la sienne --------------
+
+var _capt := {}
+
+
+func _run_autotest_cap(delta: float) -> void:
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	car.external_input = true
+	car.brake_input = 1.0
+	_inside = false
+	var eye := car.driver_seat.global_position
+	var back := car.global_basis.rotated(car.global_basis.y, PI)   # regard vers l'avant
+	var other_eye := eye + car.global_basis.x * -0.74
+	if at.call(0.05):
+		$Weather.hour = 13.0
+		# partie à deux simulée : nous conduisons, l'autre joueur est un avatar à côté
+		var peer := ENetMultiplayerPeer.new()
+		peer.create_server(7796, 1)
+		multiplayer.multiplayer_peer = peer
+		Net.role = Net.Role.DRIVER
+		var sc := GDScript.new()
+		sc.source_code = "extends Node
+var remote_eyes: Camera3D
+"
+		sc.reload()
+		var sess := Node.new()
+		sess.set_script(sc)
+		add_child(sess)
+		var avatar := NetAvatar.new(Color(0.18, 0.32, 0.55))
+		car.add_child(avatar)
+		var other := Camera3D.new()
+		avatar.head.add_child(other)
+		sess.set("remote_eyes", other)
+		Net.session = sess
+		_capt["avatar"] = avatar
+		var holder := Node3D.new()
+		add_child(holder)
+		var h := VRHandInteractor.new()
+		holder.add_child(h)
+		h.debug_points = [Vector3(0, -100, 0), Vector3(0, -100, 0)]
+		_capt["h"] = h
+	var avatar: NetAvatar = _capt.get("avatar")
+	if avatar == null:
+		return
+	avatar.pose(car.global_transform, car.to_local(other_eye),
+			Transform3D(back.rotated(car.global_basis.y, 0.35), other_eye), [], delta)
+	var h: VRHandInteractor = _capt["h"]
+	var cap := _item("DockerCap").get_node("Grab") as DockerCap
+	if _t < 0.4:
+		# gros plan sur le bonnet posé dans la voiture
+		cam.global_position = cap.item.global_position + car.global_basis.y * 0.22 + car.global_basis.z * 0.22
+		cam.look_at(cap.item.global_position + car.global_basis.y * 0.05)
+	elif _t < 3.0:
+		cam.global_transform = Transform3D(back, eye)
+	if at.call(0.35):
+		_log("AUTOTEST bonnet posé dans %s, porté=%s" % [cap.item.get_parent().name, cap.is_worn()])
+		_shot("bonnet_objet")
+	if at.call(0.5):
+		# attrapé, lâché au-dessus de la tête de l'autre joueur
+		h.get_parent().global_position = cap.item.global_position
+		cap.grab(h)
+		var other: Node3D = Net.other_head()
+		h.get_parent().global_transform = other.global_transform * cap.wear_offset * Transform3D(Basis(), Vector3(0, 0.05, 0)) * cap._offset.affine_inverse()
+		cap.grab_update(h)
+		cap.release(h)
+		_log("AUTOTEST lâché sur la tête de l'autre : porté=%s, place conducteur=%s, parent=%s, couche=%d" % [
+				cap.is_worn(), cap.worn_driver_seat, cap.item.get_parent().name, (cap.item.find_child("Cap", true, false) as GeometryInstance3D).layers])
+	if _t >= 0.6 and _t < 2.0:
+		# vu de face, depuis le pare-brise ; la tête de l'autre tourne un peu
+		var other: Node3D = Net.other_head()
+		avatar.pose(car.global_transform, car.to_local(other_eye),
+				Transform3D(back.rotated(car.global_basis.y, 0.5 * sin(_t * 2.0)), other_eye), [], 0.0)
+		cam.global_position = other.global_position + car.global_basis.z * 0.55 + car.global_basis.y * 0.08 - car.global_basis.x * 0.15
+		cam.look_at(other.global_position + car.global_basis.y * 0.05)
+	if at.call(1.2):
+		var other: Node3D = Net.other_head()
+		var lp := other.global_transform.affine_inverse() * cap.item.global_position
+		_log("AUTOTEST bonnet sur la tête de l'autre, repère de sa tête : (%.3f, %.3f, %.3f)" % [lp.x, lp.y, lp.z])
+		_shot("bonnet_copilote")
+	if _t >= 1.25 and _t < 1.8:
+		var other: Node3D = Net.other_head()
+		cam.global_position = other.global_position - car.global_basis.z * 0.5 + car.global_basis.y * 0.12 + car.global_basis.x * 0.35
+		cam.look_at(other.global_position + car.global_basis.y * 0.05)
+	if at.call(1.7):
+		_shot("bonnet_copilote_arriere")
+	if at.call(2.0):
+		# repris sur sa tête, puis mis sur la sienne (F, comme sans casque)
+		h.get_parent().global_position = cap.item.global_position
+		cap.grab(h)
+		_log("AUTOTEST repris sur la tête de l'autre : porté=%s, tenu=%s" % [cap.is_worn(), cap.is_grabbed()])
+		cap.toggle()
+		_log("AUTOTEST F en le tenant : porté=%s, place conducteur=%s, tenu=%s, caché à ma caméra=%s" % [
+				cap.is_worn(), cap.worn_driver_seat, cap.is_grabbed(),
+				(cam.cull_mask & DockerCap.WORN_LAYER) == 0 and (cap.item.find_child("Cap", true, false) as GeometryInstance3D).layers == DockerCap.WORN_LAYER])
+	if at.call(2.5):
+		var lp := cam.global_transform.affine_inverse() * cap.item.global_position
+		_log("AUTOTEST sur ma tête, repère de mes yeux : (%.3f, %.3f, %.3f)" % [lp.x, lp.y, lp.z])
+		_shot("bonnet_ma_vue")
+	if at.call(2.8):
+		# enlevé de sa tête et lâché devant soi : retombe dans la voiture
+		h.get_parent().global_position = cap.item.global_position
+		cap.grab(h)
+		h.get_parent().global_position = car.to_global(Vector3(0.0, 1.0, 0.3))
+		cap.grab_update(h)
+		cap.release(h)
+	if at.call(4.0):
+		_log("AUTOTEST enlevé et lâché devant soi : porté=%s, dans %s, couche=%d" % [
+				cap.is_worn(), cap.item.get_parent().name, (cap.item.find_child("Cap", true, false) as GeometryInstance3D).layers])
+		multiplayer.multiplayer_peer.close()
+		multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
+		Net.role = Net.Role.SOLO
+		Net.session = null
 		get_tree().quit()

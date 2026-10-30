@@ -130,8 +130,11 @@ func store(item: RigidBody3D) -> void:
 	_place(item, true)
 
 
-func on_item_taken(_item: RigidBody3D) -> void:
-	pass
+func on_item_taken(item: RigidBody3D) -> void:
+	# caché dans le rangement fermé (_hide_if_shut) : sorti, il redevient visible
+	if item.has_meta("_zone_hidden"):
+		item.remove_meta("_zone_hidden")
+		item.visible = true
 
 
 func _place(item: RigidBody3D, animate: bool) -> void:
