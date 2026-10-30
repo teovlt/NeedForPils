@@ -320,6 +320,11 @@ func _check_command_line() -> void:
 			find_or_host()   # comme le bouton JOUER À DEUX
 		elif arg.begins_with("--join="):
 			_start_join(arg.trim_prefix("--join="))
+		elif arg == "--perftest":
+			# banc de mesure sur le casque (tools/perf_cycle.gd), avec --solo
+			var pc: Node = load("res://tools/perf_cycle.gd").new()
+			pc.name = "PerfCycle"
+			add_child(pc)
 		elif arg == "--solo":
 			# partie solo tout de suite, sans le menu (tests sur le casque par adb :
 			# am start ... --esa command_line_params "++,--solo")
