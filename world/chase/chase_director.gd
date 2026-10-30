@@ -115,7 +115,7 @@ func _run_intro() -> void:
 	await get_tree().process_frame   # le joueur est installé au volant, la caméra existe
 	if net_puppet:
 		if _car and not _car.is_engine_running():
-			_play_start_voice()
+			_start_intro_call()
 		return
 	if not play_intro:
 		_set_paused(true)
@@ -163,9 +163,21 @@ func _run_intro() -> void:
 func _wait_engine_start() -> void:
 	if _car == null or _car.is_engine_running():
 		return
-	_play_start_voice()
+	_start_intro_call()
 	while is_inside_tree() and not _car.is_engine_running():
 		await get_tree().process_frame
+
+
+## Intro : le téléphone sonne sur le tableau de bord (Phone) ; décroché, il joue
+## l'appel (audio/voice/appel_intro). La voix de départ suit la fin de l'appel (ou
+## l'appel manqué). Sans téléphone, elle part tout de suite.
+func _start_intro_call() -> void:
+	var phone := get_tree().get_first_node_in_group(Phone.PHONE_GROUP) as Phone
+	if phone == null:
+		_play_start_voice()
+		return
+	phone.call_finished.connect(_play_start_voice, CONNECT_ONE_SHOT)
+	phone.ring()
 
 
 ## Voix du début (« trouve les clés, démarre… ») : à remplacer par ton enregistrement

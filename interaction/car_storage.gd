@@ -61,7 +61,8 @@ func _ready() -> void:
 		randomize_items.call_deferred()   # après le _ready des zones
 
 
-## Répartit au hasard les objets rangés (sauf ceux d'un support fixe comme le GPS).
+## Répartit au hasard les objets rangés (sauf ceux d'un support fixe comme le GPS, et
+## ceux qui ont la méta keep_place, comme le téléphone de l'intro sur le tableau de bord).
 func randomize_items() -> void:
 	var rng := RandomNumberGenerator.new()
 	if random_seed != 0:
@@ -79,7 +80,7 @@ func randomize_items() -> void:
 				if c is RigidBody3D and c.get_node_or_null("Grab"):
 					items.append(c)
 	for c in get_children():
-		if c is RigidBody3D and c.get_node_or_null("Grab"):
+		if c is RigidBody3D and c.get_node_or_null("Grab") and not c.has_meta("keep_place"):
 			items.append(c)
 	# Les gros objets d'abord, pour qu'ils trouvent encore de la place.
 	items.shuffle()

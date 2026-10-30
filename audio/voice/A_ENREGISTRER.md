@@ -18,7 +18,8 @@ En partie à deux, le copilote entend les mêmes répliques que le conducteur.
 
 | Fait | Fichier | Réplique | Quand c'est joué | Réglage |
 |---|---|---|---|---|
-| [ ] | `audio/voice/demarre.wav` | (intro : trouver les clés et démarrer, texte libre) | 1 s après le début de la partie, voiture garée moteur coupé | `ChaseDirector.start_voice_path` |
+| [ ] | `audio/voice/appel_intro.wav` | (intro : l'appel au téléphone, texte libre, aussi long que voulu) | Quand on décroche le téléphone qui sonne sur le tableau de bord, au début de la partie | `Phone.call_voice` |
+| [ ] | `audio/voice/demarre.wav` | (trouver les clés et démarrer, texte libre) | Après l'appel de l'intro (fini ou manqué), voiture garée moteur coupé | `ChaseDirector.start_voice_path` |
 | [ ] | `audio/voice/manque.wav` | « Je suis en manque bordel, il me faut un truc là. » | Quand le manque atteint 45 % (une fois, jusqu'à la pilule suivante) | `PillAddiction.craving_voice_path` |
 | [ ] | `audio/voice/baillement.wav` | (un long bâillement, 3 à 4 s, sans parole) | Quand le conducteur est fatigué : de plus en plus souvent avec la fatigue (toutes les ~75 s puis ~22 s) | `Fatigue.yawn_voice_path` |
 | [ ] | `audio/voice/bourre.wav` | « Oh putain... je suis complètement bourré là. » (voix pâteuse) | Quand on devient bien bourré (vers 2 canettes et demie), une fois par cuite | `PillAddiction.drunk_voice_id` |
