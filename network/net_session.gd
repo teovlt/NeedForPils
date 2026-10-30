@@ -50,7 +50,7 @@ const ITEM_FOLLOW_RATE := 18.0
 const ITEM_REST_DELAY := 2.0
 ## Méthodes qu'un message de l'autre joueur a le droit d'appeler (raccourcis clavier).
 const ALLOWED_CALLS := ["toggle", "press", "unpress", "_key_shortcut", "_press", "toggle_power", "set_volume",
-	"set_notch", "step"]
+	"set_notch", "step", "net_roll", "net_receive"]
 
 var car: SUV4x4
 var _road: RoadGenerator
@@ -797,7 +797,7 @@ func _do_hand(index: int, kind: int, path: String, local_xf: Transform3D, vel: V
 				proxy.held = target
 				target.grab(proxy)
 		HandEvent.RELEASE:
-			if proxy.held is VRPickable and is_instance_valid(proxy.held):
+			if is_instance_valid(proxy.held) and proxy.held is VRPickable:
 				var pk := proxy.held as VRPickable
 				pk.hand_velocity = car.global_basis * vel + car.linear_velocity
 				if Net.is_driver():

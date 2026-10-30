@@ -7,8 +7,9 @@ extends Node
 ## des animaux. Le copilote desserre le frein à main (main souris + F), éteint la radio,
 ## prend le briquet, tourne à gauche au clavier (Q) puis passe au point mort (N).
 ## Chacun écrit chaque seconde ce qu'il voit dans la console (« NETTEST »).
-## Ensuite (17-28 s) : le conducteur fait avaler une pilule puis boire une bière au
-## copilote, le copilote fait fumer un joint au conducteur ; on compare la radio et les
+## Ensuite (17-29 s) : le conducteur fait avaler une pilule puis boire une bière au
+## copilote, le copilote fait fumer un joint au conducteur, puis roule un joint (le
+## conducteur doit le voir) ; on compare la radio et les
 ## objets chez les deux, et la régularité du mouvement de la voiture (« à-coups » :
 ## écart moyen d'une image à l'autre de la vitesse, en mm). Avec `--net-jitter=60`,
 ## les messages de position arrivent avec 0 à 60 ms de retard aléatoire (Wi-Fi).
@@ -122,7 +123,8 @@ func _physics_process(delta: float) -> void:
 		menu.close())
 	_smooth_sample(car)
 	_feed_scenario(car)
-	if _t > 29.0 and not _done.has("fin"):
+	_roll_scenario(car)
+	if _t > 29.5 and not _done.has("fin"):
 		_done["fin"] = true
 		get_tree().quit()
 
@@ -233,6 +235,9 @@ func _who() -> String:
 
 
 func _feed_scenario(car: SUV4x4) -> void:
+	_once("partie_finie", 17.0, func():
+		if session.get_parent().get_node("ChaseDirector").get("game_over"):
+			print("NETTEST %s ATTENTION partie déjà finie (accident) : échanges d'objets non significatifs" % _who()))
 	# mêmes objets, même nom, même place chez les deux joueurs
 	_once("objets_test", 17.0, func():
 		for k in [["pill_smiley_item", "TestPill", Vector3(0.0, 1.0, 0.3)], ["beer_can_item", "TestBeer", Vector3(0.1, 1.0, 0.3)],
@@ -331,3 +336,42 @@ func _test_grab(h: VRHandInteractor, it: VRInteractable) -> void:
 func _test_release(h: VRHandInteractor, it: VRInteractable) -> void:
 	it.release(h)
 	h.interacted.emit(NetSession.HandEvent.RELEASE, it)
+
+
+# --- Rouler un joint (copilote) : le conducteur doit le voir ------------------------------
+
+func _roll_scenario(car: SUV4x4) -> void:
+	var sheet_pos := Vector3(-0.3, 1.0, 0.0)
+	_once("roulage_objets", 26.8, func():
+		for k in [["sheet_item", "TestSheet", sheet_pos], ["pinch_item", "TestWeed", Vector3(-0.1, 1.0, 0.0)],
+				["filter_item", "TestFilter", Vector3(0.0, 1.0, 0.0)]]:
+			var it := (load("res://props/items/%s.tscn" % k[0]) as PackedScene).instantiate() as RigidBody3D
+			it.name = k[1]
+			car.add_child(it)
+			it.freeze = true
+			it.position = k[2]
+			_done[k[1]] = it.get_node("Grab"))
+	if Net.is_copilot():
+		var h: VRHandInteractor = _done.get("dh")
+		if h == null or not _done.has("TestSheet"):
+			return
+		var holder := h.get_parent() as Node3D
+		var over := car.to_global(sheet_pos + Vector3(0, 0.01, 0))
+		_once("pincee_prise", 27.0, func(): _test_grab(h, _done["TestWeed"]))
+		_once("pincee_posee", 27.4, func():
+			holder.global_position = over
+			(_done["TestWeed"] as VRInteractable).grab_update(h)
+			_test_release(h, _done["TestWeed"]))
+		_once("filtre_pris", 27.7, func(): _test_grab(h, _done["TestFilter"]))
+		_once("filtre_pose", 28.0, func():
+			holder.global_position = over
+			(_done["TestFilter"] as VRInteractable).grab_update(h)
+			_test_release(h, _done["TestFilter"]))
+		_once("roule", 28.3, func():
+			var sh: RollingSheet = _done["TestSheet"]
+			print("NETTEST copilote roule la feuille : herbe=%.2f filtre=%s" % [sh.weed, sh.has_filter])
+			sh.toggle())
+	_once("bilan_roulage", 28.9, func():
+		var rolled := car.find_child("TestSheet_Rolled", true, false)
+		print("NETTEST %s joint roulé par le copilote : visible ici = %s, feuille encore là = %s" % [
+			_who(), rolled != null, is_instance_valid(_done.get("TestSheet"))]))

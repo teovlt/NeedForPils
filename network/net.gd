@@ -158,6 +158,13 @@ func perform(node: Node, method: StringName, args: Array = []) -> void:
 		rx_call.rpc(String(session.get_parent().get_path_to(node)), String(method), args)
 
 
+## Fait faire `method` au même objet chez l'autre joueur seulement (le résultat d'une
+## action qui vient d'avoir lieu chez soi). Méthode à ajouter à NetSession.ALLOWED_CALLS.
+func remote_call(node: Node, method: StringName, args: Array = []) -> void:
+	if is_online() and session and is_instance_valid(session) and not applying_remote:
+		rx_call.rpc(String(session.get_parent().get_path_to(node)), String(method), args)
+
+
 # --- Lobby -----------------------------------------------------------------------
 
 ## JOUER À DEUX : cherche une partie sur le réseau local, sinon en crée une.
