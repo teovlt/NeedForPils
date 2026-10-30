@@ -330,6 +330,17 @@ func get_trigger() -> float:
 		return 0.0
 	if tip_held or _tip_in_reach:
 		return 0.0   # l'index prend une pilule : pas d'accélération ni de freinage
+	if held is Gun:
+		return 0.0   # la gâchette tire : pas d'accélération ni de freinage
+	return controller.get_float("trigger")
+
+
+## Gâchette brute de cette main (pistolet tenu), réglage de test compris.
+func trigger_value() -> float:
+	if debug_trigger >= 0.0:
+		return debug_trigger
+	if controller == null:
+		return 0.0
 	return controller.get_float("trigger")
 
 

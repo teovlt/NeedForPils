@@ -89,6 +89,7 @@ func _ready() -> void:
 		_pursuer.caught.connect(_on_caught)
 		_pursuer.chase_started.connect(_on_chase_started)
 		_pursuer.lost.connect(_on_police_lost)
+		_pursuer.eliminated.connect(_on_police_eliminated)
 	# concurrents (camping-car) : créés ici, pas besoin de les placer dans la scène
 	var road := _pills.get_road() if _pills else null
 	if road and _car:
@@ -102,6 +103,7 @@ func _ready() -> void:
 		_rivals.lost.connect(_on_rivals_lost)
 		_rivals.hit.connect(_on_rivals_hit)
 		_rivals.killed.connect(_on_rivals_killed)
+		_rivals.eliminated.connect(_on_rivals_eliminated)
 	if _addiction:
 		_addiction.assimilated.connect(_on_assimilated)
 		_addiction.pill_taken.connect(_on_pill_taken)
@@ -419,6 +421,16 @@ func _on_chase_started(kind: String) -> void:
 func _on_police_lost() -> void:
 	if not game_over and not _co_running:
 		_say("SEMÉE !", "La police a perdu ta trace... pour l'instant.", 3.0, "police_semee")
+
+
+func _on_police_eliminated() -> void:
+	if not game_over:
+		_say("FLICS AU TAPIS !", "Leur voiture brûle sur le bas-côté. D'autres vont venir...", 3.0, "police_eliminee")
+
+
+func _on_rivals_eliminated() -> void:
+	if not game_over:
+		_say("CONCURRENTS ÉLIMINÉS !", "Le camping-car part en fumée. Ta came est à toi.", 3.0, "rivaux_elimines")
 
 
 func _on_rivals_started() -> void:

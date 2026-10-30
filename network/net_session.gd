@@ -50,7 +50,7 @@ const ITEM_FOLLOW_RATE := 18.0
 const ITEM_REST_DELAY := 2.0
 ## Méthodes qu'un message de l'autre joueur a le droit d'appeler (raccourcis clavier).
 const ALLOWED_CALLS := ["toggle", "press", "unpress", "_key_shortcut", "_press", "toggle_power", "set_volume",
-	"set_notch", "step"]
+	"set_notch", "step", "remote_fire"]
 
 var car: SUV4x4
 var _road: RoadGenerator

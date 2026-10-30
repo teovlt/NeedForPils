@@ -64,6 +64,8 @@ seulement la phrase. `{n}` : nombre affiché à l'écran, pas besoin de le dire.
 | [ ] | `rivaux_tir_premier.wav` | « On te tire dessus ! Encore quelques balles et c'est fini. » | Première balle reçue |
 | [ ] | `rivaux_tir_2.wav` | « On te tire dessus ! Encore deux balles et c'est fini. » | Il reste 2 balles |
 | [ ] | `rivaux_tir_1.wav` | « On te tire dessus ! Encore une balle et c'est fini. » | Il reste 1 balle |
+| [ ] | `rivaux_elimines.wav` | « Concurrents éliminés ! Le camping-car part en fumée. Ta came est à toi. » | Camping-car abattu au pistolet |
+| [ ] | `police_eliminee.wav` | « Flics au tapis ! Leur voiture brûle sur le bas-côté. D'autres vont venir... » | Voiture de police abattue au pistolet |
 
 ### Livraisons
 
