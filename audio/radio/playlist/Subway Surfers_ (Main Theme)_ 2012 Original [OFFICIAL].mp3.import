@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://bxiooewonwb61"
+path="res://.godot/imported/Subway Surfers_ (Main Theme)_ 2012 Original [OFFICIAL].mp3-cbd11e63c6cb3cbf0fd37407ddb72ed5.mp3str"
+
+[deps]
+
+source_file="res://audio/radio/playlist/Subway Surfers_ (Main Theme)_ 2012 Original [OFFICIAL].mp3"
+dest_files=["res://.godot/imported/Subway Surfers_ (Main Theme)_ 2012 Original [OFFICIAL].mp3-cbd11e63c6cb3cbf0fd37407ddb72ed5.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

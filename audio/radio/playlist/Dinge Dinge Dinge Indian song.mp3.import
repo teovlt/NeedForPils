@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://bvfux5rggt8dj"
+path="res://.godot/imported/Dinge Dinge Dinge Indian song.mp3-78d510e2b35cb078c1f5cd305d99eb39.mp3str"
+
+[deps]
+
+source_file="res://audio/radio/playlist/Dinge Dinge Dinge Indian song.mp3"
+dest_files=["res://.godot/imported/Dinge Dinge Dinge Indian song.mp3-78d510e2b35cb078c1f5cd305d99eb39.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

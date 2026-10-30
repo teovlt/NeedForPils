@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://cj20m58j1hk00"
+path="res://.godot/imported/RoK (Roknar) - Le Goûter.mp3-a30241479aa9c4349c3277cdf44a2af7.mp3str"
+
+[deps]
+
+source_file="res://audio/radio/playlist/RoK (Roknar) - Le Goûter.mp3"
+dest_files=["res://.godot/imported/RoK (Roknar) - Le Goûter.mp3-a30241479aa9c4349c3277cdf44a2af7.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

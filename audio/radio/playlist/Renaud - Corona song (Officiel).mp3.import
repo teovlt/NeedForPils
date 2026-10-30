@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://cgjw1pk47o2uf"
+path="res://.godot/imported/Renaud - Corona song (Officiel).mp3-de683c9a2fed62e5eb1d54e3cd6f31ff.mp3str"
+
+[deps]
+
+source_file="res://audio/radio/playlist/Renaud - Corona song (Officiel).mp3"
+dest_files=["res://.godot/imported/Renaud - Corona song (Officiel).mp3-de683c9a2fed62e5eb1d54e3cd6f31ff.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4
