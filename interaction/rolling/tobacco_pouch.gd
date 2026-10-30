@@ -1,7 +1,7 @@
 class_name TobaccoPouch
 extends PillBag
 ## Sachet de tabac à rouler : même pochette à zip que les pilules et la weed (PillBag :
-## grande ouverture arrondie, la main qui le tient l'ouvre avec A/X, l'autre main n'y
+## grande ouverture arrondie, A/X ou geste de l'autre main pour l'ouvrir, l'autre main n'y
 ## prend que le contenu, pincée visée surlignée), mais en plastique imprimé opaque
 ## (bleu nuit, bandeau doré, « ROUTE LIBRE — TABAC À ROULER », avertissement).
 ## Une pincée sortie (RollItem « tobacco ») se lâche sur une feuille à rouler.

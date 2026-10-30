@@ -5,13 +5,16 @@ extends VehicleBody3D
 ## VR : gâchette droite = accélérateur, gâchette gauche = frein,
 ##      grip près d'une pièce = la saisir (volant, portes, levier de vitesse,
 ##      frein à main, comodo, boîte à gants, accoudoir),
-##      A/X près d'une pièce = l'actionner (cran suivant / ouvrir / fermer),
+##      A/X près du pare-soleil ou d'un rétroviseur = le recaler (le reste se fait
+##      à la main : couvercles, zips, languette... d'un geste de l'autre main),
 ##      B/Y = recentrer la vue sur le siège conducteur.
 ## Clavier (test sans casque) : Z/W/↑ accélérer, S/↓ freiner, Q/A/D/←/→ tourner,
 ##      R/N/E = R/N/D, Pg↑/Pg↓ = vitesse précédente/suivante, T = frein à main,
 ##      K = comodo essuie-glaces, L = comodo phares, Espace = frein arrière tant qu'appuyé,
 ##      1-4 portes, G boîte à gants, C accoudoir, J klaxon, B ceinture, M clé / moteur,
 ##      F2 / F3 radio station - / +, F4 radio marche / arrêt, F9 / F10 volume.
+## Secousses (bosses, trous) et accidents : CarCrash (enfant « Crash ») ; sans ceinture,
+## un gros choc fait traverser le pare-brise.
 
 enum Gear { R, N, D, G2, G1 }
 
@@ -213,6 +216,18 @@ var _xr_origin: XROrigin3D
 var _xr_camera: XRCamera3D
 ## Vrai tant que la tête réelle n'a pas encore été calée sur le siège (attend un suivi valide).
 var _calib_wanted := false
+## Calages supplémentaires après le premier (s) : la première pose du casque peut être
+## fausse (casque pas encore sur la tête, suivi ou sol du guardian pas encore prêts) et
+## le joueur se retrouvait au-dessus de la voiture.
+const SETTLE_CALIBS := [1.0, 3.0]
+var _settle_t := -1.0
+var _settle_i := 0
+## Tête hors de la place (au-dessus de l'œil du siège ou loin du siège) pendant
+## HEAD_LOST_TIME s : on recale automatiquement.
+@export var head_lost_up := 0.35
+@export var head_lost_dist := 1.0
+const HEAD_LOST_TIME := 0.75
+var _head_lost_t := 0.0
 var _wiper_phase := 0.0
 var _wiper_pause := 0.0
 var _wiper_angle := 0.0
@@ -230,6 +245,10 @@ var ignition: Node3D   # contacteur à clé (ignition.gd) : ignition.get_level()
 var seatbelts: Array[Node3D] = []
 var seatbelt: Node3D   # ceinture du conducteur (seatbelt.gd) : seatbelt.is_buckled()
 var horn: Node3D   # klaxon (HornPad) : horn.is_honking()
+var crash: CarCrash   # secousses et accidents (car_crash.gd)
+## Plus forte vitesse de suspension (m/s) des roues au sol à ce pas physique : bosse,
+## trou, retombée d'un saut (lue par CarCrash).
+var road_jolt := 0.0
 var auto_gear := 0        # rapport interne de la boîte auto (0 = 1re, 5 = 6e)
 var shift_timer := 0.0    # > 0 pendant un passage de rapport
 var _kickdown_lock := 0.0
@@ -326,6 +345,9 @@ func _ready() -> void:
 				b.set(k, cfg[k])
 		add_child(b)
 		seatbelts.append(b)
+	crash = CarCrash.new()
+	crash.name = "Crash"
+	add_child(crash)
 	_find_lamp_materials()
 	light_stalk.set_notch(start_light_mode, true)
 	_apply_lights()
@@ -348,6 +370,13 @@ func _ready() -> void:
 			xr.connect("session_begun", func(): get_tree().create_timer(0.3).timeout.connect(recenter_view))
 		if xr.has_signal("pose_recentered"):
 			xr.connect("pose_recentered", recenter_view)
+		# casque remis sur la tête, appli de nouveau au premier plan : on recale
+		if xr.has_signal("session_focussed"):
+			xr.connect("session_focussed", recenter_view)
+		if xr.has_signal("user_presence_changed"):
+			xr.connect("user_presence_changed", func(present: bool):
+				if present:
+					recenter_view())
 
 
 # --- État lisible par d'autres scripts ------------------------------------
@@ -583,9 +612,39 @@ func recenter_view() -> void:
 	_calib_wanted = true
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if _calib_wanted and _calibrate_seated():
 		_calib_wanted = false
+		if _settle_t < 0.0:
+			_settle_t = 0.0
+	if _settle_t >= 0.0 and _settle_i < SETTLE_CALIBS.size():
+		_settle_t += delta
+		if _settle_t >= float(SETTLE_CALIBS[_settle_i]):
+			_settle_i += 1
+			_calib_wanted = true
+	_watch_head(delta)
+
+
+## Recale si la tête reste hors de la place (dans le toit, au-dessus de la voiture...).
+func _watch_head(delta: float) -> void:
+	_head_lost_t = 0.0 if not _head_out_of_seat() else _head_lost_t + delta
+	if _head_lost_t > HEAD_LOST_TIME:
+		_head_lost_t = 0.0
+		_calib_wanted = true
+		print("VR : tête hors de la place, recalage")
+
+
+func _head_out_of_seat() -> bool:
+	if _xr_origin == null or not is_instance_valid(_xr_origin) or _xr_camera == null:
+		return false
+	var xri := XRServer.primary_interface
+	if xri == null or not xri.is_initialized() or _xr_camera.transform.origin == Vector3.ZERO:
+		return false
+	var seat := _xr_origin.get_parent() as Node3D
+	if seat == null or seat.get_parent() != self:
+		return false   # point de vue ailleurs (plan aérien de l'intro)
+	var head := seat.to_local(_xr_camera.global_position)   # œil du siège = origine
+	return head.y > head_lost_up or head.y < -0.75 or Vector2(head.x, head.z).length() > head_lost_dist
 
 
 ## Renvoie faux tant que la pose du casque n'est pas encore connue (on réessaie).
@@ -750,6 +809,9 @@ func _update_drive() -> void:
 ## Flou maxi des vitres latérales et arrière par orage (0-1).
 @export_range(0.0, 1.0) var side_glass_max_wet := 0.65
 var _glass_mats: Array[ShaderMaterial] = []
+## Dans le casque, le flou (relecture de l'image) est impossible : variante sans flou.
+const GLASS_SHADER := preload("res://cars/SUV4x4/car_glass.gdshader")
+const GLASS_SHADER_VR := preload("res://cars/SUV4x4/car_glass_vr.gdshader")
 var _glass_wet := 0.0
 
 
@@ -765,7 +827,7 @@ func _make_glass_clearer() -> void:
 				continue
 			if not done.has(mat):
 				var glass := ShaderMaterial.new()
-				glass.shader = preload("res://cars/SUV4x4/car_glass.gdshader")
+				glass.shader = GLASS_SHADER
 				glass.set_shader_parameter("opacity", glass_opacity)
 				_glass_mats.append(glass)
 				done[mat] = glass
@@ -820,6 +882,7 @@ func _update_wipers(delta: float) -> void:
 func _update_road_haptics(delta: float) -> void:
 	var wheels := [$WheelFL, $WheelFR, $WheelRL, $WheelRR]
 	var side_strength := [0.0, 0.0]   # gauche, droite
+	road_jolt = 0.0
 	for i in 4:
 		var w: VehicleWheel3D = wheels[i]
 		var y := to_local(w.global_position).y
@@ -828,6 +891,7 @@ func _update_road_haptics(delta: float) -> void:
 		if not w.is_in_contact():
 			continue
 		debug_max_suspension_speed = maxf(debug_max_suspension_speed, v)
+		road_jolt = maxf(road_jolt, v)
 		if v > haptic_suspension_threshold:
 			var side := 0 if w.position.x > 0.0 else 1   # +X = gauche du véhicule
 			side_strength[side] = maxf(side_strength[side], clampf(v / 2.0, 0.15, 1.0))
@@ -863,8 +927,11 @@ func _update_weather_effects(delta: float) -> void:
 	if rain > 0.02:
 		target = side_glass_max_wet * clampf(0.3 + 0.7 * rain, 0.0, 1.0)
 	_glass_wet = move_toward(_glass_wet, target, delta * (0.08 if target > _glass_wet else 0.02))
+	var glass_shader := GLASS_SHADER_VR if WindshieldRain.is_xr_view(self) else GLASS_SHADER
 	for g in _glass_mats:
 		g.set_shader_parameter("wet", _glass_wet)
+		if g.shader != glass_shader:
+			g.shader = glass_shader
 		g.set_shader_parameter("light", 1.0 - darkness)
 	if _weather:
 		_weather.set_rain_shelter(global_transform)

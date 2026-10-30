@@ -217,6 +217,9 @@ func _make(sp: String, p: Vector3, young := false) -> Node3D:
 	a.name = sp.capitalize()
 	a.position = p     # avant add_child : _ready cale l'animal sur le sol à cet endroit
 	add_child(a)
+	# au-delà de 200 m un animal n'est qu'un point : on ne le dessine plus
+	for g in a.find_children("*", "GeometryInstance3D", true, false):
+		(g as GeometryInstance3D).visibility_range_end = 200.0
 	a.set("heading", randf() * TAU)
 	a.connect("hit_car", _on_animal_hit)
 	animals.append(a)

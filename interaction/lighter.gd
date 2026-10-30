@@ -100,6 +100,11 @@ func set_lit(on: bool) -> void:
 		_grow = 0.4   # la flamme « prend »
 
 
+## A/X en VR.
+func vr_button() -> void:
+	toggle()
+
+
 func _on_grab_end(hand: Node3D) -> void:
 	super._on_grab_end(hand)
 	if not is_grabbed():

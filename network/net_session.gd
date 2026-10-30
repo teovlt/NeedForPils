@@ -20,7 +20,7 @@ extends Node
 ##   lâché ne retombe pas forcément pareil chez les deux : celui qui l'a lâché envoie
 ##   ensuite où il s'est posé.
 
-enum HandEvent { GRAB, RELEASE, TOGGLE }
+enum HandEvent { GRAB, RELEASE, TOGGLE, BUTTON }
 
 ## Retard de l'interpolation de la voiture chez le copilote (s).
 const INTERP_DELAY := 0.1
@@ -41,14 +41,22 @@ var _director: ChaseDirector
 var _trees: FallingTreeManager
 var _animals: AnimalManager
 var _rivals: Rivals
+var _deliveries: DeliveryManager
 var remote_player: Node3D
 var _remote_head: Node3D
-var _remote_body: Node3D
+## Yeux (caméra non active) de l'autre joueur : sa bouche (Net.other_head).
+var remote_eyes: Camera3D
+var _avatar: NetAvatar
 var _remote_hand_meshes: Array[Node3D] = []
 var _remote_hands: Array[NetRemoteHand] = []
 var _remote_head_local := Transform3D.IDENTITY
 var _remote_hand_local: Array = [null, null, null]   # gauche, droite, souris
-var _remote_touch: Array = [null, null]   # mains VR : [peut toucher, bout de l'index, paume]
+var _remote_touch: Array = [null, null]   # mains VR : [peut toucher, bout de l'index, paume, main affichée]
+var _remote_posed := [false, false]       # poing refermé sur une commande (pose appliquée)
+var _grip_poses: Array = []               # pose « poing » des mains XR Tools (gauche, droite)
+## Mains XR Tools affichées pour l'autre joueur (les mêmes que les nôtres).
+const HAND_SCENES := ["res://addons/godot-xr-tools/hands/scenes/lowpoly/left_hand_low.tscn",
+	"res://addons/godot-xr-tools/hands/scenes/lowpoly/right_hand_low.tscn"]
 
 var _local_hands := {}            # main locale -> indice (0 gauche, 1 droite, 2 souris)
 var _snapshots: Array = []        # copilote : [temps conducteur, Transform3D, vitesse, vitesse angulaire]
@@ -75,6 +83,7 @@ func _ready() -> void:
 	_director = main.get_node_or_null("ChaseDirector") as ChaseDirector
 	_trees = main.get_node_or_null("FallingTrees") as FallingTreeManager
 	_animals = main.get_node_or_null("RoadGenerator/Animals") as AnimalManager
+	_deliveries = main.get_node_or_null("RoadGenerator/Deliveries") as DeliveryManager
 	_rivals = _director._rivals if _director else null
 	if Net.is_copilot():
 		# le copilote applique la position reçue avant que le reste de la scène bouge
@@ -130,6 +139,8 @@ func _setup_copilot() -> void:
 		_trees.enabled = false   # les arbres viennent du conducteur
 	if _animals:
 		_animals.net_puppet = true
+	if _deliveries:
+		_deliveries.net_puppet = true   # les adresses viennent du conducteur
 	var pills := get_parent().get_node_or_null("Pills")
 	if pills:
 		pills.process_mode = Node.PROCESS_MODE_DISABLED   # pilules sur la route : pas encore recopiées
@@ -380,6 +391,8 @@ func _world_state() -> Dictionary:
 	var addiction := car.get_addiction()
 	if addiction:
 		st["paused"] = addiction.paused
+	if _deliveries:
+		st["deliv"] = _deliveries.net_state()
 	return st
 
 
@@ -405,6 +418,14 @@ func on_world(st: Dictionary) -> void:
 	var addiction := car.get_addiction()
 	if addiction and st.has("paused"):
 		addiction.paused = st["paused"]
+	if _deliveries and st.has("deliv"):
+		_deliveries.net_apply(st["deliv"])
+
+
+## L'autre joueur a livré un sachet.
+func on_delivered(target_id: String, bag_name: String) -> void:
+	if _deliveries:
+		_deliveries.net_delivered(target_id, bag_name)
 
 
 # --- Mains locales -> autre joueur ----------------------------------------------------
@@ -444,7 +465,10 @@ func _send_pose() -> void:
 			hands[i] = inv * (h as Node3D).global_transform
 			if h is VRHandInteractor:
 				var vh := h as VRHandInteractor
-				touch[i] = [vh.can_touch(), inv * vh.fingertip_position(), inv * vh.palm_position()]
+				var vis := vh.visual_state()
+				if not vis.is_empty():
+					vis[0] = inv * (vis[0] as Transform3D)
+				touch[i] = [vh.can_touch(), inv * vh.fingertip_position(), inv * vh.palm_position(), vis]
 	Net.rx_pose.rpc([inv * cam.global_transform, hands[0], hands[1], hands[2], touch[0], touch[1]])
 
 
@@ -543,6 +567,9 @@ func on_hand(index: int, kind: int, path: String, local_xf: Transform3D) -> void
 		HandEvent.TOGGLE:
 			if target and target.has_method("toggle"):
 				target.toggle()
+		HandEvent.BUTTON:
+			if target and target.has_method("vr_button"):
+				target.vr_button()
 	Net.applying_remote = false
 
 
@@ -571,11 +598,6 @@ func _update_remote_hands() -> void:
 		return
 	var cxf := car.global_transform
 	_remote_head.global_transform = cxf * _remote_head_local
-	# corps : sous la tête, tourné comme elle mais toujours droit
-	var fwd := (cxf.basis.inverse() * _remote_head.global_basis.z)
-	fwd.y = 0.0
-	var body_basis := Basis.looking_at(-fwd.normalized() if fwd.length() > 0.01 else Vector3.FORWARD, Vector3.UP)
-	_remote_body.global_transform = cxf * Transform3D(body_basis, _remote_head_local.origin + Vector3(0, -0.42, 0.04))
 	for i in 5:
 		var proxy := _remote_hands[i]
 		var local = _remote_hand_local[i if i < 3 else i - 3]
@@ -587,7 +609,7 @@ func _update_remote_hands() -> void:
 		var touch = _remote_touch[i % 3] if i != 2 else null
 		if i < 3:
 			proxy.global_transform = cxf * (local as Transform3D)
-			_remote_hand_meshes[i].global_transform = proxy.global_transform
+			_show_remote_hand(i, proxy.global_transform, touch, cxf)
 			proxy.remote_touch = touch != null and touch[0]
 			if touch != null:
 				proxy.tip_global = cxf * (touch[1] as Vector3)
@@ -603,9 +625,53 @@ func _update_remote_hands() -> void:
 				Net.remote_camera = proxy.camera
 				proxy.held.grab_update(proxy)
 				Net.applying_remote = false
+	# corps assis : bras vers les mains affichées (mains VR), sinon posées sur les cuisses
+	var hands: Array = [null, null]
+	for i in 2:
+		var shown := _remote_hand_meshes[i]
+		if shown.visible and _remote_touch[i] != null and (_remote_touch[i] as Array).size() > 3 and not (_remote_touch[i][3] as Array).is_empty():
+			hands[i] = shown.global_position
+	var seat := car.driver_seat.position
+	if Net.is_driver():
+		seat.x = -seat.x   # l'autre joueur est le copilote, côté passager
+	_avatar.pose(cxf, seat, _remote_head.global_transform, hands, get_physics_process_delta_time())
 
 
 # --- Avatar de l'autre joueur ---------------------------------------------------------
+
+## Main affichée de l'autre joueur : le modèle XR Tools posé exactement comme chez lui
+## (calée sur le volant ou un levier, doigts selon son grip et sa gâchette, poing refermé
+## sur une commande). Main souris : un point lumineux.
+func _show_remote_hand(i: int, xf: Transform3D, touch, cxf: Transform3D) -> void:
+	var mesh := _remote_hand_meshes[i]
+	if i == 2 or touch == null or (touch as Array).size() < 4 or (touch[3] as Array).is_empty():
+		mesh.global_transform = xf
+		return
+	var vis: Array = touch[3]
+	mesh.global_transform = cxf * (vis[0] as Transform3D)
+	var tree := mesh.get_node_or_null("AnimationTree") as AnimationTree
+	if tree:
+		tree.set("parameters/Grip/blend_amount", vis[1])
+		tree.set("parameters/Trigger/blend_amount", vis[2])
+	var posed: bool = vis[3]
+	if posed != _remote_posed[i] and mesh.has_method("add_pose_override"):
+		_remote_posed[i] = posed
+		if posed:
+			mesh.call("add_pose_override", self, 10, _grip_pose(i))
+		else:
+			mesh.call("remove_pose_override", self)
+
+
+func _grip_pose(i: int) -> Resource:
+	if _grip_poses.is_empty():
+		for path in [VRHandInteractor.GRIP_POSE_LEFT, VRHandInteractor.GRIP_POSE_RIGHT]:
+			var pose := XRToolsHandPoseSettings.new()
+			var anim := load(path) as Animation
+			pose.open_pose = anim
+			pose.closed_pose = anim
+			_grip_poses.append(pose)
+	return _grip_poses[i]
+
 
 func _ensure_remote_player() -> void:
 	if remote_player:
@@ -613,40 +679,16 @@ func _ensure_remote_player() -> void:
 	remote_player = Node3D.new()
 	remote_player.name = "RemotePlayer"
 	add_child(remote_player)
-	var skin := _mat(Color(0.85, 0.66, 0.52))
-	var cloth := _mat(Color(0.18, 0.32, 0.55) if Net.is_copilot() else Color(0.55, 0.22, 0.18))
-	_remote_head = Node3D.new()
-	_remote_head.name = "Head"
-	_remote_head.top_level = true
-	remote_player.add_child(_remote_head)
-	var head := MeshInstance3D.new()
-	var sphere := SphereMesh.new()
-	sphere.radius = 0.095
-	sphere.height = 0.22
-	head.mesh = sphere
-	head.material_override = skin
-	head.position = Vector3(0, 0.0, 0.03)
-	_remote_head.add_child(head)
-	var glasses := MeshInstance3D.new()
-	var gbox := BoxMesh.new()
-	gbox.size = Vector3(0.16, 0.04, 0.03)
-	glasses.mesh = gbox
-	glasses.material_override = _mat(Color(0.05, 0.05, 0.06))
-	glasses.position = Vector3(0, 0.01, -0.07)
-	_remote_head.add_child(glasses)
+	# corps assis simple ; haut rouge pour le conducteur, bleu pour le copilote
+	_avatar = NetAvatar.new(Color(0.55, 0.22, 0.18) if Net.is_copilot() else Color(0.18, 0.32, 0.55))
+	_avatar.name = "Avatar"
+	remote_player.add_child(_avatar)
+	_remote_head = _avatar.head
 	var cam := Camera3D.new()
 	cam.name = "Eyes"
 	_remote_head.add_child(cam)
 	cam.current = false
-	_remote_body = MeshInstance3D.new()
-	_remote_body.name = "Body"
-	_remote_body.top_level = true
-	var torso := CapsuleMesh.new()
-	torso.radius = 0.17
-	torso.height = 0.62
-	(_remote_body as MeshInstance3D).mesh = torso
-	(_remote_body as MeshInstance3D).material_override = cloth
-	remote_player.add_child(_remote_body)
+	remote_eyes = cam
 	for i in 3:
 		var hand := NetRemoteHand.new()
 		hand.name = ["LeftHand", "RightHand", "MouseHand"][i]
@@ -654,23 +696,27 @@ func _ensure_remote_player() -> void:
 		hand.camera = cam
 		remote_player.add_child(hand)
 		_remote_hands.append(hand)
+		if i < 2:
+			# les mêmes mains que les nôtres (modèle XR Tools), posées par _show_remote_hand
+			var shown := (load(HAND_SCENES[i]) as PackedScene).instantiate() as Node3D
+			shown.name = ["RemoteLeftHand", "RemoteRightHand"][i]
+			remote_player.add_child(shown)
+			shown.top_level = true
+			shown.set_physics_process(false)   # pas de manette à suivre : posée à la main
+			shown.visible = false
+			_remote_hand_meshes.append(shown)
+			continue
+		# main souris : un point lumineux là où vise l'autre joueur
 		var mesh := MeshInstance3D.new()
 		mesh.top_level = true
-		if i == 2:
-			# main souris : un point lumineux là où vise l'autre joueur
-			var dot := SphereMesh.new()
-			dot.radius = 0.015
-			dot.height = 0.03
-			mesh.mesh = dot
-			var m := _mat(Color(1.0, 0.75, 0.2))
-			m.emission_enabled = true
-			m.emission = Color(1.0, 0.6, 0.1)
-			mesh.material_override = m
-		else:
-			var box := BoxMesh.new()
-			box.size = Vector3(0.07, 0.035, 0.11)
-			mesh.mesh = box
-			mesh.material_override = skin
+		var dot := SphereMesh.new()
+		dot.radius = 0.015
+		dot.height = 0.03
+		mesh.mesh = dot
+		var m := _mat(Color(1.0, 0.75, 0.2))
+		m.emission_enabled = true
+		m.emission = Color(1.0, 0.6, 0.1)
+		mesh.material_override = m
 		mesh.visible = false
 		remote_player.add_child(mesh)
 		_remote_hand_meshes.append(mesh)

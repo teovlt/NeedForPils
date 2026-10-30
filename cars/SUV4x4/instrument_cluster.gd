@@ -26,9 +26,10 @@ func _ready() -> void:
 	vp.name = "ClusterView"
 	vp.size = resolution
 	vp.disable_3d = true
-	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	vp.render_target_update_mode = SubViewport.UPDATE_ONCE
 	add_child(vp)
 	display = ClusterDisplay.new()
+	display.viewport = vp
 	display.size = Vector2(resolution)
 	display.car = _find_car()
 	vp.add_child(display)

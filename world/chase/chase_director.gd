@@ -8,11 +8,17 @@ extends Node
 ## Lore : la Pils, une pilule rose, a envahi la ville et la police traque tous ceux qui
 ## en ont. Tu t'enfuis avec un sachet de vingt. Une Pils te rend plus rapide... et
 ## chaque Pils te rend un peu plus accro.
-## Deux fins : rattrapé par la police, ou assimilé (100 %) : perdu dans la Pils.
+## Fins : rattrapé par la police, abattu par les concurrents, assimilé (100 %) : perdu
+## dans la Pils, ou éjecté par le pare-brise dans un accident sans ceinture (CarCrash).
 ##
 ## Les textes s'affichent devant les yeux (Label3D collé à la caméra, invisible dans
-## les rétros) : lisibles en VR comme en mode bureau. Espace / Entrée ou A / X pour
+## les rétros) : lisibles en VR comme en mode bureau. Chacun a sa voix
+## (audio/voice/<identifiant>, VoiceLine ; liste dans audio/voice/A_ENREGISTRER.md) :
+## le texte reste à l'écran le temps de la réplique, ou disparaît si
+## `show_text_with_voice` est décoché et que la réplique est enregistrée. Espace / Entrée ou A / X pour
 ## passer l'intro ou rejouer.
+
+const GROUP := "chase_director"
 
 const LORE := [
 	["2049.", "La Pils est arrivée en ville. Une pilule rose. Tout le monde en a pris."],
@@ -31,6 +37,9 @@ const LORE := [
 @export var start_voice_db := 0.0
 ## Délai (s) avant la voix, le temps que le joueur s'installe.
 @export var start_voice_delay := 1.0
+## Garder les textes à l'écran quand leur voix est enregistrée (sous-titres).
+@export var show_text_with_voice := true
+@export var voice_db := 0.0
 @export_file("*.tscn") var menu_scene := "res://menu/main_menu.tscn"
 ## Secondes d'affichage de chaque écran de lore.
 @export var lore_time := 5.5
@@ -64,9 +73,13 @@ var _rivals: Rivals
 ## Partie à deux, chez le copilote : rien ne se décide ici, on affiche les textes du
 ## conducteur (et Espace / A demande au conducteur de rejouer à la fin).
 var net_puppet := false
+var _voice_id := ""
+var _voice_seq := 0
+var _voice_heard := 0
 
 
 func _ready() -> void:
+	add_to_group(GROUP)
 	_car = get_node_or_null(car_path) as SUV4x4
 	_pursuer = get_node_or_null(pursuer_path) as Pursuer
 	_addiction = get_node_or_null(addiction_path) as PillAddiction
@@ -106,15 +119,21 @@ func _run_intro() -> void:
 		return
 	if not play_intro:
 		_set_paused(true)
+		# arrivée en fondu depuis le noir : les premières images (compilation des
+		# shaders, route) saccadent, on ne les voit pas
+		_set_curtain(1.0)
+		_fade_curtain(0.0, 1.0)
 		await _wait_engine_start()
+		if not is_inside_tree():
+			return   # partie quittée (rejouer, menu) avant le démarrage
 		_start_chase()
 		return
 	# Pendant l'intro, le 4x4 roule tout seul ; ni pilules, ni arbres, ni manque.
 	_set_paused(true)
 	_autopilot = true
 	_set_curtain(1.0)
-	for line in LORE:
-		await _say(line[0], line[1], lore_time)
+	for k in LORE.size():
+		await _say(LORE[k][0], LORE[k][1], lore_time, "intro_lore_%d" % (k + 1))
 		if _skip:   # une pression passe tout le lore
 			break
 	# Plan aérien : les deux voitures lancées sur la route.
@@ -122,9 +141,9 @@ func _run_intro() -> void:
 	if _pursuer:
 		_pursuer.start_escort(55.0)
 	_fade_curtain(0.0, 1.2)
-	await _say("ILS T'ONT TROUVÉ.", "La police est sur tes traces.", aerial_time * 0.45)
+	await _say("ILS T'ONT TROUVÉ.", "La police est sur tes traces.", aerial_time * 0.45, "intro_trouve")
 	if not _skip:
-		await _say("ILS SE RAPPROCHENT.", "Ne ralentis jamais.", aerial_time * 0.45)
+		await _say("ILS SE RAPPROCHENT.", "Ne ralentis jamais.", aerial_time * 0.45, "intro_rapprochent")
 	# Fondu au noir, retour au volant.
 	await _fade_curtain(1.0, 0.7)
 	_end_aerial()
@@ -133,8 +152,10 @@ func _run_intro() -> void:
 		_car.external_input = false
 	await _fade_curtain(0.0, 0.8)
 	await _wait_engine_start()
+	if not is_inside_tree():
+		return   # partie quittée (rejouer, menu) avant le démarrage
 	_start_chase()
-	await _say("PRENDS LE VOLANT !", _controls_text(), 4.5)
+	await _say("PRENDS LE VOLANT !", _controls_text(), 4.5, "intro_volant_vr" if _is_vr() else "intro_volant_clavier")
 
 
 ## Le 4x4 part moteur coupé : la poursuite ne commence qu'une fois le moteur
@@ -143,7 +164,7 @@ func _wait_engine_start() -> void:
 	if _car == null or _car.is_engine_running():
 		return
 	_play_start_voice()
-	while not _car.is_engine_running():
+	while is_inside_tree() and not _car.is_engine_running():
 		await get_tree().process_frame
 
 
@@ -323,7 +344,7 @@ func _process(delta: float) -> void:
 			if Net.is_online():
 				Net.leave_to_menu()
 			else:
-				get_tree().change_scene_to_file(menu_scene)
+				SceneLoader.change_scene(menu_scene)
 		return
 	if _pursuer and _addiction:
 		var close := clampf((70.0 - _pursuer.gap) / 60.0, 0.0, 1.0) if _pursuer.state == Pursuer.State.CHASE else 0.0
@@ -333,10 +354,11 @@ func _process(delta: float) -> void:
 
 # --- Partie à deux ------------------------------------------------------------------
 
-## Texte affiché chez le conducteur : [titre, sous-titre, visible, fin de partie, rideau].
+## Texte affiché chez le conducteur : [titre, sous-titre, visible, fin de partie, rideau,
+## voix, numéro de la voix].
 func net_text() -> Array:
 	return [_title.text if _title else "", _sub.text if _sub else "", _text_target,
-		game_over, _addiction.curtain if _addiction else 0.0]
+		game_over, _addiction.curtain if _addiction else 0.0, _voice_id, _voice_seq]
 
 
 func net_apply_text(t: Array) -> void:
@@ -347,6 +369,11 @@ func net_apply_text(t: Array) -> void:
 	game_over = t[3]
 	if _addiction:
 		_addiction.curtain = t[4]
+	# la même voix que chez le conducteur
+	if t.size() > 6 and int(t[6]) != _voice_heard:
+		_voice_heard = int(t[6])
+		if _voice_heard > 0:
+			_voice(String(t[5]))
 
 
 ## Conseils affichés une seule fois, au bon moment.
@@ -367,7 +394,7 @@ func _hint_once(key: String, title: String, sub: String) -> void:
 	if _hint_done.has(key) or _co_running:
 		return
 	_hint_done[key] = true
-	_say(title, sub, 3.5)
+	_say(title, sub, 3.5, "conseil_" + key)
 
 
 func _on_pill_taken(count: int) -> void:
@@ -375,7 +402,7 @@ func _on_pill_taken(count: int) -> void:
 		return   # c'est le conducteur qui décide
 	if count == 1 and not game_over:
 		_hint_done["premiere"] = true
-		_say("BOOST !", "Mais tu leur ressembles un peu plus...", 3.0)
+		_say("BOOST !", "Mais tu leur ressembles un peu plus...", 3.0, "pilule_boost")
 
 
 func _on_chase_started(kind: String) -> void:
@@ -386,12 +413,12 @@ func _on_chase_started(kind: String) -> void:
 		sub = "Elle a démarré derrière toi. " + sub
 	if not _hint_done.has("police"):
 		_hint_done["police"] = true
-		_say("LA POLICE !", sub, 3.5)
+		_say("LA POLICE !", sub, 3.5, "police_barrage" if kind == "barrage" else "police_debut")
 
 
 func _on_police_lost() -> void:
 	if not game_over and not _co_running:
-		_say("SEMÉE !", "La police a perdu ta trace... pour l'instant.", 3.0)
+		_say("SEMÉE !", "La police a perdu ta trace... pour l'instant.", 3.0, "police_semee")
 
 
 func _on_rivals_started() -> void:
@@ -399,14 +426,14 @@ func _on_rivals_started() -> void:
 		return
 	if not _hint_done.has("rivaux"):
 		_hint_done["rivaux"] = true
-		_say("LES CONCURRENTS !", "Le camping-car veut ta came. Ils vont tirer : sème-les.", 3.5)
+		_say("LES CONCURRENTS !", "Le camping-car veut ta came. Ils vont tirer : sème-les.", 3.5, "rivaux_debut")
 	else:
-		_say("ILS SONT REVENUS", "Le camping-car est derrière toi.", 2.5)
+		_say("ILS SONT REVENUS", "Le camping-car est derrière toi.", 2.5, "rivaux_retour")
 
 
 func _on_rivals_lost() -> void:
 	if not game_over and not _co_running:
-		_say("SEMÉS !", "Le camping-car a disparu du rétro.", 3.0)
+		_say("SEMÉS !", "Le camping-car a disparu du rétro.", 3.0, "rivaux_semes")
 
 
 func _on_rivals_hit(count: int) -> void:
@@ -414,13 +441,14 @@ func _on_rivals_hit(count: int) -> void:
 		return
 	var left := _rivals.max_hits - count
 	if count == 1 or left <= 2:
-		_say("ON TE TIRE DESSUS !", "Encore %d balle%s et c'est fini." % [left, "s" if left > 1 else ""], 1.6)
+		var vid := "rivaux_tir_premier" if count == 1 else "rivaux_tir_%d" % clampi(left, 1, 2)
+		_say("ON TE TIRE DESSUS !", "Encore %d balle%s et c'est fini." % [left, "s" if left > 1 else ""], 1.6, vid)
 
 
 func _on_rivals_killed() -> void:
 	if _pursuer:
 		_pursuer.stop()
-	_end("ILS T'ONT EU.", "Les concurrents ont pris ta came.")
+	_end("ILS T'ONT EU.", "Les concurrents ont pris ta came.", "fin_rivaux")
 
 
 # --- Fins ---------------------------------------------------------------------------------
@@ -430,7 +458,7 @@ func _on_caught() -> void:
 		return   # c'est le conducteur qui décide
 	if _rivals:
 		_rivals.stop()
-	_end("ILS T'ONT RATTRAPÉ.", "La police t'a eu.")
+	_end("ILS T'ONT RATTRAPÉ.", "La police t'a eu.", "fin_police")
 
 
 func _on_assimilated() -> void:
@@ -438,10 +466,26 @@ func _on_assimilated() -> void:
 		return   # c'est le conducteur qui décide
 	if _pursuer:
 		_pursuer.stop()
-	_end("PERDU DANS LA PILS.", "Tu souris. Tu ne sais plus pourquoi tu roulais.")
+	_end("PERDU DANS LA PILS.", "Tu souris. Tu ne sais plus pourquoi tu roulais.", "fin_assimile")
 
 
-func _end(title: String, line: String) -> void:
+## Accident sans ceinture (CarCrash) : le conducteur, ou le copilote, a traversé le
+## pare-brise à `kmh`.
+func end_crash(copilot: bool, kmh: float) -> void:
+	if net_puppet:
+		return   # c'est le conducteur qui décide
+	if _pursuer:
+		_pursuer.stop()
+	if _rivals:
+		_rivals.stop()
+	var line := "Pas de ceinture, %d km/h dans le décor." % roundi(kmh)
+	if copilot:
+		_end("LE COPILOTE A TRAVERSÉ LE PARE-BRISE.", line, "fin_pare_brise_copilote")
+	else:
+		_end("À TRAVERS LE PARE-BRISE.", line, "fin_pare_brise")
+
+
+func _end(title: String, line: String, voice := "") -> void:
 	if game_over:
 		return
 	game_over = true
@@ -457,20 +501,40 @@ func _end(title: String, line: String) -> void:
 	var pills := _addiction.pills_taken if _addiction else 0
 	var assim := roundi((_addiction.assimilation if _addiction else 0.0) * 100.0)
 	var stats := "%s\n%.1f km parcourus  ·  %d Pils  ·  assimilation %d %%" % [line, km, pills, assim]
+	var deliveries := get_tree().get_first_node_in_group(DeliveryManager.GROUP) as DeliveryManager
+	if deliveries and deliveries.delivered + deliveries.missed > 0:
+		stats += "  ·  %d livraison%s" % [deliveries.delivered, "s" if deliveries.delivered > 1 else ""]
 	_fade_curtain(0.85, 1.0)
 	_show(title, stats + "\n\nEspace / A : rejouer")
+	_end_voices(voice)
+
+
+## Voix de la fin, puis « Espace / A : rejouer ».
+func _end_voices(voice: String) -> void:
+	var p := _voice(voice)
+	if p:
+		await p.finished
+	if is_inside_tree() and game_over:
+		_voice("fin_rejouer")
 
 
 # --- Texte et rideau -----------------------------------------------------------------
 
-func _say(title: String, sub: String, duration: float) -> void:
+func _say(title: String, sub: String, duration: float, voice := "") -> void:
 	_co_running = true
 	_skip = false
 	_show(title, sub)
+	_voice(voice)
+	if voice != "" and not show_text_with_voice and VoiceLine.has_recording(voice):
+		_text_target = 0.0   # la voix remplace le texte
+	# le texte reste au moins le temps de la réplique
+	duration = maxf(duration, VoiceLine.length(voice) + 0.4)
 	var t := 0.0
 	while t < duration and not _skip:
 		t += get_process_delta_time()
 		await get_tree().process_frame
+	if _skip:
+		VoiceLine.stop("narrateur")
 	if not game_over:
 		_text_target = 0.0
 		var f := 0.0
@@ -478,6 +542,16 @@ func _say(title: String, sub: String, duration: float) -> void:
 			f += get_process_delta_time()
 			await get_tree().process_frame
 	_co_running = false
+
+
+## Joue la voix (et la fait jouer chez le copilote). Renvoie le lecteur ou null.
+func _voice(id: String) -> Node:
+	if id == "":
+		return null
+	if not net_puppet:
+		_voice_id = id
+		_voice_seq += 1
+	return VoiceLine.play(self, id, "narrateur", voice_db)
 
 
 func _show(title: String, sub: String) -> void:

@@ -4,6 +4,15 @@ extends MeshInstance3D
 ## Une petite carte d'humidité (CPU) est remplie par la pluie et remise à zéro
 ## dans la zone balayée par chaque balai. Placé à la surface extérieure du pare-brise
 ## (axe X = largeur, axe Y = vers le haut de la vitre).
+## Dans le casque, la vitre mouillée n'est pas floue mais voilée (variante du shader
+## sans relecture de l'image, impossible en stéréo avec le rendu Compatibility : elle
+## donnait un voile noir).
+
+const SHADER := preload("res://cars/SUV4x4/windshield_rain.gdshader")
+const SHADER_VR := preload("res://cars/SUV4x4/windshield_rain_vr.gdshader")
+
+## Tests sans casque : utiliser quand même la variante du casque.
+static var force_xr := false
 
 ## Taille de la vitre (m).
 @export var size := Vector2(1.74, 0.80)
@@ -46,7 +55,7 @@ func _ready() -> void:
 	mesh = quad
 	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_mat = ShaderMaterial.new()
-	_mat.shader = preload("res://cars/SUV4x4/windshield_rain.gdshader")
+	_mat.shader = SHADER
 	_mat.set_shader_parameter("aspect", size.y / size.x)
 	material_override = _mat
 	var n := resolution.x * resolution.y
@@ -55,6 +64,7 @@ func _ready() -> void:
 	_img = Image.create_from_data(resolution.x, resolution.y, false, Image.FORMAT_R8, _bytes)
 	_tex = ImageTexture.create_from_image(_img)
 	_mat.set_shader_parameter("wet_map", _tex)
+	visible = false   # sèche au départ
 
 
 ## Humidité moyenne (0-1) de la zone balayée côté conducteur : mesure de la visibilité.
@@ -102,6 +112,7 @@ func update_rain(rain: float, wiper_angle: float, light: float, delta: float, st
 	if grow == 0.0 and dry == 0.0 and not wiping:
 		return
 
+	var wettest := 0.0
 	var rmin2 := blade_range.x * blade_range.x
 	var rmax2 := blade_range.y * blade_range.y
 	var idx := 0
@@ -124,8 +135,19 @@ func update_rain(rain: float, wiper_angle: float, light: float, delta: float, st
 							w = minf(w, _residual * (0.5 + fposmod(float(idx) * 0.37, 1.0)))
 							break
 			_wet[idx] = w
+			wettest = maxf(wettest, w)
 			_bytes[idx] = int(w * 255.0)
 			idx += 1
+	# vitre sèche : pas de dessin (le flou relit l'image : passe coûteuse)
+	visible = wettest > 0.004
 	_img.set_data(resolution.x, resolution.y, false, Image.FORMAT_R8, _bytes)
 	_tex.update(_img)
 	_mat.set_shader_parameter("light", light)
+	var sh := SHADER_VR if is_xr_view(self) else SHADER
+	if _mat.shader != sh:
+		_mat.shader = sh
+
+
+## Vrai si la scène est rendue dans le casque (viewport XR).
+static func is_xr_view(n: Node) -> bool:
+	return force_xr or (n.is_inside_tree() and n.get_viewport().use_xr)

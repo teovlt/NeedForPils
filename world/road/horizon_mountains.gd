@@ -99,7 +99,9 @@ func _build_ring(cfg: Dictionary) -> ArrayMesh:
 						col = Color(0.2, 0.33, 0.15).lerp(Color(0.28, 0.38, 0.17), g)      # collines : herbe
 				else:
 					col = Color(0.12, 0.24, 0.12).lerp(Color(0.18, 0.3, 0.13), g)          # forêt
-				for v in [v0, v1, v2]:
+				# ordre horaire vu du centre (face avant dans Godot) : dans l'autre sens,
+				# les reliefs étaient éliminés au rendu et restaient invisibles
+				for v in [v0, v2, v1]:
 					verts.append(v)
 					normals.append(nrm)
 					colors.append(col)

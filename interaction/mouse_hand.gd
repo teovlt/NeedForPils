@@ -6,7 +6,8 @@ extends Node3D
 ## - Survol : le contour de l'objet visé s'illumine (même système que la VR)
 ## - Clic gauche maintenu : attraper / tirer (portes, volant, leviers, objets...)
 ## - Molette : rapprocher / éloigner l'objet tenu
-## - F ou clic molette : ouvrir/fermer, cran suivant (comme A/X en VR)
+## - F ou clic molette : ouvrir/fermer, cran suivant (en VR : saisir la pièce, ou geste
+##   de l'autre main sur l'objet tenu)
 
 const GROUP := "mouse_hands"
 

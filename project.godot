@@ -19,6 +19,7 @@ config/icon="res://icon.svg"
 
 XRToolsUserSettings="*uid://bqgb8i74tm0t"
 XRToolsRumbleManager="*uid://by853dk86g1qw"
+SceneLoader="*res://menu/scene_loader.gd"
 Net="*res://network/net.gd"
 
 [editor_plugins]
@@ -36,6 +37,7 @@ enabled=PackedStringArray("res://addons/godot-xr-tools/plugin.cfg", "res://addon
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
 textures/vram_compression/import_etc2_astc=true
+anti_aliasing/quality/msaa_3d=2
 
 [shader_globals]
 
@@ -98,3 +100,4 @@ openxr/extensions/meta/render_model=true
 openxr/extensions/meta/anchor_api=true
 openxr/extensions/meta/scene_api=true
 openxr/extensions/meta/environment_depth=true
+openxr/extensions/meta/dynamic_resolution=false

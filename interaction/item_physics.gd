@@ -57,6 +57,14 @@ static func begin(item: RigidBody3D, airborne := false, vel := Vector3.ZERO) -> 
 	return st
 
 
+## Élan soudain (repère du support, m/s) : secousse, choc. Vers le haut, l'objet décolle.
+static func kick(st: Dictionary, impulse: Vector3) -> void:
+	st["vel"] = (st["vel"] as Vector3) + impulse
+	if impulse.y > 0.0:
+		st["air"] = true
+	st["yaw_vel"] = float(st["yaw_vel"]) + randf_range(-1.0, 1.0) * impulse.length() * 4.0
+
+
 static func get_state(item: RigidBody3D) -> Dictionary:
 	return item.get_meta(META) if item.has_meta(META) else {}
 

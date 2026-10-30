@@ -16,11 +16,64 @@ var wheel_angle := 0.0   # radians
 
 var _rest_basis: Basis
 var _last_hand_angle := {}
+## Jante mesurée sur les maillages : [rayon du cercle central, demi-épaisseur, hauteur
+## le long de la colonne] (vide tant que les maillages ne sont pas là).
+var _rim: Array = []
 
 
 func _ready() -> void:
 	super._ready()
 	_rest_basis = transform.basis
+
+
+## Distance à la jante (anneau) et non à la boîte englobante du volant : la boîte
+## couvrait tout le disque et débordait sur le contact à clé, juste à côté, dont la clé
+## devenait presque impossible à saisir.
+func get_distance_to(global_point: Vector3) -> float:
+	if _rim.is_empty():
+		_measure_rim()
+		if _rim.is_empty():
+			return super.get_distance_to(global_point)
+	var axis := column_axis.normalized()
+	var p := _parent_xf().affine_inverse() * global_point - position
+	var h := p.dot(axis) - float(_rim[2])
+	var rho := (p - axis * p.dot(axis)).length()
+	return maxf(Vector2(rho - float(_rim[0]), h).length() - float(_rim[1]), 0.0)
+
+
+func _parent_xf() -> Transform3D:
+	return get_parent().global_transform if get_parent() is Node3D else Transform3D.IDENTITY
+
+
+## Rayon et épaisseur de la jante, d'après les sommets les plus éloignés de la colonne.
+func _measure_rim() -> void:
+	_ensure_built()
+	var axis := column_axis.normalized()
+	var inv := _parent_xf().affine_inverse()
+	var pts: Array[Vector2] = []   # (distance à la colonne, hauteur)
+	var max_rho := 0.0
+	for m in _meshes:
+		if not is_instance_valid(m) or m.mesh == null:
+			continue
+		var xf := inv * m.global_transform
+		for v in m.mesh.get_faces():
+			var p: Vector3 = xf * v - position
+			var h := p.dot(axis)
+			var rho := (p - axis * h).length()
+			pts.append(Vector2(rho, h))
+			max_rho = maxf(max_rho, rho)
+	if max_rho < 0.05:
+		return
+	var lo := INF
+	var h_sum := 0.0
+	var n := 0
+	for q in pts:
+		if q.x > max_rho * 0.8:   # sommets de la jante (pas les branches ni le moyeu)
+			lo = minf(lo, q.x)
+			h_sum += q.y
+			n += 1
+	var half := maxf((max_rho - lo) * 0.5, 0.012)
+	_rim = [max_rho - half, half, h_sum / n]
 
 
 ## Valeur de direction entre -1 (droite) et 1 (gauche).

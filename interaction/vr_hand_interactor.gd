@@ -2,7 +2,10 @@ class_name VRHandInteractor
 extends Node3D
 ## À placer comme enfant d'un XRController3D.
 ## Cherche l'objet VRInteractable le plus proche, le fait s'illuminer,
-## le saisit avec "grip" et l'ouvre/ferme avec A/X (si l'objet a toggle()).
+## le saisit avec "grip". A/X n'agit que sur ce qui a vr_button() : objets à manipuler
+## (briquet, pochettes, paquet, grinder, carnet, feuille, canette fermée) et recalage
+## du pare-soleil et des rétroviseurs. Les pièces de la voiture (portes, manivelles,
+## leviers...) se manœuvrent à la main seulement.
 ## Les objets `grab_with_trigger` (pilules de la pochette) se prennent aussi du bout de
 ## l'index avec la gâchette : ils suivent alors le bout du doigt (`tip_hand`) tant que
 ## la gâchette reste enfoncée, et la gâchette ne sert plus d'accélérateur / de frein.
@@ -19,8 +22,8 @@ const GROUP := "vr_hands"
 ## les mains VR locales et celles de l'autre joueur en partie à deux (NetRemoteHand).
 const TOUCH_GROUP := "touch_hands"
 
-## Saisie (0), lâcher (1) ou action A/X (2) sur un objet : la partie à deux (NetSession)
-## rejoue le geste chez l'autre joueur.
+## Saisie (0), lâcher (1), action souris (2) ou bouton A/X (3) sur un objet : la
+## partie à deux (NetSession) rejoue le geste chez l'autre joueur.
 signal interacted(kind: int, target: VRInteractable)
 ## Pareil pour une prise du bout de l'index (gâchette).
 signal tip_interacted(kind: int, target: VRInteractable)
@@ -65,6 +68,12 @@ var _free_target: Node3D           # pose de la main affichée (bloquée par la 
 var _snap_target: Node3D           # main accrochée à une commande
 var _free_local := Vector3.ZERO    # position de la main affichée, repère de l'XROrigin
 var _free_ok := false
+var _lag_t := 0.0                    # temps passé loin de la vraie main (main affichée bloquée)
+## Main affichée restée en arrière (bloquée) alors que la vraie main est dans un endroit
+## libre : au bout de ce temps (s), elle la rejoint en glissant, même à travers une paroi.
+const HAND_RESCUE_TIME := 0.35
+## Vitesse mini (m/s) à laquelle elle rejoint la vraie main.
+const HAND_CATCH_UP := 4.0
 var _sphere_offsets: Array[Vector3] = []
 var _sphere_shapes: Array[SphereShape3D] = []
 var _shrunk_shapes: Array[SphereShape3D] = []
@@ -138,28 +147,41 @@ func _update_visual_hand() -> void:
 	if _free_ok:
 		var cur := frame * _free_local
 		pos = cur
-		# légèrement en contact (la voiture a bougé, la main a tourné) : toléré, sphères
-		# réduites de 4 mm ; vraiment dedans : la main affichée reste où elle est
-		if _hand_free(basis, cur, 0.004):
-			var d := desired.origin - cur
-			var n := clampi(int(ceil(d.length() / 0.01)), 1, 50)
+		# un peu dans une surface (la voiture a bougé, le poignet a tourné) : on la sort
+		# le long de la normale (avant, elle restait figée là)
+		if not _hand_free(basis, pos, 0.004):
+			pos = _push_out(basis, pos)
+		if _hand_free(basis, pos, 0.004):
+			var d := desired.origin - pos
+			var n := clampi(int(ceil(d.length() / 0.01)), 1, 60)
 			var step := d / n
 			for i in n:
 				if _hand_free(basis, pos + step):
 					pos += step
 					continue
+				# bloquée : elle glisse le long de la surface touchée, puis, dans un coin,
+				# composante par composante
+				var nrm := _contact_normal(basis, pos + step, pos)
+				var sl := step - nrm * step.dot(nrm)
+				if nrm != Vector3.ZERO and step.dot(nrm) < 0.0 and sl.length_squared() > 1e-10 \
+						and _hand_free(basis, pos + sl):
+					pos += sl
+					continue
 				var moved := false
 				for ax in [Vector3.RIGHT, Vector3.UP, Vector3.BACK]:
-					var sl: Vector3 = ax * step.dot(ax)
-					if sl.length_squared() > 1e-10 and _hand_free(basis, pos + sl):
-						pos += sl
+					var part: Vector3 = ax * step.dot(ax)
+					if part.length_squared() > 1e-10 and _hand_free(basis, pos + part):
+						pos += part
 						moved = true
 				if not moved:
 					break
-		# vraie main bien plus loin (passée derrière une paroi, ou main coincée) : on la
-		# rejoint si elle est dans un endroit libre
-		if pos.distance_to(desired.origin) > 0.45 and _hand_free(basis, desired.origin):
-			pos = desired.origin
+		# restée en arrière (derrière le volant, une paroi...) alors que la vraie main est
+		# dans le vide : elle la rejoint vite, en glissant (sans téléportation)
+		var gap := pos.distance_to(desired.origin)
+		_lag_t = _lag_t + get_physics_process_delta_time() if gap > 0.06 else 0.0
+		if _lag_t > HAND_RESCUE_TIME and _hand_free(basis, desired.origin):
+			var dt := get_physics_process_delta_time()
+			pos += (desired.origin - pos).limit_length(maxf(HAND_CATCH_UP * dt, gap * 0.3))
 	_free_local = frame.affine_inverse() * pos
 	_free_ok = true
 	_free_target.global_transform = Transform3D(basis, pos)
@@ -201,6 +223,46 @@ func _setup_hand_spheres() -> bool:
 	return true
 
 
+## Sort la main affichée d'une surface où elle est un peu entrée : par pas de 3 mm le
+## long de la normale du contact (au plus 3 cm), tant qu'elle n'est pas libre.
+func _push_out(basis: Basis, pos: Vector3) -> Vector3:
+	var p := pos
+	for _k in 10:
+		if _hand_free(basis, p, 0.004):
+			return p
+		var n := _contact_normal(basis, p, p)
+		if n == Vector3.ZERO:
+			return pos
+		p += n * 0.003
+	return p if _hand_free(basis, p, 0.004) else pos
+
+
+## Normale de la surface touchée par la main placée en `pos`, tournée vers le centre de
+## la sphère qui touche (côté libre, celui d'où vient la main `from`), ou ZERO.
+func _contact_normal(basis: Basis, pos: Vector3, from: Vector3) -> Vector3:
+	var space := get_world_3d().direct_space_state
+	var xf := Transform3D(basis, pos)
+	for i in _sphere_offsets.size():
+		_query.shape = _sphere_shapes[i]
+		var c: Vector3 = xf * _sphere_offsets[i]
+		_query.transform = Transform3D(Basis.IDENTITY, c)
+		var info := space.get_rest_info(_query)
+		if info.is_empty():
+			continue
+		var n: Vector3 = info.get("normal", Vector3.ZERO)
+		var free_c: Vector3 = Transform3D(basis, from) * _sphere_offsets[i]
+		var to_free := free_c - (info["point"] as Vector3)
+		if to_free.length_squared() < 1e-10:
+			to_free = c - (info["point"] as Vector3)
+		if n.length_squared() < 1e-8:
+			n = to_free
+		n = n.normalized()
+		if n.dot(to_free) < 0.0:
+			n = -n
+		return n
+	return Vector3.ZERO
+
+
 func _hand_free(basis: Basis, pos: Vector3, shrink := 0.0) -> bool:
 	var space := get_world_3d().direct_space_state
 	var xf := Transform3D(basis, pos)
@@ -236,6 +298,17 @@ func _snap_to(it: VRInteractable) -> void:
 	_xr_hand.add_pose_override(self, 10, _grip_pose)
 
 
+## Main affichée (modèle XR Tools) pour la partie à deux : [transformation (monde),
+## grip, gâchette, poing refermé sur une commande], ou [] sans main affichée.
+func visual_state() -> Array:
+	if _xr_hand == null or not is_instance_valid(_xr_hand):
+		return []
+	var tree := _xr_hand.get_node_or_null("AnimationTree") as AnimationTree
+	var grip: float = tree.get("parameters/Grip/blend_amount") if tree else 0.0
+	var trig: float = tree.get("parameters/Trigger/blend_amount") if tree else 0.0
+	return [(_xr_hand as Node3D).global_transform, grip, trig, _snap_target != null]
+
+
 func _unsnap() -> void:
 	if _snap_target == null:
 		return
@@ -251,6 +324,7 @@ func is_left() -> bool:
 	return controller != null and controller.tracker == &"left_hand"
 
 
+## Gâchette pour la conduite (accélérateur à droite, frein à gauche).
 func get_trigger() -> float:
 	if controller == null or not controller.get_has_tracking_data():
 		return 0.0
@@ -342,11 +416,11 @@ func _physics_process(_delta: float) -> void:
 			_release()
 		else:
 			held.grab_update(self)
-			# A / X sur l'objet tenu (allumer le briquet, la cigarette...)
+			# A / X sur l'objet tenu (allumer le briquet, ouvrir la pochette...)
 			var toggle_held := controller.is_button_pressed(toggle_action)
-			if toggle_held and not _toggle_down and held.has_method("toggle"):
-				held.toggle()
-				interacted.emit(2, held)
+			if toggle_held and not _toggle_down and held.has_method("vr_button"):
+				held.vr_button()
+				interacted.emit(3, held)
 				pulse(0.4, 0.05)
 			_toggle_down = toggle_held
 		return
@@ -384,9 +458,9 @@ func _physics_process(_delta: float) -> void:
 				_grab_now(best)
 				return
 		var toggle_now := controller.is_button_pressed(toggle_action)
-		if toggle_now and not _toggle_down and best.has_method("toggle"):
-			best.toggle()
-			interacted.emit(2, best)
+		if toggle_now and not _toggle_down and best.has_method("vr_button"):
+			best.vr_button()
+			interacted.emit(3, best)
 			pulse(0.4, 0.05)
 		_toggle_down = toggle_now
 	else:

@@ -4,9 +4,10 @@ extends VRPickable
 ##
 ## - S'attrape et se range comme les autres objets de la voiture (placée au hasard au
 ##   démarrage par CarStorage).
-## - Fermée : A/X (VR) ou F (bureau) en la visant -> le zip s'ouvre en grand : le film
-##   du dessus se soulève en arche et l'ouverture s'arrondit (petit bruit de zip). Viser
-##   la bande du zip et refaire A/X / F la referme.
+## - Fermée : A/X (VR) ou F (bureau) en la visant ou en la tenant, ou, tenue d'une main,
+##   l'autre pince le zip et tire (VR) -> le zip s'ouvre en grand : le film du dessus se soulève en
+##   arche et l'ouverture s'arrondit (petit bruit de zip). Le même geste sur la bande du
+##   zip (ou F en la visant) la referme.
 ## - Ouverte, VR : glisser l'index dans l'ouverture jusqu'aux pilules et presser la
 ##   gâchette -> la pilule la plus proche se colle au bout du doigt tant que la gâchette
 ##   reste enfoncée ; la porter à la bouche pour l'avaler (EdiblePickable). Serrer
@@ -14,9 +15,11 @@ extends VRPickable
 ##   Bureau : viser les pilules dans la pochette et appuyer sur F -> une pilule avalée.
 ##   On peut aussi en sortir une au clic gauche et la poser ailleurs.
 ## - Les pilules visibles dans la pochette diminuent à mesure qu'on les prend.
+## - Une pilule sortie (ou le contenu des pochettes dérivées : tête de weed, pincée de
+##   tabac) lâchée au-dessus de la pochette ouverte y retourne.
 ## - Seule la pilule visée (la plus proche de la main) est surlignée ; c'est elle qui sort.
-## - Tenue dans une main (VR) : cette main l'ouvre / la ferme avec A/X ; l'autre main ne
-##   peut plus attraper la pochette elle-même, seulement les pilules.
+## - Tenue dans une main (VR) : l'autre main ne peut plus attraper la pochette elle-même,
+##   seulement le zip et les pilules.
 ## Repère : pochette posée à plat (épaisseur selon Y), zip vers +Z.
 
 const SIZE := Vector2(0.10, 0.14)          # largeur (X), longueur (Z)
@@ -111,6 +114,7 @@ class Taker:
 
 func _ready() -> void:
 	super._ready()
+	add_to_group(RECEIVERS)
 	rest_up_axis = 1
 	friction = 0.7
 	_build.call_deferred()
@@ -181,6 +185,14 @@ func _build() -> void:
 	_zip_player.stream = _make_zip_sound()
 	_zip_player.unit_size = 1.5
 	item.add_child(_zip_player)
+	# VR : l'autre main pince le zip et tire -> ouvre / ferme
+	var zh := VRGestureHandle.new()
+	zh.name = "ZipHandle"
+	zh.owner_grab = self
+	zh.mesh_root = _zip_mi
+	zh.segment = _zip_segment
+	zh.action = toggle
+	item.add_child(zh)
 	refresh_meshes()
 	_apply_open(true)
 
@@ -214,6 +226,15 @@ func _make_content(i: int, rng: RandomNumberGenerator) -> Node3D:
 func _content_scene(node: Node3D) -> String:
 	var kind: String = (node.get_child(0) as Node3D).get_meta("kind")
 	return CAPSULE_SCENE if kind == "capsule" else SMILEY_SCENE
+
+
+## Bande du zip du film du dessus (monde), qui suit l'arche de l'ouverture.
+func _zip_segment() -> Array:
+	var model := _bag_mi.get_parent().get_parent() as Node3D
+	var z := ZIP_Z + 0.008
+	var x := SIZE.x * 0.3
+	var y := _surface_y(x, z, 1.0)
+	return [model.global_transform * Vector3(-x, y, z), model.global_transform * Vector3(x, y, z)]
 
 
 ## Hauteur du film du dessus (side = 1) ou du dessous (side = -1) en (x, z).
@@ -331,7 +352,9 @@ func ray_hit_distance(origin: Vector3, dir: Vector3, max_t: float, margin: float
 	var t := super.ray_hit_distance(origin, dir, max_t, margin)
 	if t == INF or not open or pills_left() == 0 or item == null:
 		return t
-	var inv := item.global_transform.affine_inverse()
+	# repère du modèle (réduit pour les petits sachets, DealerBag)
+	var model := item.get_node_or_null("Model") as Node3D
+	var inv := (model.global_transform if model else item.global_transform).affine_inverse()
 	var o := inv * origin
 	var d := inv.basis * dir
 	if absf(d.y) < 1e-4:
@@ -348,11 +371,18 @@ func ray_hit_distance(origin: Vector3, dir: Vector3, max_t: float, margin: float
 # --- Ouverture / pilules ------------------------------------------------------
 
 func pills_left() -> int:
+	if not _bag_built:
+		return _content_count()   # contenu construit en différé : encore tout dedans
 	var n := 0
 	for p in _pill_nodes:
 		if p.visible:
 			n += 1
 	return n
+
+
+## A/X en VR : comme F.
+func vr_button() -> void:
+	toggle()
 
 
 ## Visée sur la pochette (sur le zip, ou partout si elle est fermée) : ouvre / ferme.
@@ -411,6 +441,27 @@ func take_pill_into(hand: Node3D) -> VRPickable:
 	g.grab(hand)
 	refresh_state()
 	return g
+
+
+## Contenu sorti de la pochette (même scène qu'une place vide) lâché au-dessus de la
+## pochette ouverte ou dans son ouverture : il y retourne, à une place libre.
+func try_receive(g: VRPickable) -> bool:
+	if not open or item == null or g.item == null or g.item == item or _pill_nodes.is_empty():
+		return false
+	# repère du modèle (réduit pour les petits sachets, DealerBag)
+	var model := item.get_node_or_null("Model") as Node3D
+	var l := (model.global_transform if model else item.global_transform).affine_inverse() * g.item.global_position
+	if absf(l.x) > SIZE.x * 0.5 + 0.02 or l.z < -SIZE.y * 0.5 - 0.01 or l.z > SIZE.y * 0.5 + 0.05 \
+			or l.y < -0.02 or l.y > MOUTH_H + 0.06:
+		return false
+	var scene := g.item.scene_file_path
+	for p in _pill_nodes:
+		if not p.visible and _content_scene(p) == scene:
+			p.visible = true
+			g.item.queue_free()
+			refresh_state()
+			return true
+	return false
 
 
 ## F en visant les pilules (bureau) : une pilule avalée directement.

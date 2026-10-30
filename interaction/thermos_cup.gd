@@ -5,7 +5,8 @@ extends VRPickable
 ## - Se remplit sous le filet de café du thermos (add_coffee) ; trop pleine, elle déborde.
 ## - Boire : tenue, le bord porté à la bouche (même bouche que les pilules et les
 ##   cigarettes) et un peu penchée : gorgées, la fatigue baisse (Fatigue.drink_coffee).
-##   Sans casque : F (ou A/X) en la tenant, on boit toute la tasse.
+##   Sans casque : F en la tenant, on boit toute la tasse. En partie à deux, portée à
+##   la bouche de l'autre joueur, c'est lui qui boit (et se réveille).
 ## - Penchée ailleurs qu'à la bouche, le café se renverse.
 ## - Lâchée retournée (ou vide) sur le goulot du thermos ouvert : elle s'y revisse.
 ## Repère : tasse à l'endroit, fond à y = 0, bord à y = HEIGHT (props/thermos_cup.glb).
@@ -34,6 +35,7 @@ var _drips: CPUParticles3D
 var _gulp: AudioStreamPlayer3D
 var _gulp_t := 0.0
 var _auto_drink := false
+var _auto_remote := false       # ... demandée par l'autre joueur (partie à deux)
 
 
 func _ready() -> void:
@@ -159,10 +161,11 @@ func _update_liquid() -> void:
 	_liquid.position = Vector3(0, BOTTOM + h * 0.5, 0)
 
 
-## F / A/X en la tenant (sans casque) : boit toute la tasse.
+## F en la tenant (sans casque) : boit toute la tasse.
 func toggle() -> void:
 	if fill > 0.01:
 		_auto_drink = true
+		_auto_remote = Net.applying_remote
 
 
 func _process(delta: float) -> void:
@@ -172,19 +175,22 @@ func _process(delta: float) -> void:
 	var drinking := false
 	if fill > 0.001:
 		var rate := 0.0
+		var remote := false   # bu par l'autre joueur : l'effet est chez lui
 		if _auto_drink:
 			rate = drink_rate * 1.2
+			remote = _auto_remote
 		elif is_grabbed():
-			var mouth = EdiblePickable.mouth_position(get_tree())
-			if mouth != null and rim_center().distance_to(mouth) < MOUTH_RADIUS and up < 0.97:
+			var m := EdiblePickable.mouth_near(get_tree(), rim_center(), MOUTH_RADIUS)
+			if not m.is_empty() and up < 0.97:
 				rate = drink_rate * lerpf(0.4, 1.0, clampf((0.95 - up) / 0.5, 0.0, 1.0))
+				remote = not m[2]
 		if rate > 0.0:
 			drinking = true
 			var q := minf(rate * delta, fill)
 			fill -= q
 			drunk += q
 			var f := get_tree().get_first_node_in_group(Fatigue.GROUP)
-			if f:
+			if f and not remote:
 				f.drink_coffee(q)
 			_gulp_t -= delta
 			if _gulp_t <= 0.0:

@@ -2,7 +2,8 @@ class_name Grinder
 extends VRPickable
 ## Grinder à herbe (props/rolling/grinder.glb : Base, Lid).
 ##
-## - A/X (main qui le tient) ou F : ouvre / ferme le couvercle (il bascule sur le côté).
+## - A/X (VR) ou F (bureau) : ouvre / ferme le couvercle (il bascule sur le côté) ; en
+##   VR, tenu d'une main, l'autre peut aussi le tirer.
 ## - Ouvert : lâcher une tête de weed (RollItem « bud ») au-dessus de la chambre -> elle
 ##   tombe dedans (4 au plus).
 ## - Fermé avec des têtes : en VR, attraper le couvercle avec l'autre main et le tourner
@@ -10,6 +11,7 @@ extends VRPickable
 ##   de l'herbe moulue (1 tête = de quoi rouler un joint bien chargé).
 ## - Ouvert avec de l'herbe moulue : l'autre main (grip, ou bout de l'index à la gâchette)
 ##   en prend une pincée (RollItem « weed ») à lâcher sur une feuille (RollingSheet).
+##   Lâchée au-dessus du grinder ouvert, la pincée y retourne.
 ## - Tenu dans une main : l'autre main n'a accès qu'au couvercle et à l'herbe.
 
 const BASE_H := 0.028
@@ -184,6 +186,17 @@ func _build() -> void:
 	_snap.unit_size = 1.5
 	_snap.volume_db = -6.0
 	item.add_child(_snap)
+	# VR : l'autre main tire le couvercle -> ouvre / ferme (fermé avec des têtes, on le
+	# tourne pour moudre : LidGrip)
+	var oh := VRGestureHandle.new()
+	oh.name = "OpenHandle"
+	oh.owner_grab = self
+	oh.mesh_root = _lid
+	oh.segment = VRGestureHandle.part_segment(_lid, "centre")
+	oh.radius = GR_R
+	oh.available = func() -> bool: return open or buds == 0
+	oh.action = toggle
+	item.add_child(oh)
 	mesh_root = base
 	refresh_meshes()
 	_apply_open(true)
@@ -202,19 +215,31 @@ func accepts_hand(hand: Node3D) -> bool:
 	return owner_hand != null and owner_hand in _grab_hands
 
 
-## Une tête lâchée au-dessus de la chambre ouverte tombe dedans.
+## Une tête lâchée au-dessus de la chambre ouverte tombe dedans ; une pincée d'herbe
+## moulue aussi (elle retourne avec le reste de l'herbe).
 func try_receive(g: VRPickable) -> bool:
-	if not (g is RollItem) or g.kind != "bud" or not open or buds >= MAX_BUDS or _lid == null:
+	if not (g is RollItem) or g.kind not in ["bud", "weed"] or not open or _lid == null:
+		return false
+	if g.kind == "bud" and buds >= MAX_BUDS:
 		return false
 	var p := item.global_transform.affine_inverse() * g.item.global_position
 	if Vector2(p.x, p.z).length() > CH_R + 0.03 or p.y < -0.01 or p.y > 0.2:
 		return false
-	buds += 1
+	if g.kind == "weed":
+		ground += g.amount
+		refresh_state()
+	else:
+		buds += 1
 	g.item.queue_free()
 	_snap.pitch_scale = 1.4
 	_snap.play()
 	_update_contents()
 	return true
+
+
+## A/X en VR : comme F.
+func vr_button() -> void:
+	toggle()
 
 
 ## A/X ou F : moud s'il y a des têtes (fermé), sinon ouvre / ferme.

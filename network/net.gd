@@ -88,6 +88,14 @@ func world_seed(salt: String) -> int:
 	return s if s != 0 else 1
 
 
+## Tête de l'autre joueur (caméra non active de son avatar), ou null : sa bouche, pour
+## lui faire fumer / boire / avaler quelque chose (EdiblePickable.mouth_near).
+func other_head() -> Node3D:
+	if session == null or not is_instance_valid(session):
+		return null
+	return session.get("remote_eyes") as Node3D
+
+
 ## L'objet est-il tenu par une main de l'autre joueur ?
 func held_by_remote(it: VRInteractable) -> bool:
 	for h in it._grab_hands:
@@ -130,7 +138,7 @@ func find_or_host() -> void:
 	state = State.SEARCHING
 	_timer = SEARCH_TIME + randf() * 0.5   # deux clics simultanés : l'un finit avant
 	_announce_timer = 0.0
-	_status("Recherche d'une partie sur le réseau...")
+	_status("Recherche d'une partie sur le réseau...", "reseau_recherche")
 
 
 func cancel() -> void:
@@ -159,19 +167,19 @@ func _start_host() -> void:
 	_udp_send = PacketPeerUDP.new()
 	_udp_send.set_broadcast_enabled(true)
 	_announce_timer = 0.0
-	_status("En attente de l'autre joueur...\n(il doit cliquer sur JOUER À DEUX)")
+	_status("En attente de l'autre joueur...\n(il doit cliquer sur JOUER À DEUX)", "reseau_attente")
 
 
 func _start_join(ip: String) -> void:
 	_close_udp()
 	var peer := ENetMultiplayerPeer.new()
 	if peer.create_client(ip, GAME_PORT) != OK:
-		_fail("Impossible de rejoindre %s" % ip)
+		_fail("Impossible de rejoindre %s" % ip, "reseau_echec_rejoindre")
 		return
 	multiplayer.multiplayer_peer = peer
 	role = Role.COPILOT
 	state = State.JOINING
-	_status("Partie trouvée (%s), connexion..." % ip)
+	_status("Partie trouvée (%s), connexion..." % ip, "reseau_trouvee")
 
 
 func _process(delta: float) -> void:
@@ -237,21 +245,24 @@ func _close_udp() -> void:
 	_udp_send = null
 
 
-func _status(text: String) -> void:
+## Message d'état du réseau (menu principal) et sa voix (VoiceLine, canal « menu »).
+func _status(text: String, voice := "") -> void:
 	print("Réseau : ", text.replace("\n", " "))
 	status_changed.emit(text)
+	if voice != "":
+		VoiceLine.play(self, voice, "menu")
 
 
-func _fail(reason: String) -> void:
+func _fail(reason: String, voice := "") -> void:
 	if state == State.IDLE:
 		return   # déjà traité (déconnexion signalée deux fois)
 	var was_in_game := state == State.IN_GAME
 	cancel()
-	_status(reason)
+	_status(reason, voice)
 	last_message = reason
 	connection_lost.emit(reason)
 	if was_in_game:
-		get_tree().change_scene_to_file(MENU_SCENE)
+		SceneLoader.change_scene(MENU_SCENE)
 
 
 func _on_peer_connected(id: int) -> void:
@@ -263,7 +274,7 @@ func _on_peer_connected(id: int) -> void:
 		return
 	_close_udp()
 	state = State.IN_LOBBY
-	_status("Joueur trouvé ! Tu conduis.")
+	_status("Joueur trouvé ! Tu conduis.", "reseau_conducteur")
 	lobby_complete.emit()
 	game_seed = randi() % 2000000000 + 1
 	get_tree().create_timer(1.0).timeout.connect(func():
@@ -273,14 +284,14 @@ func _on_peer_connected(id: int) -> void:
 
 func _on_connected_to_server() -> void:
 	state = State.IN_LOBBY
-	_status("Connecté ! Tu es copilote.")
+	_status("Connecté ! Tu es copilote.", "reseau_copilote")
 	lobby_complete.emit()
 
 
 # Les signaux du réseau arrivent pendant que la connexion se met à jour : la fermer
 # tout de suite fait planter Godot, on attend la fin de l'image (call_deferred).
 func _on_connection_failed() -> void:
-	_fail.call_deferred("Connexion impossible.")
+	_fail.call_deferred("Connexion impossible.", "reseau_echec")
 
 
 func _on_peer_disconnected(_id: int) -> void:
@@ -292,11 +303,11 @@ func _on_peer_disconnected(_id: int) -> void:
 			session.call("on_remote_left")
 		return
 	if state != State.IDLE:
-		_fail.call_deferred("L'autre joueur est parti.")
+		_fail.call_deferred("L'autre joueur est parti.", "reseau_parti")
 
 
 func _on_server_disconnected() -> void:
-	_fail.call_deferred("Le conducteur a quitté la partie.")
+	_fail.call_deferred("Le conducteur a quitté la partie.", "reseau_conducteur_parti")
 
 
 func _check_command_line() -> void:
@@ -308,6 +319,15 @@ func _check_command_line() -> void:
 			find_or_host()   # comme le bouton JOUER À DEUX
 		elif arg.begins_with("--join="):
 			_start_join(arg.trim_prefix("--join="))
+		elif arg == "--perftest":
+			# banc de mesure sur le casque (tools/perf_cycle.gd), avec --solo
+			var pc: Node = load("res://tools/perf_cycle.gd").new()
+			pc.name = "PerfCycle"
+			add_child(pc)
+		elif arg == "--solo":
+			# partie solo tout de suite, sans le menu (tests sur le casque par adb :
+			# am start ... --esa command_line_params "++,--solo")
+			change_scene_async.call_deferred(GAME_SCENE)
 
 
 # --- Démarrage de la partie --------------------------------------------------------
@@ -316,7 +336,14 @@ func _check_command_line() -> void:
 func _rpc_start_game(seed_value: int) -> void:
 	game_seed = seed_value
 	state = State.IN_GAME
-	get_tree().change_scene_to_file(GAME_SCENE)
+	SceneLoader.change_scene(GAME_SCENE)
+
+
+## Passe à une scène en la chargeant dans un fil de travail, derrière l'écran de
+## chargement (voir menu/scene_loader.gd) : l'image ne fige pas pendant la lecture
+## des fichiers (~1 s sur PC, bien plus sur le casque).
+func change_scene_async(path: String) -> void:
+	SceneLoader.change_scene(path)
 
 
 ## Le conducteur relance la partie (rejouer) : le copilote recharge aussi.
@@ -324,7 +351,7 @@ func restart_game() -> void:
 	if is_online() and multiplayer.is_server():
 		_rpc_start_game.rpc(game_seed)
 	else:
-		get_tree().reload_current_scene()
+		SceneLoader.reload_current()
 
 
 ## Le copilote demande à rejouer (fin de partie) : c'est le conducteur qui relance.
@@ -336,7 +363,7 @@ func request_restart() -> void:
 ## Retour au menu : on quitte la partie à deux.
 func leave_to_menu() -> void:
 	cancel()
-	get_tree().change_scene_to_file(MENU_SCENE)
+	SceneLoader.change_scene(MENU_SCENE)
 
 
 # --- Messages de jeu (relayés à la NetSession) ---------------------------------------
@@ -412,3 +439,9 @@ func rx_restart_request() -> void:
 @rpc("authority", "reliable", "call_remote", 2)
 func rx_rivals_fx(kind: String, data: Array) -> void:
 	_to_session(&"on_rivals_fx", [kind, data])
+
+
+## Sachet livré par l'un des joueurs (point de livraison, nom stable du sachet).
+@rpc("any_peer", "reliable", "call_remote", 2)
+func rx_delivered(target_id: String, bag_name: String) -> void:
+	_to_session(&"on_delivered", [target_id, bag_name])

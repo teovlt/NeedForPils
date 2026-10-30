@@ -8,6 +8,9 @@ extends VRInteractable
 ## rapport au plan de la glace rend la scène dans un SubViewport, avec un frustum
 ## décentré qui épouse exactement la glace : l'image change quand on bouge la tête.
 ## Saisir la glace (grip, ou clic souris) pour la régler ; A/X ou F = réglage auto.
+## Coût : chaque rétro redessine la scène. Ils sont rendus une image sur deux, à tour
+## de rôle (jamais les trois à la même image), et pas du tout quand on ne les regarde
+## pas (hors du champ de vision).
 
 ## Taille de la glace (m).
 @export var mirror_size := Vector2(0.24, 0.075)
@@ -27,7 +30,11 @@ extends VRInteractable
 ## Sensibilité du réglage manuel (degrés par cm de déplacement de la main).
 @export var adjust_deg_per_cm := 3.0
 ## Nombre d'images entre deux rendus (1 = chaque image ; 2 = moitié moins coûteux).
-@export_range(1, 4) var update_every := 1
+@export_range(1, 4) var update_every := 2
+## Angle (degrés) entre le regard et la glace au-delà duquel on ne la rend plus.
+@export var view_cone_deg := 75.0
+
+static var _instances := 0
 
 var _viewport: SubViewport
 var _cam: Camera3D
@@ -42,6 +49,8 @@ var _frame := 0
 
 
 func _ready() -> void:
+	_frame = _instances   # décalés : pas tous les rétros à la même image
+	_instances += 1
 	_base_basis = basis
 	_build()
 	super._ready()
@@ -110,6 +119,11 @@ func toggle() -> void:
 	auto_adjust()
 
 
+## A/X en VR : réglage automatique (recale la glace).
+func vr_button() -> void:
+	auto_adjust()
+
+
 func _apply_rotation() -> void:
 	basis = _base_basis * Basis(Vector3.UP, _yaw) * Basis(Vector3.RIGHT, _pitch)
 
@@ -130,7 +144,7 @@ func _eye_position() -> Vector3:
 
 func _process(_delta: float) -> void:
 	_frame += 1
-	var render := _frame % update_every == 0
+	var render := _frame % update_every == 0 and _in_view()
 	_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS if render else SubViewport.UPDATE_DISABLED
 	if not render:
 		return
@@ -147,6 +161,17 @@ func _process(_delta: float) -> void:
 	_cam.global_transform = Transform3D(Basis(-r, u, -n), eye_r)
 	var d := c - eye_r
 	_cam.set_frustum(mirror_size.y, Vector2(d.dot(-r), d.dot(u)), maxf(dist, 0.02), view_distance)
+
+
+## La glace est-elle dans le champ de vision du joueur ?
+func _in_view() -> bool:
+	var main_cam := get_tree().root.get_camera_3d()
+	if main_cam == null:
+		return true
+	var to := _glass.global_position - main_cam.global_position
+	if to.length_squared() < 1e-6:
+		return true
+	return (-main_cam.global_basis.z).normalized().dot(to.normalized()) > cos(deg_to_rad(view_cone_deg))
 
 
 # --- Réglage à la main ------------------------------------------------------

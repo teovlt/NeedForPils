@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://ciubeif6xmmn3"
+path="res://.godot/imported/Luigi clash Mario.mp3-9dacb96de8aa25f40592bd3c263514a8.mp3str"
+
+[deps]
+
+source_file="res://audio/radio/playlist/Luigi clash Mario.mp3"
+dest_files=["res://.godot/imported/Luigi clash Mario.mp3-9dacb96de8aa25f40592bd3c263514a8.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

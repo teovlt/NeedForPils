@@ -7,7 +7,8 @@ extends VRPickable
 ## - une pincée de tabac (RollItem « tobacco », sortie du sachet de tabac à rouler) ;
 ## - un filtre (RollItem « filter », un seul), qui se place au bout.
 ## Garnie (au moins une pincée d'herbe et / ou de tabac) et avec son filtre :
-## A/X (en la tenant) ou F -> elle se roule : joint s'il y a de l'herbe, sinon cigarette
+## A/X (VR) ou F (bureau) en la tenant, ou l'autre main la pince et la roule (tirer de
+## 3 cm, VR) -> elle se roule : joint s'il y a de l'herbe, sinon cigarette
 ## (Smokable, à allumer au briquet et à fumer). Plus elle est chargée, plus il dure.
 ## Repère : feuille à plat, longueur selon X (filtre au bout +X), colle vers +Z.
 
@@ -56,6 +57,18 @@ func _ready() -> void:
 	_rustle.volume_db = -14.0
 	_rustle.pitch_scale = 2.2
 	item.add_child.call_deferred(_rustle)
+	# VR : garnie et tenue, l'autre main la pince et la roule
+	var rh := VRGestureHandle.new()
+	rh.name = "RollHandle"
+	rh.owner_grab = self
+	rh.mesh_root = item.get_node_or_null("Model")
+	rh.segment = func() -> Array:
+		return [item.global_transform * Vector3(-SIZE.x * 0.35, 0.004, 0), item.global_transform * Vector3(SIZE.x * 0.35, 0.004, 0)]
+	rh.radius = 0.015
+	rh.pull_distance = 0.03
+	rh.available = is_ready_to_roll
+	rh.action = toggle
+	item.add_child.call_deferred(rh)
 
 
 func filling() -> float:
@@ -111,6 +124,11 @@ func _update_visual() -> void:
 		_filter_node.position = Vector3(SIZE.x * 0.5 - 0.015, 0.0036, -0.002)
 		item.add_child(_filter_node)
 		refresh_meshes()
+
+
+## A/X en VR : comme F.
+func vr_button() -> void:
+	toggle()
 
 
 ## A/X ou F : roule la feuille garnie (avec filtre).

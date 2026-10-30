@@ -115,6 +115,28 @@ const SITE_BLEND := 12.0
 ## {type, s_car, s0, s1, lat0, lat1, y}. Vide si aucun.
 var _site := {}
 
+## Lieux du bord de la route (station-service, motel, supérette, aire de repos, camp) :
+## un tous les `lot_spacing` m environ, côté droit, là où la route est rendue droite et
+## plate (elle s'y prépare LOT_LEAD m avant). Terrain aplani, décor écarté, bâtis par
+## world/start/start_site.gd (sans voiture) avec un point de livraison (DeliveryDrop).
+@export var roadside_lots := true
+@export var lot_spacing := Vector2(650.0, 1300.0)
+const LOT_TYPES := ["station", "station", "station", "motel", "motel", "superette", "superette", "aire", "camp"]
+const LOT_SIZES := {"station": Vector2(26.0, 44.0)}   # les autres : SITE_SIZES
+const LOT_LEAD := 220.0
+const LOT_BLEND := 10.0
+var _lot_rng := RandomNumberGenerator.new()
+## Lieux prévus (s croissants) : {id, type, s0, s1, depth, length, seed[, traced]}.
+var _lot_plans: Array[Dictionary] = []
+## Lieux tracés (repère du bruit, jamais modifiés : lus par les threads) :
+## {id, type, s0, s1, depth, length, seed, origin, fwd, right, y, lat0, lat1}.
+var _lots: Array[Dictionary] = []
+var _lots_built := {}
+var _lot_count := 0
+
+## Livraisons des sachets du sac à dos (world/delivery/delivery_manager.gd).
+@export var deliveries_enabled := true
+
 ## Animaux du décor (promeneurs et traversées, world/animals/animal_manager.gd).
 @export var animals_enabled := true
 @export var horizon_mountains := true   # taches de couleur du décor (~80 m)
@@ -194,6 +216,9 @@ func _ready() -> void:
 	_terrain_mat.roughness = 1.0
 
 	_setup_nature()
+	_lot_rng.seed = hash(_noise.seed + 7331)
+	if roadside_lots:
+		_plan_lot(straight_start + _lot_rng.randf_range(260.0, 520.0))
 	_relief0 = 0.0
 	_relief0 = relief(_pos + world_offset)
 
@@ -207,13 +232,25 @@ func _ready() -> void:
 		am.set("road", self)
 		am.set("car", _target)
 		add_child(am)
-	# Premiers tronçons tout de suite (synchrone) pour que la voiture ait un sol :
-	# jusqu'à 80 m devant la voiture (la route peut commencer loin derrière elle).
+	if deliveries_enabled and _target is RigidBody3D:
+		var dm := DeliveryManager.new()
+		dm.name = "Deliveries"
+		dm.road = self
+		dm.car = _target
+		add_child(dm)
+	# Premiers tronçons tout de suite pour que la voiture ait un sol : jusqu'à 80 m
+	# devant la voiture (la route peut commencer loin derrière elle). Calculés en
+	# parallèle sur les fils de travail (un par cœur) puis attendus : le démarrage
+	# bloque bien moins longtemps qu'en les calculant l'un après l'autre.
 	var t0 := _target.global_position if _target else global_position
 	var n := 0
 	while n < 3 or ((to_global(_pos) - global_position).length() < (t0 - global_position).length() + 80.0 and n < 40):
-		_finalize(_queue_chunk(false))
+		_queue_chunk(true)
 		n += 1
+	for job in _pending:
+		WorkerThreadPool.wait_for_task_completion(job["task"])
+		_finalize(job)
+	_pending.clear()
 	# Collisions des premiers tronçons tout de suite.
 	while not _collision_queue.is_empty():
 		var item: Dictionary = _collision_queue.pop_front()
@@ -267,6 +304,14 @@ func _physics_process(delta: float) -> void:
 		print("Route : collision %.1f ms, suppression %.1f ms" % [t_col / 1000.0, t_del / 1000.0])
 
 
+## Scène quittée (rejouer, retour au menu) : on attend les tronçons en cours de calcul
+## sur les autres fils, sinon ils travaillent sur une route déjà libérée.
+func _exit_tree() -> void:
+	for job in _pending:
+		WorkerThreadPool.wait_for_task_completion(job["task"])
+	_pending.clear()
+
+
 # --- Informations sur la route -----------------------------------------------
 
 ## Point de route le plus proche : {point, dir, right, lateral, s, found}.
@@ -310,6 +355,25 @@ func sample_road(world_pos: Vector3) -> Dictionary:
 		"lateral": (local - rp[bi]).dot(right),
 		"s": rs[bi],
 	}
+
+
+## Milieu de la route (points du monde, dans l'ordre) entre les abscisses `s0` et `s1`,
+## un point tous les `every` m environ : la carte du GPS.
+func centerline(s0: float, s1: float, every := 4.0) -> PackedVector3Array:
+	var out := PackedVector3Array()
+	var last := -INF
+	for ch in _chunks:
+		var rs: PackedFloat32Array = ch["rows_s"]
+		if rs.is_empty() or rs[rs.size() - 1] < s0 or rs[0] > s1:
+			continue
+		var node: Node3D = ch["node"]
+		var rp: PackedVector3Array = ch["rows_p"]
+		for i in rs.size():
+			if rs[i] < s0 or rs[i] > s1 or rs[i] - last < every:
+				continue
+			last = rs[i]
+			out.append(node.to_global(rp[i]))
+	return out
 
 
 ## Tronçon (noeud) le plus proche d'un point du monde, ou null. Partie à deux : le
@@ -424,6 +488,9 @@ func _advance(ds: float) -> void:
 			var err := wrapf(_wander - _heading, -PI, PI)
 			if absf(err) > 0.7:
 				_k_target = absf(_k_target) * signf(err)
+	var hold := _lot_hold()
+	if hold:
+		_k_target = 0.0   # lieu du bord de la route : portion droite
 	_k = move_toward(_k, _k_target, ds * 0.0004)
 	_wander += _rng.randf_range(-1.0, 1.0) * 0.0004 * ds
 
@@ -446,11 +513,15 @@ func _advance(ds: float) -> void:
 		g = clampf(follow + _grade_target * gmax * 0.3, -gmax, gmax)
 		# rampe douce à la sortie de la ligne droite de départ
 		g *= clampf((_s - straight_start) / 150.0, 0.0, 1.0)
+	if hold:
+		g = 0.0           # ... et plate
 	_grade = move_toward(_grade, g, ds * 0.0008)
 
 	_heading += _k * ds
 	_pos += Vector3(sin(_heading), _grade, cos(_heading)) * ds
 	_s += ds
+	if not _lot_plans.is_empty():
+		_trace_lots()
 
 
 func _right() -> Vector3:
@@ -486,6 +557,7 @@ func _queue_chunk(threaded: bool) -> Dictionary:
 		"potholes": feats["potholes"], "patches": feats["patches"], "bumps": feats["bumps"],
 		"wear": _quality,
 		"fields": fields,
+		"lots": _lots.duplicate(),
 		"offset": world_offset,
 		"result": {},
 	}
@@ -551,13 +623,17 @@ func relief(world_pos: Vector3) -> float:
 ## Hauteur du terrain hors de la route, relative au bord de la route.
 ## `world_xz.y` doit être l'altitude de la route à cette rangée (les appelants passent
 ## un point de la rangée décalé latéralement, donc à l'altitude de la route).
-func _terrain_height(world_xz: Vector3, ax: float) -> float:
+func _terrain_height(world_xz: Vector3, ax: float, lots = null) -> float:
 	var h := _terrain_height_raw(world_xz, ax)
 	if not _site.is_empty():
 		var w := _site_weight(world_xz, 0.0)
 		if w > 0.0:
 			# lieu de départ : terrain plat juste sous le niveau de la route
 			h = lerpf(h, float(_site["y"]) - world_xz.y - 0.08, w)
+	for lot in (_lots if lots == null else lots):
+		var lw := _lot_weight(lot, world_xz, 0.0)
+		if lw > 0.0:
+			h = lerpf(h, float(lot["y"]) - world_xz.y - 0.08, lw)
 	return h
 
 
@@ -708,7 +784,7 @@ func _build_chunk(job: Dictionary) -> void:
 		for x in tcols:
 			var ax := absf(x)
 			var p := rp[i] + rr[i] * x
-			p.y += edge_h + _terrain_height(p + offset, ax)
+			p.y += edge_h + _terrain_height(p + offset, ax, job["lots"])
 			line.append(p)
 		grid.append(line)
 	var tverts := PackedVector3Array()
@@ -876,9 +952,17 @@ func _spawn_props(chunk: Node3D, job: Dictionary) -> void:
 	# Champs cultivés (blé, colza, tournesols, lavande, labours, chaume + bottes de foin)
 	_spawn_fields(chunk, job)
 
+	# Lieux du bord de la route (station-service, motel...) : avec le tronçon de leur milieu
+	var rs_all: PackedFloat32Array = job["rows_s"]
+	for lot in _lots:
+		var sc := float(lot["s0"]) + float(lot["length"]) * 0.5
+		if sc >= rs_all[0] and sc < rs_all[n] and not _lots_built.has(lot["id"]):
+			_lots_built[lot["id"]] = true
+			_build_lot(chunk, job, lot)
+
 	# Camion en panne sur l'accotement
 	if truck_scene and job["index"] > 3 and rng.randf() < broken_truck_chance \
-			and not in_start_site(rp[n >> 1] + offset, 60.0):
+			and not in_reserved(rp[n >> 1] + offset, 60.0):
 		var i := rng.randi_range(n >> 2, (3 * n) >> 2)
 		var right := rr[i]
 		var fwd := Vector3.UP.cross(right)
@@ -901,8 +985,8 @@ func _spawn_props(chunk: Node3D, job: Dictionary) -> void:
 			var fwd := Vector3.UP.cross(rr[i]).normalized()
 			for side in [-1.0, 1.0]:
 				var p: Vector3 = rp[i] + rr[i] * (5.0 * side)
-				if in_start_site(p + offset, 2.0):
-					continue   # entrée du lieu de départ
+				if in_reserved(p + offset, 2.0):
+					continue   # entrée du lieu de départ ou d'un lieu du bord de la route
 				p.y += -0.04 + _terrain_height(p + offset, 5.0) - 0.1
 				var post: Node3D = ROAD_POST.new()
 				post.name = "RoadPost"
@@ -1048,6 +1132,8 @@ func _plan_fields(s0: float, s1: float, noise_pos: Vector3) -> Array:
 					"near": -1, "far": -1, "fence": false}
 				var on_site: bool = not _site.is_empty() and side == 1 \
 					and start + FIELD_LEN > float(_site["s0"]) - 15.0 and start < float(_site["s1"]) + 15.0
+				if side == 1 and _lot_overlaps(start - 15.0, start + FIELD_LEN + 15.0):
+					on_site = true
 				if start > straight_start * 0.6 and not on_site and r.randf() < chance:
 					plan["near"] = _pick_crop(r)
 					var x := r.randf()
@@ -1263,7 +1349,7 @@ func _nature_mesh(mname: String) -> Dictionary:
 	else:
 		var inst := scene.instantiate()
 		for c in inst.find_children("*", "MeshInstance3D", true, false):
-			res = {"mesh": _tinted_mesh(c as MeshInstance3D), "xf": (c as MeshInstance3D).transform}
+			res = {"mesh": tinted_mesh(c as MeshInstance3D, nature_color_variation), "xf": (c as MeshInstance3D).transform}
 			break
 		inst.free()
 	_mesh_cache[mname] = res
@@ -1272,12 +1358,12 @@ func _nature_mesh(mname: String) -> Dictionary:
 
 ## Copie du maillage où chaque surface reçoit le shader de variation de couleur,
 ## réglé selon le type de matériau (feuillage, herbe, écorce, roche, fleur).
-func _tinted_mesh(mi: MeshInstance3D) -> Mesh:
+## `v` : force de la variation (voir nature_color_variation). Sert aussi au décor du menu.
+static func tinted_mesh(mi: MeshInstance3D, v: float) -> Mesh:
 	var src := mi.mesh
-	if not (src is ArrayMesh) or nature_color_variation <= 0.0:
+	if not (src is ArrayMesh) or v <= 0.0:
 		return src
 	var mesh: ArrayMesh = src.duplicate()
-	var v := nature_color_variation
 	for si in mesh.get_surface_count():
 		var orig := mi.get_active_material(si)
 		var std := orig as BaseMaterial3D
@@ -1350,7 +1436,7 @@ func _plan_chalet(job: Dictionary, rng: RandomNumberGenerator) -> void:
 	if _field_at(job["fields"], rs[i], x) >= 0:
 		return
 	var rr: PackedVector3Array = job["rows_r"]
-	if in_start_site(rp[i] + rr[i] * x + job["offset"], 10.0):
+	if in_reserved(rp[i] + rr[i] * x + job["offset"], 10.0):
 		return
 	job["chalet"] = {"i": i, "x": x}
 
@@ -1547,8 +1633,8 @@ func _place_nature(spot: Vector2, k: int, sp: Dictionary, cat: String, job: Dict
 	var ax := absf(x)
 	if ax < 5.2 or _field_at(job["fields"], rs[i], x) >= 0:
 		return   # pas sur l'accotement ni dans un champ
-	if in_start_site(rp[i] + rr[i] * x + offset, 4.0):
-		return   # lieu de départ
+	if in_reserved(rp[i] + rr[i] * x + offset, 4.0):
+		return   # lieu de départ, lieu du bord de la route
 	if job.has("chalet"):
 		var ch: Dictionary = job["chalet"]
 		if absf((rs[i] - rs[ch["i"]])) < 7.5 and absf(x - ch["x"]) < 7.0:
@@ -1682,6 +1768,130 @@ func _build_site() -> void:
 	parent.add_child(b)
 	b.global_transform = global_transform * Transform3D(Basis(Vector3(0, 0, 1), Vector3.UP, Vector3(-1, 0, 0)), origin)
 	b.call("build")
+
+
+# --- Lieux du bord de la route ---------------------------------------------------------
+
+func _plan_lot(s0: float) -> void:
+	var t: String = LOT_TYPES[_lot_rng.randi() % LOT_TYPES.size()]
+	var size: Vector2 = LOT_SIZES[t] if LOT_SIZES.has(t) else SITE_SIZES[t]
+	_lot_plans.append({"id": _lot_count, "type": t, "s0": s0, "s1": s0 + size.y,
+		"depth": size.x, "length": size.y, "seed": hash(Vector2i(_lot_count, _noise.seed))})
+	_lot_count += 1
+
+
+## La route approche d'un lieu ou le longe : elle doit y être droite et plate.
+func _lot_hold() -> bool:
+	for p in _lot_plans:
+		if _s > float(p["s0"]) - LOT_LEAD and _s < float(p["s1"]) + 12.0:
+			return true
+	return false
+
+
+## 30 m avant un lieu (route déjà redressée) : on fixe sa place et on prévoit le suivant.
+func _trace_lots() -> void:
+	var next := -1.0
+	for p in _lot_plans:
+		if p.has("traced") or _s < float(p["s0"]) - 30.0:
+			continue
+		p["traced"] = true
+		next = float(p["s1"]) + _lot_rng.randf_range(lot_spacing.x, lot_spacing.y)
+		if absf(_k) > 0.0008 or absf(_grade) > 0.004:
+			p["cancelled"] = true   # route pas assez droite ici (ne devrait pas arriver)
+			continue
+		var fwd := Vector3(sin(_heading), 0.0, cos(_heading))
+		var o := _pos + fwd * (float(p["s0"]) - _s) + world_offset
+		_lots.append({"id": p["id"], "type": p["type"], "s0": p["s0"], "s1": p["s1"],
+			"depth": p["depth"], "length": p["length"], "seed": p["seed"],
+			"origin": o, "fwd": fwd, "right": _right(), "y": _pos.y,
+			"lat0": 4.3, "lat1": 6.0 + float(p["depth"])})
+	if next > 0.0:
+		_plan_lot(next)
+	while _lot_plans.size() > 1 and float(_lot_plans[0]["s1"]) < _s - 1500.0:
+		_lot_plans.pop_front()
+	while not _lots.is_empty() and float(_lots[0]["s1"]) < _s - 1500.0:
+		_lots_built.erase(_lots[0]["id"])
+		_lots.pop_front()
+
+
+## Poids d'un lieu en un point (repère du bruit) : 1 dedans, 0 à LOT_BLEND m au-delà.
+func _lot_weight(lot: Dictionary, p: Vector3, margin: float) -> float:
+	var d: Vector3 = p - (lot["origin"] as Vector3)
+	var along := d.x * (lot["fwd"] as Vector3).x + d.z * (lot["fwd"] as Vector3).z
+	var lat := d.x * (lot["right"] as Vector3).x + d.z * (lot["right"] as Vector3).z
+	var dx := maxf(maxf(float(lot["lat0"]) - margin - lat, lat - float(lot["lat1"]) - margin), 0.0)
+	var ds := maxf(maxf(-margin - along, along - float(lot["length"]) - margin), 0.0)
+	if dx > LOT_BLEND or ds > LOT_BLEND:
+		return 0.0
+	return 1.0 - smoothstep(0.0, LOT_BLEND, sqrt(dx * dx + ds * ds))
+
+
+## Lieu du bord de la route qui contient ce point (repère du bruit), ou {}.
+func lot_at(p: Vector3, margin := 0.0) -> Dictionary:
+	for lot in _lots:
+		if _lot_weight(lot, p, margin) >= 1.0:
+			return lot
+	return {}
+
+
+## Point réservé (lieu de départ ou lieu du bord de la route) : pas de décor.
+func in_reserved(p: Vector3, margin := 0.0) -> bool:
+	return in_start_site(p, margin) or not lot_at(p, margin).is_empty()
+
+
+func _lot_overlaps(a: float, b: float) -> bool:
+	for p in _lot_plans:
+		if b > float(p["s0"]) and a < float(p["s1"]):
+			return true
+	return false
+
+
+## Lieux prévus ou tracés (devant et un peu derrière), s croissants :
+## [{id, type, s0, s1, depth, length}].
+func get_lots() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for p in _lot_plans:
+		if not p.get("cancelled", false):
+			out.append(p)
+	return out
+
+
+func _build_lot(chunk: Node3D, job: Dictionary, lot: Dictionary) -> void:
+	var t0 := Time.get_ticks_usec()
+	var b: Node3D = preload("res://world/start/start_site.gd").new()
+	b.name = "Lot%d" % lot["id"]
+	b.set("site_type", lot["type"])
+	b.set("depth", lot["depth"])
+	b.set("length", lot["length"])
+	b.set("seed_value", lot["seed"])
+	b.set("drop_id", "lot:%d" % lot["id"])
+	var fwd: Vector3 = lot["fwd"]
+	var right: Vector3 = lot["right"]
+	# repère du lieu : X le long de la route, Z vers l'extérieur, origine au bord du lieu
+	# (6 m de l'axe), au milieu de sa longueur
+	var o: Vector3 = (lot["origin"] as Vector3) - (job["offset"] as Vector3) + fwd * (float(lot["length"]) * 0.5) + right * 6.0
+	o.y = float(lot["y"])
+	b.transform = Transform3D(Basis(fwd, Vector3.UP, right), o)
+	chunk.add_child(b)
+	b.call("build")
+	if debug_timings:
+		print("Route : lieu %s construit en %.1f ms" % [lot["type"], (Time.get_ticks_usec() - t0) / 1000.0])
+
+
+## Point de l'axe de la route à l'abscisse `s` (tronçons chargés) :
+## {found, chunk, i, point, right, dir, s} comme sample_ahead.
+func sample_at_s(s: float) -> Dictionary:
+	for c in _chunks:
+		var rs: PackedFloat32Array = c["rows_s"]
+		if rs.is_empty() or s < rs[0] or s > rs[rs.size() - 1]:
+			continue
+		var i := clampi(int(round((s - rs[0]) / row_step)), 0, rs.size() - 1)
+		var node: Node3D = c["node"]
+		var right: Vector3 = (c["rows_r"] as PackedVector3Array)[i]
+		return {"found": true, "chunk": node, "i": i,
+			"point": node.to_global((c["rows_p"] as PackedVector3Array)[i]),
+			"right": right, "dir": Vector3.UP.cross(right).normalized(), "s": rs[i]}
+	return {"found": false}
 
 
 # --- Pluie et recentrage --------------------------------------------------------

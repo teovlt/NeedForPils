@@ -2,7 +2,7 @@ class_name HornPad
 extends VRInteractable
 ## Klaxon : coussin rond au centre du volant. Il klaxonne tant qu'on appuie dessus :
 ## en VR il suffit de poser la main (paume ou doigt) sur le coussin, sans bouton (le grip
-## marche aussi) ; clic gauche maintenu à la souris, touche J au clavier. A/X ou F :
+## marche aussi) ; clic gauche maintenu à la souris, touche J au clavier. F :
 ## coup de klaxon bref. Le coussin s'enfonce de 4 mm pendant l'appui.
 ## Il tourne avec le volant (`wheel`) autour de la colonne de direction.
 ## Son généré par code : klaxon à deux tons (environ 415 et 520 Hz).
@@ -104,7 +104,7 @@ func unpress(source) -> void:
 	_hold_sources.erase(source)
 
 
-## A/X ou F : coup de klaxon bref.
+## F : coup de klaxon bref.
 func toggle() -> void:
 	_short_timer = 0.35
 

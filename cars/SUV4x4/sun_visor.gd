@@ -6,7 +6,8 @@ extends VRInteractable
 ##   sous 10°.
 ## - Rabattu, on peut le décrocher et le pivoter contre la vitre latérale (tirer la main
 ##   vers la portière). Il ne se relève que remis devant.
-## - A/X ou F : relevé -> rabattu -> contre la vitre -> relevé.
+## - F : relevé -> rabattu -> contre la vitre -> relevé. A/X (VR) : il revient à sa
+##   place, relevé contre le pavillon.
 ## - Le pare-soleil conducteur a une sangle élastique qui tient la clé de la voiture, sur
 ##   la face collée au pavillon quand il est relevé : on ne la voit (et ne l'attrape)
 ##   qu'une fois le pare-soleil rabattu. Lâchée tout près de la sangle, la clé y retourne.
@@ -106,6 +107,14 @@ func store_key(item: RigidBody3D) -> void:
 	if item.has_meta("rest_xf"):
 		item.remove_meta("rest_xf")
 	item.transform = Transform3D.IDENTITY
+
+
+## A/X en VR : retour à la position de départ (relevé, devant).
+func vr_button() -> void:
+	if is_grabbed():
+		return
+	_auto_swing = 0.0
+	_auto_flip = 0.0
 
 
 func toggle() -> void:

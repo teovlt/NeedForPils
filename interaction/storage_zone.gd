@@ -15,6 +15,9 @@ extends Node3D
 @export var exact_snap := false
 ## Marge (m) autour de la boîte pour accepter un objet relâché.
 @export var accept_margin := 0.07
+## Seuls ces objets (nom du RigidBody3D) peuvent y être posés ; vide = tous. Le support
+## du GPS ne prend que le GPS (les autres objets s'y collaient contre le pare-brise).
+@export var only_items := PackedStringArray()
 ## Peut recevoir des objets lors du rangement aléatoire de début de partie
 ## (faux pour le support du GPS, qui garde son objet).
 @export var random_fill := true
@@ -35,6 +38,18 @@ func _ready() -> void:
 			_place(c as RigidBody3D, false)
 
 
+## Compartiment bien fermé (couvercle à moins de 2°) : ce qu'il contient ne se voit
+## pas, on ne le dessine pas (casque : moins d'objets à dessiner).
+func _hide_if_shut(item: RigidBody3D) -> void:
+	var shut := _hinge != null and absf(_hinge.angle) < deg_to_rad(2.0) and not _hinge.is_grabbed()
+	if shut and item.visible:
+		item.visible = false
+		item.set_meta("_zone_hidden", true)
+	elif not shut and item.has_meta("_zone_hidden"):
+		item.remove_meta("_zone_hidden")
+		item.visible = true
+
+
 func _physics_process(delta: float) -> void:
 	var open := is_accessible()
 	if _car == null:
@@ -46,6 +61,7 @@ func _physics_process(delta: float) -> void:
 		if not c is RigidBody3D:
 			continue
 		var item := c as RigidBody3D
+		_hide_if_shut(item)
 		var grab := item.get_node_or_null("Grab") as VRPickable
 		if grab:
 			grab.enabled = open
@@ -102,6 +118,10 @@ func accepts(world_pos: Vector3) -> bool:
 		return p.length() < size.length() * 0.5 + accept_margin
 	var m := accept_margin
 	return absf(p.x) <= size.x * 0.5 + m and absf(p.z) <= size.z * 0.5 + m and p.y >= -m and p.y <= size.y + m * 2.0
+
+
+func accepts_item(item: RigidBody3D) -> bool:
+	return only_items.is_empty() or String(item.name) in only_items
 
 
 func store(item: RigidBody3D) -> void:

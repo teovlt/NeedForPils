@@ -34,6 +34,11 @@ var _lag_local := Transform3D.IDENTITY
 var _lag_ready := false
 var _prev_local := Vector3.ZERO
 var _prev_ok := false
+## Retard de l'objet sur la main (bloqué par une paroi) à l'image précédente (m).
+var _lag := 0.0
+## Vitesse mini (m/s) à laquelle l'objet resté en arrière rejoint la main : il glisse
+## jusqu'à elle au lieu de s'y téléporter dès que le chemin est libre.
+const CATCH_UP_SPEED := 3.0
 
 
 func _ready() -> void:
@@ -103,7 +108,15 @@ func _on_grab_update(hand: Node3D) -> void:
 		if not _prev_ok:
 			_prev_local = storage.to_local(item.global_position)
 			_prev_ok = true
-		xf = storage.constrain_held(self, xf, _prev_local)
+		if _collides_while_held(xf):
+			var target := xf.origin
+			if _lag > 0.02:
+				var from := storage.to_global(_prev_local)
+				xf.origin = from + (target - from).limit_length(maxf(CATCH_UP_SPEED * dt, _lag * 0.3))
+			xf = storage.constrain_held(self, xf, _prev_local)
+			_lag = xf.origin.distance_to(target)
+		else:
+			_lag = 0.0
 		_prev_local = storage.to_local(xf.origin)
 	hand_velocity = hand_velocity.lerp((xf.origin - _last_pos) / maxf(dt, 0.001), 0.5)
 	_last_pos = xf.origin
@@ -118,6 +131,8 @@ func _on_grab_end(hand: Node3D) -> void:
 		return
 	_active_hand = null
 	item.top_level = false
+	# partie à deux : lâcher rejoué pour l'autre joueur (les points de livraison l'ignorent)
+	item.set_meta("net_remote", Net.applying_remote)
 	# lâché sur un objet qui le prend (tête dans le grinder, pincée / filtre sur une
 	# feuille à rouler...) : c'est lui qui s'en occupe
 	for r in get_tree().get_nodes_in_group(RECEIVERS):
@@ -151,6 +166,7 @@ func _take(hand: Node3D) -> void:
 	_last_pos = item.global_position
 	_lag_ready = false
 	_prev_ok = false
+	_lag = 0.0
 	hand_velocity = Vector3.ZERO
 
 
@@ -177,6 +193,12 @@ func _hand_xf(hand: Node3D) -> Transform3D:
 	if hand.has_method("visual_transform"):
 		return hand.visual_transform()
 	return hand.global_transform
+
+
+## L'objet tenu bute-t-il sur l'intérieur de la voiture à cette position ? (la clé
+## doit pouvoir entrer dans le contact, enfoncé dans le tableau de bord)
+func _collides_while_held(_xf: Transform3D) -> bool:
+	return true
 
 
 func _nearest_storage() -> CarStorage:

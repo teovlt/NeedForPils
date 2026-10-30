@@ -1,6 +1,8 @@
 extends StartXR
 
-# Menu d'accueil : un panneau 3D flottant au milieu d'une forêt.
+# Menu d'accueil : un panneau 3D flottant au bord de la route du jeu (menu_scenery.gd),
+# sous la vraie météo du jeu (heure et temps tirés au hasard, qui changent pendant
+# qu'on reste dans le menu).
 # - Avec casque : on clique avec le laser des manettes (gâchette).
 # - Sans casque : caméra classique, on clique à la souris.
 # - JOUER À DEUX : attend l'autre joueur sur le réseau local (voir network/net.gd) ;
@@ -14,6 +16,13 @@ extends StartXR
 # Amplitude (m) et vitesse du flottement du panneau
 @export var float_amplitude: float = 0.03
 @export var float_speed: float = 1.2
+
+## Météos possibles à l'ouverture du menu, avec leur poids.
+const START_WEATHERS := {"degage": 3.0, "eclaircies": 3.0, "nuageux": 2.0, "couvert": 1.0,
+	"brouillard": 1.0, "pluie_legere": 1.5, "pluie": 1.0, "orage": 0.5}
+## Heures possibles à l'ouverture du menu (souvent au coucher du soleil, vers 17-18 h,
+## parfois la nuit).
+const START_HOURS := [8.0, 10.5, 13.0, 15.5, 16.8, 17.3, 17.6, 17.9, 18.6, 21.0]
 
 ## Hauteur des yeux utilisée si le casque ne fournit pas une référence au niveau du sol
 @export var fallback_eye_height: float = 1.7
@@ -33,6 +42,10 @@ const POINTABLE_LAYER := 1 << 20
 @onready var desktop_camera: Camera3D = $DesktopCamera
 @onready var music_player: AudioStreamPlayer = $MusicPlayer
 @onready var ambience_player: AudioStreamPlayer = $AmbiencePlayer
+@onready var weather: WeatherSystem = $Weather
+@onready var headlights: Array[Light3D] = [$CarShowcase/HeadlightL, $CarShowcase/HeadlightR]
+@onready var fireflies: CPUParticles3D = $Fireflies
+@onready var butterflies: CPUParticles3D = $Butterflies
 
 var vr_enabled := false
 var _panel_base_y: float
@@ -75,7 +88,11 @@ func _ready():
 		ui.show_main(Net.last_message)
 		Net.last_message = ""
 
+	_start_weather()
 	_start_audio()
+	SceneLoader.loading_started.connect(func(_path): _fade_out_audio())
+	# le jeu se charge en arrière-plan pendant qu'on est dans le menu
+	get_tree().create_timer(1.5).timeout.connect(func(): SceneLoader.preload_scene(game_scene))
 
 
 func _process(delta: float) -> void:
@@ -85,6 +102,7 @@ func _process(delta: float) -> void:
 
 	if vr_enabled and not _height_calibrated:
 		_calibrate_height()
+	_update_ambience(delta)
 
 
 func _set_opaque() -> void:
@@ -147,6 +165,33 @@ func _calibrate_height() -> void:
 	_height_calibrated = true
 
 
+# ------------------------------------------------------------------ Météo / ambiance
+
+func _start_weather() -> void:
+	var total := 0.0
+	for k in START_WEATHERS:
+		total += START_WEATHERS[k]
+	var r := randf() * total
+	for k in START_WEATHERS:
+		r -= START_WEATHERS[k]
+		if r <= 0.0:
+			weather.set_weather(k, true)
+			break
+	weather.hour = START_HOURS[randi() % START_HOURS.size()] + randf_range(-0.2, 0.2)
+	$Scenery.set_wet(weather.rain > 0.05)
+
+
+# Phares et lucioles quand il fait sombre, papillons quand il fait beau.
+func _update_ambience(delta: float) -> void:
+	var dark := weather.get_darkness()
+	var lights_on := dark > 0.45
+	for l in headlights:
+		l.light_energy = move_toward(l.light_energy, 3.0 if lights_on else 0.0, delta * 6.0)
+		l.visible = l.light_energy > 0.01
+	fireflies.emitting = dark > 0.55 and weather.rain < 0.1
+	butterflies.emitting = dark < 0.3 and weather.rain < 0.02 and weather.wind < 0.9
+
+
 # ------------------------------------------------------------------ Audio / actions
 
 func _start_audio() -> void:
@@ -164,11 +209,16 @@ func _start_audio() -> void:
 func _fade_out_then(action: Callable) -> void:
 	if _leaving:
 		return
+	_fade_out_audio()
+	get_tree().create_timer(fade_time).timeout.connect(action)
+
+
+func _fade_out_audio() -> void:
 	_leaving = true
 	var tween := create_tween().set_parallel()
 	tween.tween_property(music_player, "volume_db", -60.0, fade_time)
 	tween.tween_property(ambience_player, "volume_db", -60.0, fade_time)
-	tween.chain().tween_callback(action)
+	weather.rain_volume = 0.0
 
 
 func _on_play_pressed() -> void:
@@ -179,9 +229,12 @@ func _on_play_pressed() -> void:
 
 
 func _on_solo_pressed() -> void:
+	if _leaving:
+		return
 	Net.cancel()
 	var scene := game_scene if vr_enabled else desktop_game_scene
-	_fade_out_then(func(): get_tree().change_scene_to_file(scene))
+	# écran de chargement en fondu pendant que la musique s'éteint
+	SceneLoader.change_scene(scene, fade_time)
 
 
 func _on_cancel_pressed() -> void:

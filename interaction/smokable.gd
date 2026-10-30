@@ -6,7 +6,9 @@ extends VRPickable
 ##   briquet allumé (Lighter) pendant ~0,4 s. Sans casque (une seule main), F en le tenant
 ##   l'allume avec le briquet de la voiture (s'il y en a un).
 ## - Fumer : allumé et tenu, le filtre porté à la bouche (même bouche que les pilules,
-##   EdiblePickable.mouth_position) : on tire dessus, la braise rougit, le papier se
+##   EdiblePickable.mouth_near ; en partie à deux, la bouche de l'autre joueur marche
+##   aussi : on le fait fumer, c'est lui qui en ressent l'effet) : on tire dessus, la
+##   braise rougit, le papier se
 ##   consume beaucoup plus vite ; en l'éloignant, on recrache un nuage de fumée. Sans
 ##   casque, F sur la cigarette allumée = une bouffée.
 ## - Allumé, il se consume aussi tout seul (lentement) et fume, même posé. Arrivé au
@@ -53,6 +55,7 @@ var _flame_t := 0.0
 var _mouth_t := 0.0        # temps passé à la bouche (bouffée en cours)
 var _auto_puff := 0.0      # bouffée simulée (F sans casque)
 var _auto_puff_remote := false   # ... demandée par l'autre joueur (partie à deux)
+var _puff_head: Node3D     # tête de celui qui tire dessus (souffle recraché par sa bouche)
 var _t := 0.0
 
 
@@ -118,9 +121,11 @@ func _process(delta: float) -> void:
 	var at_mouth := false
 	var remote := Net.is_online() and Net.held_by_remote(self)   # l'autre joueur fume
 	if is_grabbed():
-		var mouth = EdiblePickable.mouth_position(get_tree(), self)
-		if mouth != null and butt_position().distance_to(mouth) < MOUTH_RADIUS:
+		var m := EdiblePickable.mouth_near(get_tree(), butt_position(), MOUTH_RADIUS)
+		if not m.is_empty():
 			at_mouth = true
+			remote = not m[2]   # à la bouche de l'autre joueur : c'est lui qui fume
+			_puff_head = m[1]
 	if _auto_puff > 0.0:
 		_auto_puff -= delta
 		at_mouth = true
@@ -173,6 +178,9 @@ func _exhale_puff(strength: float) -> void:
 	puffs += 1
 	var mouth = EdiblePickable.mouth_position(get_tree(), self)
 	var cam: Node3D = Net.camera_for(self) if Net.is_online() else get_viewport().get_camera_3d()
+	if _puff_head and is_instance_valid(_puff_head) and _auto_puff <= 0.0:
+		cam = _puff_head
+		mouth = cam.global_transform * EdiblePickable.MOUTH_OFFSET
 	if mouth == null or cam == null or _exhale == null:
 		return
 	# un peu devant la bouche : le nuage ne bouche pas toute la vue

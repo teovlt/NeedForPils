@@ -1,7 +1,8 @@
 class_name EdiblePickable
 extends VRPickable
 ## Pilule qu'on peut avaler : en VR, la porter à la bouche (sous les yeux) ; sans
-## casque, la viser et appuyer sur F (ou A/X avec la manette).
+## casque, la viser et appuyer sur F. En partie à deux, on peut aussi la porter à la
+## bouche de l'autre joueur : c'est lui qui l'avale (mouth_near).
 ## Avaler appelle PillAddiction.take_pill() (boost, effet, manque à zéro, assimilation).
 
 const GROUP_ADDICTION := "pill_addiction"
@@ -24,13 +25,37 @@ static func mouth_position(tree: SceneTree, held: VRInteractable = null) -> Vari
 	return cam.global_transform * MOUTH_OFFSET
 
 
+## Bouche la plus proche de `point`, à moins de `radius` : celle du joueur local ou, en
+## partie à deux, celle de l'autre joueur (on peut lui faire fumer une cigarette, boire
+## une bière ou un café, avaler une pilule, même pendant qu'il conduit). Renvoie
+## [position, tête (caméra), vrai si c'est le joueur local], ou [] si aucune. Les deux
+## joueurs font le même calcul ; l'effet ne s'applique que chez celui dont c'est la
+## bouche.
+static func mouth_near(tree: SceneTree, point: Vector3, radius: float) -> Array:
+	var heads := [[tree.root.get_viewport().get_camera_3d(), true]]
+	if Net.is_online():
+		heads.append([Net.other_head(), false])
+	var best := []
+	var best_d := radius
+	for hd in heads:
+		var cam := hd[0] as Node3D
+		if cam == null or not is_instance_valid(cam):
+			continue
+		var m := cam.global_transform * MOUTH_OFFSET
+		var d := m.distance_to(point)
+		if d < best_d:
+			best_d = d
+			best = [m, cam, hd[1]]
+	return best
+
+
 func _on_grab_update(hand: Node3D) -> void:
 	super._on_grab_update(hand)
 	if _eaten or not is_inside_tree():
 		return
-	var mouth = mouth_position(get_tree(), self)
-	if mouth != null and item.global_position.distance_to(mouth) < MOUTH_RADIUS:
-		eat()
+	var m := mouth_near(get_tree(), item.global_position, MOUTH_RADIUS)
+	if not m.is_empty():
+		eat(m[2])
 
 
 func _on_grab_end(hand: Node3D) -> void:
@@ -39,25 +64,28 @@ func _on_grab_end(hand: Node3D) -> void:
 	super._on_grab_end(hand)
 
 
-## F (bureau) ou A/X (VR) en visant la pilule : avalée tout de suite.
+## F (bureau) en visant la pilule : avalée tout de suite.
 func toggle() -> void:
 	eat()
 
 
-func eat() -> void:
+## `local_player` : avalée par le joueur local (vrai) ou par l'autre (faux) ; null =
+## d'après le geste (rejoué de l'autre joueur ou non).
+func eat(local_player = null) -> void:
 	if _eaten:
 		return
 	_eaten = true
 	for h in _grab_hands.duplicate():
 		release(h)
-	swallow(get_tree())
+	swallow(get_tree(), local_player)
 	eaten.emit()
 	item.queue_free()
 
 
 ## Effet d'une pilule avalée (sert aussi à la pochette, F sans sortir la pilule).
-static func swallow(tree: SceneTree) -> void:
-	if Net.applying_remote:
+static func swallow(tree: SceneTree, local_player = null) -> void:
+	var mine: bool = (not Net.applying_remote) if local_player == null else local_player
+	if not mine:
 		return   # c'est l'autre joueur qui l'a avalée
 	var addiction := tree.get_first_node_in_group(GROUP_ADDICTION)
 	if addiction and addiction.has_method("take_pill"):

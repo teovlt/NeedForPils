@@ -7,7 +7,7 @@ extends VRHingeInteractable
 ## - Porte ouverte : saisir la poignée entraîne directement la porte (pour la fermer).
 ## - Relâchée, la poignée revient en place ; une porte repoussée presque fermée se
 ##   referme et se verrouille toute seule.
-## - A/X (ou F à la souris) près de la poignée : ouvre / ferme la porte automatiquement.
+## - F (souris) près de la poignée : ouvre / ferme la porte automatiquement.
 ## La porte elle-même n'est plus saisissable : seules ses poignées s'illuminent.
 
 ## Porte (VRHingeInteractable) commandée par cette poignée.

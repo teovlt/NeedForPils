@@ -1,7 +1,8 @@
 extends StartXR
 ## Démarre la VR si un casque est disponible, sinon passe en mode bureau :
 ## clavier pour conduire (voir suv_4x4.gd) et souris pour regarder / attraper.
-## Partie à deux : ajoute la NetSession (synchronisation avec l'autre joueur).
+## Menu pause (bouton menu de la manette gauche, P sans casque). Partie à deux : ajoute
+## la NetSession (synchronisation avec l'autre joueur).
 
 
 func _enter_tree() -> void:
@@ -15,10 +16,13 @@ func _ready():
 	if xr and xr.is_initialized():
 		super._ready()
 		# Initialise le casque VR quand la session démarre
-		if xr_interface and xr_interface.is_initialized():
+		if xr_interface and xr_interface.is_initialized() 				and not xr_interface.session_begun.is_connected(_on_openxr_session_begun):
 			xr_interface.session_begun.connect(_on_openxr_session_begun)
 	else:
 		_start_desktop_mode()
+	var pause := PauseMenu.new()
+	pause.name = "PauseMenu"
+	add_child(pause)
 	if Net.is_online():
 		var session := NetSession.new()
 		session.name = "NetSession"
