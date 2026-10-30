@@ -119,6 +119,10 @@ func _run_intro() -> void:
 		return
 	if not play_intro:
 		_set_paused(true)
+		# arrivée en fondu depuis le noir : les premières images (compilation des
+		# shaders, route) saccadent, on ne les voit pas
+		_set_curtain(1.0)
+		_fade_curtain(0.0, 1.0)
 		await _wait_engine_start()
 		if not is_inside_tree():
 			return   # partie quittée (rejouer, menu) avant le démarrage

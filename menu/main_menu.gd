@@ -181,7 +181,7 @@ func _on_play_pressed() -> void:
 func _on_solo_pressed() -> void:
 	Net.cancel()
 	var scene := game_scene if vr_enabled else desktop_game_scene
-	_fade_out_then(func(): get_tree().change_scene_to_file(scene))
+	_fade_out_then(func(): Net.change_scene_async(scene))
 
 
 func _on_cancel_pressed() -> void:

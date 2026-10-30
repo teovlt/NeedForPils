@@ -64,13 +64,13 @@ func _ready() -> void:
 	car = get_parent() as SUV4x4
 	_crash_player = AudioStreamPlayer3D.new()
 	_crash_player.name = "CrashSound"
-	_crash_player.stream = _make_crash()
+	GeneratedSound.make_later(_make_crash, _crash_player, &"stream")
 	_crash_player.position = Vector3(0.0, 1.0, 1.4)
 	_crash_player.unit_size = 6.0
 	add_child(_crash_player)
 	_glass_player = AudioStreamPlayer3D.new()
 	_glass_player.name = "GlassSound"
-	_glass_player.stream = _make_glass()
+	GeneratedSound.make_later(_make_glass, _glass_player, &"stream")
 	_glass_player.position = Vector3(0.0, 1.45, 0.74)
 	_glass_player.unit_size = 5.0
 	add_child(_glass_player)

@@ -47,6 +47,7 @@ var remote_camera: Node3D
 var session: Node
 ## Raison de la dernière déconnexion (affichée par le menu à son retour).
 var last_message := ""
+var _scene_loading := ""
 
 var _udp: PacketPeerUDP          # écoute (annonces ou recherches)
 var _udp_send: PacketPeerUDP
@@ -319,6 +320,10 @@ func _check_command_line() -> void:
 			find_or_host()   # comme le bouton JOUER À DEUX
 		elif arg.begins_with("--join="):
 			_start_join(arg.trim_prefix("--join="))
+		elif arg == "--solo":
+			# partie solo tout de suite, sans le menu (tests sur le casque par adb :
+			# am start ... --esa command_line_params "++,--solo")
+			change_scene_async.call_deferred(GAME_SCENE)
 
 
 # --- Démarrage de la partie --------------------------------------------------------
@@ -327,7 +332,27 @@ func _check_command_line() -> void:
 func _rpc_start_game(seed_value: int) -> void:
 	game_seed = seed_value
 	state = State.IN_GAME
-	get_tree().change_scene_to_file(GAME_SCENE)
+	change_scene_async(GAME_SCENE)
+
+
+## Passe à une scène en la chargeant dans un fil de travail : l'image ne fige pas
+## pendant la lecture des fichiers (~1 s sur PC, bien plus sur le casque, où l'image
+## figée se voit beaucoup). Seule la mise en place de la scène bloque encore.
+func change_scene_async(path: String) -> void:
+	if _scene_loading == path:
+		return
+	if ResourceLoader.load_threaded_request(path) != OK:
+		get_tree().change_scene_to_file(path)
+		return
+	_scene_loading = path
+	while ResourceLoader.load_threaded_get_status(path) == ResourceLoader.THREAD_LOAD_IN_PROGRESS:
+		await get_tree().process_frame
+	_scene_loading = ""
+	var ps := ResourceLoader.load_threaded_get(path) as PackedScene
+	if ps:
+		get_tree().change_scene_to_packed(ps)
+	else:
+		get_tree().change_scene_to_file(path)
 
 
 ## Le conducteur relance la partie (rejouer) : le copilote recharge aussi.
@@ -335,7 +360,11 @@ func restart_game() -> void:
 	if is_online() and multiplayer.is_server():
 		_rpc_start_game.rpc(game_seed)
 	else:
-		get_tree().reload_current_scene()
+		var cur := get_tree().current_scene
+		if cur and cur.scene_file_path != "":
+			change_scene_async(cur.scene_file_path)
+		else:
+			get_tree().reload_current_scene()
 
 
 ## Le copilote demande à rejouer (fin de partie) : c'est le conducteur qui relance.
