@@ -65,6 +65,8 @@ seulement la phrase. `{n}` : nombre affiché à l'écran, pas besoin de le dire.
 | [x]  | `rivaux_tir_premier.wav` | « Les enculés ils ont des fers »            | Première balle reçue                    |
 | [x]  | `rivaux_tir_2.wav`       | « Encore deux balles et ca lâche »          | Il reste 2 balles                       |
 | [x]  | `rivaux_tir_1.wav`       | « Nique zebi roule »                        | Il reste 1 balle                        |
+| [ ] | `rivaux_elimines.wav` | « Concurrents éliminés ! Le camping-car part en fumée. Ta came est à toi. » | Camping-car abattu au pistolet |
+| [ ] | `police_eliminee.wav` | « Flics au tapis ! Leur voiture brûle sur le bas-côté. D'autres vont venir... » | Voiture de police abattue au pistolet |
 
 ### Livraisons
 

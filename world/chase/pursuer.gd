@@ -17,10 +17,15 @@ extends Node3D
 ## La voiture visible est posée sur la route à l'écart voulu (visible dans les rétros),
 ## gyrophares bleus, sirène. Pas de collision en poursuite : rattrapé = écart < `catch_gap`.
 ## À l'arrêt (bas-côté, barrage), les voitures ont une collision.
+## On peut l'abattre au pistolet (Gun) : `health` balles et elle explose, sirène coupée,
+## puis brûle (à l'arrêt, ou en partant en travers sur le bas-côté si elle roulait) ;
+## la rencontre suivante arrive plus loin (« eliminated »).
 
 signal caught
 signal chase_started(kind: String)
 signal lost
+## Abattue au pistolet.
+signal eliminated
 
 const GROUP := "pursuer"
 ## Voiture low poly (props/police_car/police_car_build.py) : nœud Body et 4 roues Wheel_*.
@@ -38,7 +43,7 @@ const BLOCK_ANGLE := 60.0
 const BLOCK_SPACING := 30.0
 const BLOCK_LAT := 2.2
 
-enum State { IDLE, ESCORT, CHASE, STOPPED, FREE, WAIT, BLOCK }
+enum State { IDLE, ESCORT, CHASE, STOPPED, FREE, WAIT, BLOCK, WRECK }
 
 @export var road_path: NodePath
 @export var car_path: NodePath
@@ -77,6 +82,8 @@ enum State { IDLE, ESCORT, CHASE, STOPPED, FREE, WAIT, BLOCK }
 ## Semée : écart (m) au-delà duquel elle nous perd, tenu pendant `lose_time` s.
 @export var lose_gap := 300.0
 @export var lose_time := 5.0
+## Balles de pistolet pour l'abattre.
+@export var health := 6
 
 var state := State.IDLE
 var gap := 999.0
@@ -119,6 +126,14 @@ var _lateral := 1.75
 ## Partie à deux, chez le copilote : la police ne décide rien, elle recopie celle du
 ## conducteur (position, sirène, gyrophares, barrage : voir NetSession).
 var net_puppet := false
+var wrecked := false
+var _hp := 6
+var _hit_aabb := AABB()
+var _wreck_fire: Node3D
+var _wreck_t := 0.0
+var _wreck_parked := false
+var _wreck_yaw := 0.0
+var _wreck_lat := 5.5
 
 
 func _ready() -> void:
@@ -135,6 +150,9 @@ func _ready() -> void:
 	_wheels = parts["wheels"]
 	_shape = parts["shape"]
 	_shape.disabled = true
+	_hit_aabb = _local_aabb(_visual)
+	if _hit_aabb.size == Vector3.ZERO:
+		_hit_aabb = AABB(Vector3(-0.95, 0.0, -2.4), Vector3(1.9, 1.5, 4.8))
 	_siren = AudioStreamPlayer3D.new()
 	_siren.name = "Siren"
 	_siren.stream = _make_siren()
@@ -387,6 +405,9 @@ func _cone(parent: Node3D, pos: Vector3) -> Node3D:
 
 
 func _clear_encounter() -> void:
+	_hp = health
+	wrecked = false
+	_end_wreck_fx()
 	for p in _props:
 		if is_instance_valid(p):
 			p.queue_free()
@@ -488,6 +509,9 @@ func _physics_process(delta: float) -> void:
 				_far_t = 0.0
 		State.STOPPED:
 			pass   # reste sur place
+		State.WRECK:
+			_update_wreck(delta, car_s)
+			return
 	gap = car_s - _s
 	_place(delta)
 	_flash()
@@ -519,11 +543,95 @@ func _place(delta: float) -> void:
 		w.rotate_object_local(Vector3.RIGHT, spin)
 
 
+# --- Abattue au pistolet -------------------------------------------------------------
+
+## Boîte touchable par les balles : [centre (monde), demi-tailles], ou [] si rien à viser.
+func get_hit_box() -> Array:
+	if wrecked or not _visual.visible:
+		return []
+	if not net_puppet and not state in [State.CHASE, State.WAIT, State.BLOCK]:
+		return []
+	return [_visual.global_transform * Transform3D(Basis.IDENTITY, _hit_aabb.get_center()), _hit_aabb.size * 0.5]
+
+
+## Une balle du joueur l'a touchée (comptée chez le conducteur).
+func take_shot(_point: Vector3) -> void:
+	if net_puppet or wrecked or not state in [State.CHASE, State.WAIT, State.BLOCK]:
+		return
+	_hp -= 1
+	print("Police : touchée au pistolet (%d/%d)" % [health - _hp, health])
+	if _hp <= 0:
+		_wreck()
+
+
+func _wreck() -> void:
+	_wreck_parked = state != State.CHASE
+	state = State.WRECK
+	wrecked = true
+	_wreck_t = 0.0
+	_wreck_yaw = _yaw_off
+	_wreck_lat = (_road.road_half_width + 1.5) * (1.0 if _lateral >= 0.0 else -1.0)
+	_siren.stop()
+	_set_lights(false)
+	_start_wreck_fx()
+	print("Police : voiture abattue")
+	eliminated.emit()
+
+
+func _start_wreck_fx() -> void:
+	CombatFx.explosion(_visual, Vector3(0, 1.0, 0.0))
+	if _wreck_fire == null:
+		_wreck_fire = CombatFx.burning(_visual, Vector3(0, 0.9, 1.4))
+
+
+func _end_wreck_fx() -> void:
+	if _wreck_fire and is_instance_valid(_wreck_fire):
+		_wreck_fire.queue_free()
+	_wreck_fire = null
+
+
+## Abattue : elle brûle sur place (garée, barrage) ou freine en partant en travers vers
+## le bas-côté ; une fois loin derrière, la rencontre est terminée.
+func _update_wreck(delta: float, car_s: float) -> void:
+	_wreck_t += delta
+	_flash()
+	if _wreck_parked:
+		if not is_instance_valid(_anchor) or car_s - _s > 250.0 or _wreck_t > 60.0:
+			_finish_wreck()
+			return
+		_visual.global_transform = _anchor.global_transform * _anchor_xf
+		gap = car_s - _s
+		return
+	_speed = move_toward(_speed, 0.0, 45.0 * delta)
+	_s += _speed / 3.6 * delta
+	gap = car_s - _s
+	_lateral = lerpf(_lateral, _wreck_lat, clampf(delta * 0.9, 0.0, 1.0))
+	if _speed > 1.0:
+		_wreck_yaw = move_toward(_wreck_yaw, 0.9 * signf(_wreck_lat), delta * 0.6)
+	var sample := _road.sample_ahead(_car.global_position, -gap)
+	if not sample["found"] or gap > 300.0 or _wreck_t > 30.0:
+		_finish_wreck()
+		return
+	var dir: Vector3 = sample["dir"]
+	_visual.global_transform = Transform3D(Basis(Vector3.UP, _wreck_yaw) * Basis.looking_at(-dir, Vector3.UP), _road.ground_position(sample, _lateral))
+	var spin := _speed / 3.6 / WHEEL_RADIUS * delta
+	for w in _wheels:
+		w.rotate_object_local(Vector3.RIGHT, spin)
+
+
+func _finish_wreck() -> void:
+	_visual.visible = false
+	_clear_encounter()
+	state = State.FREE
+	_schedule_next()
+
+
 # --- Partie à deux -------------------------------------------------------------------
 
-## État visible à recopier chez le copilote : [visible, transformation, sirène, gyrophares, km/h].
+## État visible à recopier chez le copilote : [visible, transformation, sirène,
+## gyrophares, km/h, abattue].
 func net_state() -> Array:
-	return [_visual.visible, _visual.global_transform, _siren.playing, _lights_on, _speed]
+	return [_visual.visible, _visual.global_transform, _siren.playing, _lights_on, _speed, wrecked]
 
 
 func net_apply(st: Array, xf: Transform3D) -> void:
@@ -538,6 +646,13 @@ func net_apply(st: Array, xf: Transform3D) -> void:
 	if st[3] != _lights_on:
 		_set_lights(st[3])
 	_speed = st[4]
+	var w: bool = st[5] if st.size() > 5 else false
+	if w and not wrecked:
+		wrecked = true
+		_start_wreck_fx()
+	elif not w and wrecked:
+		wrecked = false
+		_end_wreck_fx()
 
 
 ## Barrage (2e voiture, plots) : [[« car » ou « cone », transformation], ...].

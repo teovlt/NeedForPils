@@ -12,6 +12,9 @@ extends Node3D
 ## - pour le semer, comme la police : creuser l'écart au-delà de `lose_gap` m pendant
 ##   `lose_time` s (il roule moins vite que le 4x4 pied au plancher, mais il ne lâche
 ##   pas si on freine ou si on ralentit).
+## - on peut l'abattre au pistolet (Gun) : `health` balles et il explose, puis brûle en
+##   se rangeant sur le bas-côté pendant qu'on s'éloigne (« eliminated ») ; il revient
+##   plus tard comme s'il avait été semé.
 ## Poursuite « virtuelle » comme Pursuer : on suit l'écart le long de la route et le
 ## camping-car visible est posé sur la route à cet écart.
 
@@ -19,6 +22,8 @@ signal started
 signal lost
 signal hit(count: int)
 signal killed
+## Abattu au pistolet.
+signal eliminated
 ## Partie à deux : coup de feu (« shot »), balle reçue (« hit », [position, rotation]
 ## de l'impact sur la vitre) ou coup de flanc (« ram »), à rejouer chez le copilote.
 signal net_event(kind: String, data: Array)
@@ -28,7 +33,7 @@ const GROUP := "rivals"
 const BEIGE := Color(0.86, 0.8, 0.64)
 const BROWN := Color(0.42, 0.27, 0.15)
 
-enum State { IDLE, FREE, CHASE, DONE }
+enum State { IDLE, FREE, CHASE, DONE, WRECK }
 
 @export var road_path: NodePath
 @export var car_path: NodePath
@@ -49,6 +54,8 @@ enum State { IDLE, FREE, CHASE, DONE }
 @export var max_hits := 6
 @export var lose_gap := 280.0
 @export var lose_time := 5.0
+## Balles de pistolet pour l'abattre.
+@export var health := 10
 
 var state := State.IDLE
 var gap := 999.0
@@ -75,6 +82,12 @@ var _engine: AudioStreamPlayer3D
 var _gun: AudioStreamPlayer3D
 var _impact: AudioStreamPlayer
 var _cracks: Array[Node3D] = []
+var _hp := 10
+var wrecked := false
+var _wreck_fire: Node3D
+var _wreck_t := 0.0
+var _wreck_yaw := 0.0
+var _wreck_lat := 5.5
 
 
 func _ready() -> void:
@@ -131,6 +144,8 @@ func force_encounter() -> void:
 	_far_t = 0.0
 	_shot_t = 1.0
 	encounters += 1
+	_hp = health
+	_end_wreck_fx()
 	_visual.visible = true
 	_engine.play()
 	print("Concurrents : camping-car à %d m derrière" % roundi(spawn_gap))
@@ -165,6 +180,9 @@ func _physics_process(delta: float) -> void:
 	var car_s := _car_s()
 	match state:
 		State.IDLE, State.DONE:
+			return
+		State.WRECK:
+			_update_wreck(delta, car_s)
 			return
 		State.FREE:
 			if auto_encounters and car_s >= _next_s:
@@ -308,11 +326,80 @@ func _add_crack() -> Node3D:
 	return star
 
 
+# --- Abattu au pistolet --------------------------------------------------------------
+
+## Boîte touchable par les balles : [centre (monde), demi-tailles], ou [] si rien à viser.
+func get_hit_box() -> Array:
+	if wrecked or not _visual.visible or not (state == State.CHASE or Net.is_copilot()):
+		return []
+	return [_visual.global_transform * Transform3D(Basis.IDENTITY, Vector3(0, 1.85, 0.07)), Vector3(1.2, 1.45, 4.0)]
+
+
+## Une balle du joueur l'a touché (compté chez le conducteur).
+func take_shot(_point: Vector3) -> void:
+	if wrecked or state != State.CHASE:
+		return
+	_hp -= 1
+	print("Concurrents : touchés au pistolet (%d/%d)" % [health - _hp, health])
+	if _hp <= 0:
+		_wreck()
+
+
+func _wreck() -> void:
+	state = State.WRECK
+	wrecked = true
+	_wreck_t = 0.0
+	_wreck_yaw = 0.0
+	_wreck_lat = 5.5 * (1.0 if _lateral >= 0.0 else -1.0)
+	_engine.stop()
+	_start_wreck_fx()
+	print("Concurrents : camping-car abattu")
+	eliminated.emit()
+
+
+func _start_wreck_fx() -> void:
+	CombatFx.explosion(_visual, Vector3(0, 1.8, 0.5))
+	if _wreck_fire == null:
+		_wreck_fire = CombatFx.burning(_visual, Vector3(0, 1.6, 2.6))
+
+
+func _end_wreck_fx() -> void:
+	if _wreck_fire and is_instance_valid(_wreck_fire):
+		_wreck_fire.queue_free()
+	_wreck_fire = null
+
+
+## Abattu : il freine en zigzaguant, part en travers sur le bas-côté et brûle ; on le
+## laisse derrière nous. Il reviendra plus loin, comme s'il avait été semé.
+func _update_wreck(delta: float, car_s: float) -> void:
+	_wreck_t += delta
+	_speed = move_toward(_speed, 0.0, 40.0 * delta)
+	_s += _speed / 3.6 * delta
+	gap = car_s - _s
+	_lateral = lerpf(_lateral, _wreck_lat, clampf(delta * 0.9, 0.0, 1.0))
+	if _speed > 1.0:
+		_wreck_yaw = move_toward(_wreck_yaw, 0.75 * signf(_wreck_lat), delta * 0.5)
+	var sample := _road.sample_ahead(_car.global_position, -gap)
+	if not sample["found"] or gap > 300.0 or _wreck_t > 30.0:
+		_visual.visible = false
+		_end_wreck_fx()
+		wrecked = false
+		state = State.FREE
+		_next_s = car_s + randf_range(next_encounter.x, next_encounter.y)
+		return
+	var pos := _road.ground_position(sample, _lateral)
+	var dir: Vector3 = sample["dir"]
+	_visual.global_transform = Transform3D(Basis(Vector3.UP, _wreck_yaw) * Basis.looking_at(-dir, Vector3.UP), pos)
+	var spin := _speed / 3.6 / 0.48 * delta
+	for w in _wheels:
+		w.rotate_object_local(Vector3.RIGHT, spin)
+
+
 # --- Partie à deux (chez le copilote, les concurrents recopient ceux du conducteur) ---
 
-## [visible, transformation, km/h, moteur audible]
+## [visible, transformation, km/h, moteur audible, abattu]
 func net_state() -> Array:
-	return [_visual.visible, _visual.global_transform, _speed, _engine.playing]
+	return [_visual.visible, _visual.global_transform, _speed, _engine.playing, wrecked]
 
 
 func net_apply(st: Array, xf: Transform3D) -> void:
@@ -328,6 +415,13 @@ func net_apply(st: Array, xf: Transform3D) -> void:
 			_engine.play()
 		else:
 			_engine.stop()
+	var w: bool = st[4] if st.size() > 4 else false
+	if w and not wrecked:
+		wrecked = true
+		_start_wreck_fx()
+	elif not w and wrecked:
+		wrecked = false
+		_end_wreck_fx()
 
 
 func net_fx(kind: String, data: Array) -> void:

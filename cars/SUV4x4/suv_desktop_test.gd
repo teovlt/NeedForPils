@@ -193,6 +193,8 @@ func _physics_process(delta: float) -> void:
 			_run_autotest_delivery(delta)
 		elif autotest_scenario == "voix":
 			_run_autotest_voices(delta)
+		elif autotest_scenario == "flingue":
+			_run_autotest_gun(delta)
 		elif autotest_scenario == "remettre":
 			_run_autotest_put_back(delta)
 		elif autotest_scenario == "sac_porte":
@@ -7102,3 +7104,234 @@ var remote_eyes: Camera3D
 		Net.role = Net.Role.SOLO
 		Net.session = null
 		get_tree().quit()
+
+
+# --- Pistolet : prise en main, concurrents, police qui suit, police garée ------------
+
+var _fg := {"phase": 0}
+
+
+func _fg_log(msg: String) -> void:
+	_log("AUTOTEST [%.1f s] %s" % [_t, msg])
+
+
+func _fg_shot(n: String) -> void:
+	_fg["pending"] = n
+	_fg["frames"] = 4
+	_fg["cam"] = cam.global_transform
+	_fg_apply_cam.call_deferred()
+
+
+func _fg_apply_cam() -> void:
+	if _fg.has("pending"):
+		cam.global_transform = _fg["cam"]
+
+
+## Tient le pistolet dans la main `h`, main placée à `pos` (repère voiture), canon vers `aim` (monde).
+func _fg_hold(h: VRHandInteractor, g: Gun, pos_local: Vector3, aim: Vector3) -> void:
+	var p := car.to_global(pos_local)
+	var d := (aim - p).normalized()
+	# main placée pour que le pistolet soit en `p`, canon vers la cible
+	h.get_parent().global_transform = Transform3D(Basis.looking_at(d, car.global_basis.y), p) * g._offset.affine_inverse()
+	g._prev_ok = false
+	g.grab_update(h)
+
+
+func _run_autotest_gun(delta: float) -> void:
+	var road: RoadGenerator = $RoadGenerator
+	var t0 := _t
+	_t += delta
+	var at := func(x: float) -> bool: return t0 < x and _t >= x
+	$Weather.random_events = false
+	$FallingTrees.enabled = false
+	car.external_input = true
+	cam.fov = 65.0
+	if _fg.has("pending"):
+		_fg["frames"] = int(_fg["frames"]) - 1
+		if _fg["frames"] <= 0:
+			_shot(_fg["pending"])
+			_fg.erase("pending")
+		else:
+			_fg_apply_cam.call_deferred()
+	var g := car.find_child("Pistol", true, false).get_node("Grab") as Gun
+	if at.call(0.05):
+		$Weather.hour = 13.0
+		$Weather.set_weather("degage", true)
+		road.get_node("Deliveries").set("_delay", 9999.0)
+		var holder := Node3D.new()
+		add_child(holder)
+		var h := VRHandInteractor.new()
+		holder.add_child(h)
+		h.debug_points = [Vector3(0, -100, 0), Vector3(0, -100, 0)]
+		h.debug_trigger = 0.0
+		_fg["hand"] = h
+		# main XR Tools refermée (pose « Grip Shaft »), pour voir la prise en main
+		var hand := (load("res://addons/godot-xr-tools/hands/scenes/lowpoly/right_hand_low.tscn") as PackedScene).instantiate() as Node3D
+		holder.add_child(hand)
+		var ps := XRToolsHandPoseSettings.new()
+		var anim := load("res://addons/godot-xr-tools/hands/animations/right/Grip Shaft.res") as Animation
+		ps.open_pose = anim
+		ps.closed_pose = anim
+		hand.call("add_pose_override", self, 10, ps)
+		_fg["xrhand"] = hand
+		var tree := hand.get_node_or_null("AnimationTree") as AnimationTree
+		if tree:
+			tree.active = false
+		var ap := hand.find_child("AnimationPlayer", true, false) as AnimationPlayer
+		if ap:
+			ap.play("Grip Shaft")
+			ap.seek(0.0, true)
+			ap.advance(0.0)
+			ap.pause()
+		var rv := Rivals.new()
+		rv.name = "Rivals"
+		rv.road_path = NodePath("../RoadGenerator")
+		rv.car_path = NodePath("../SUV4x4")
+		rv.auto_encounters = false
+		rv.hit_chance = 0.0
+		add_child(rv)
+		rv.start()
+		_fg["rv"] = rv
+		var po := Pursuer.new()
+		po.name = "Pursuer"
+		po.road_path = NodePath("../RoadGenerator")
+		po.car_path = NodePath("../SUV4x4")
+		po.auto_encounters = false
+		add_child(po)
+		po.start_patrols()
+		_fg["po"] = po
+		rv.eliminated.connect(func(): _fg_log("signal : concurrents éliminés"))
+		po.eliminated.connect(func(): _fg_log("signal : police éliminée"))
+		_fg_log("pistolet : %s dans %s, %d balles" % [g.item.name, g.item.get_parent().name, g.ammo])
+	var h: VRHandInteractor = _fg.get("hand")
+	if h == null:
+		return
+	var rv: Rivals = _fg["rv"]
+	var po: Pursuer = _fg["po"]
+	var ph: int = _fg["phase"]
+	var kmh: float = car.forward_speed * 3.6
+	match ph:
+		0:   # prise en main, à l'arrêt
+			car.brake_input = 1.0
+			_inside = false
+			if at.call(0.3):
+				g.item.reparent(car)   # rangé dans un compartiment fermé (caché) : on le sort
+				g.item.visible = true
+				g.grab(h)
+				_fg_log("pistolet saisi : tenu=%s, gâchette de conduite de cette main=%.1f" % [g.is_grabbed(), h.get_trigger()])
+			if _t > 0.3 and _t < 2.6:
+				var aim := car.to_global(Vector3(0.25, 1.3, 10.0))
+				_fg_hold(h, g, Vector3(0.15, 1.3, 0.55), aim)
+				var hp: Vector3 = (h.get_parent() as Node3D).global_position
+				if _t < 1.4:
+					cam.global_position = g.item.global_position + car.global_basis.x * 0.32 + car.global_basis.y * 0.04
+					cam.look_at(g.item.global_position)
+					if at.call(1.2):
+						_fg_shot("flingue_1_main_cote")
+						_fg_log("main %s ; pistolet %s (top_level %s, visible %s, parent %s), écart %s" % [hp, g.item.global_position, g.item.top_level, g.item.is_visible_in_tree(), g.item.get_parent().name, g.item.global_position - hp])
+				else:
+					cam.global_position = g.item.global_position + car.global_basis.z * -0.35 + car.global_basis.y * 0.12 + car.global_basis.x * 0.1
+					cam.look_at(g.item.global_position + car.global_basis.z * 0.2)
+					if at.call(2.0):
+						h.debug_trigger = 1.0
+					if at.call(2.05):
+						_fg_shot("flingue_2_tir")
+						_fg_log("tir à vide : balles %d, éclair %s" % [g.ammo, g._flash_t > 0.0])
+					if at.call(2.3):
+						h.debug_trigger = 0.0
+			if at.call(2.6):
+				_fg["phase"] = 1
+				rv.force_encounter()
+				_fg["t"] = _t
+		1:   # concurrents : on roule, on tire dès qu'ils sont à portée
+			_drive_lane(road, 95.0)
+			var target := rv.get_car_position() + Vector3.UP * 1.6
+			var near := rv.gap < 60.0 and rv._visual.visible
+			_fg_hold(h, g, Vector3(-0.35, 1.35, -0.2), target if near else car.to_global(Vector3(0, 1.3, -20)))
+			h.debug_trigger = 1.0 if near and fmod(_t, 0.3) < 0.15 else 0.0
+			cam.global_position = car.to_global(Vector3(1.5, 3.2, 6.0))
+			cam.look_at(rv.get_car_position() if rv._visual.visible else car.to_global(Vector3(0, 1, -20)))
+			if near and not _fg.has("rv_seen"):
+				_fg["rv_seen"] = true
+				_fg_log("camping-car à %.0f m : feu" % rv.gap)
+			if rv.state == Rivals.State.WRECK:
+				if not _fg.has("rv_dead"):
+					_fg["rv_dead"] = _t
+					h.debug_trigger = 0.0
+					_fg_log("camping-car abattu à %.0f m (balles restantes %d)" % [rv.gap, g.ammo])
+				if at.call(float(_fg["rv_dead"]) + 0.15):
+					_fg_shot("flingue_3_explosion")
+				if at.call(float(_fg["rv_dead"]) + 2.5):
+					_fg_shot("flingue_4_epave")
+				if _t > float(_fg["rv_dead"]) + 2.8:
+					_fg["phase"] = 2
+					po.force_encounter("derriere")
+					_fg_log("police derrière (%.0f m)" % po.gap)
+			if _t - float(_fg["t"]) > 40.0:
+				_fg_log("ÉCHEC : camping-car pas abattu (gap %.0f, état %d)" % [rv.gap, rv.state])
+				get_tree().quit()
+		2:   # police qui nous suit
+			_drive_lane(road, 95.0)
+			var vis := po._visual.visible and po.state == Pursuer.State.CHASE
+			var near2 := vis and po.gap < 90.0
+			var tgt := po.get_car_position() + Vector3.UP * 0.8
+			_fg_hold(h, g, Vector3(-0.35, 1.35, -0.2), tgt if near2 else car.to_global(Vector3(0, 1.3, -20)))
+			h.debug_trigger = 1.0 if near2 and fmod(_t, 0.3) < 0.15 else 0.0
+			cam.global_position = car.to_global(Vector3(1.5, 3.2, 6.0))
+			cam.look_at(po.get_car_position() if po._visual.visible else car.to_global(Vector3(0, 1, -20)))
+			if po.state == Pursuer.State.WRECK:
+				if not _fg.has("po_dead"):
+					_fg["po_dead"] = _t
+					h.debug_trigger = 0.0
+					_fg_log("police abattue à %.0f m" % po.gap)
+				if at.call(float(_fg["po_dead"]) + 2.0):
+					_fg_shot("flingue_5_police_epave")
+				if _t > float(_fg["po_dead"]) + 2.3:
+					_fg["phase"] = 3
+			if po.state == Pursuer.State.STOPPED:
+				_fg_log("ÉCHEC : rattrapé par la police")
+				get_tree().quit()
+		3:   # attendre la fin de l'épave, puis police garée devant
+			_drive_lane(road, 95.0)
+			h.debug_trigger = 0.0
+			if po.state == Pursuer.State.FREE:
+				var ok := po.force_encounter("bord", 140.0)
+				_fg_log("épave laissée derrière ; police garée posée devant : %s" % ok)
+				_fg["phase"] = 4
+		4:
+			_drive_lane(road, 60.0)
+			var parked := po.state == Pursuer.State.WAIT
+			var d := po.get_car_position().distance_to(car.global_position)
+			var shoot := parked and d < 90.0
+			_fg_hold(h, g, Vector3(-0.35, 1.35, 0.4), po.get_car_position() + Vector3.UP * 0.8 if shoot else car.to_global(Vector3(0, 1.3, 20)))
+			h.debug_trigger = 1.0 if shoot and fmod(_t, 0.3) < 0.15 else 0.0
+			cam.global_position = car.to_global(Vector3(1.0, 2.6, -5.0))
+			cam.look_at(po.get_car_position())
+			if po.state == Pursuer.State.WRECK and not _fg.has("park_dead"):
+				_fg["park_dead"] = _t
+				_fg_log("police garée abattue à %.0f m ; état %d" % [d, po.state])
+			if _fg.has("park_dead"):
+				h.debug_trigger = 0.0
+				if at.call(float(_fg["park_dead"]) + 1.5):
+					_fg_shot("flingue_6_police_garee")
+				if _t > float(_fg["park_dead"]) + 1.8:
+					g.release(h)
+					_fg_log("lâché : tenu=%s ; balles %d" % [g.is_grabbed(), g.ammo])
+					get_tree().quit()
+			elif po.state == Pursuer.State.CHASE:
+				_fg_log("ÉCHEC : la police garée a démarré avant d'être abattue")
+				get_tree().quit()
+
+
+## Pilote automatique simple : voie de droite à `v` km/h.
+func _drive_lane(road: RoadGenerator, v: float) -> void:
+	var fwd: Vector3 = car.global_basis.z
+	var info := road.sample_road(car.global_position + fwd * 10.0)
+	if info["found"]:
+		var target: Vector3 = info["point"] + info["right"] * 1.75 + info["dir"] * 6.0
+		var to_t := target - car.global_position
+		to_t.y = 0.0
+		_steer(clampf(fwd.cross(to_t.normalized()).y * 2.0, -1.0, 1.0))
+	var kmh: float = car.forward_speed * 3.6
+	car.throttle_input = clampf((v - kmh) * 0.1, 0.0, 1.0)
+	car.brake_input = clampf((kmh - v - 5.0) * 0.1, 0.0, 1.0)

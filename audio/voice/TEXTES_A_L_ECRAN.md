@@ -64,6 +64,8 @@ décoché et que la voix est enregistrée).
 | [ ] | `rivaux_retour` | ILS SONT REVENUS | Le camping-car est derrière toi. | Apparitions suivantes | `chase_director.gd:408` |
 | [ ] | `rivaux_semes` | SEMÉS ! | Le camping-car a disparu du rétro. | Camping-car semé | `chase_director.gd:413` |
 | [ ] | `rivaux_tir_premier` · `rivaux_tir_2` · `rivaux_tir_1` | ON TE TIRE DESSUS ! | Encore {n} balle(s) et c'est fini. | 1re balle reçue, puis quand il en reste 2 ou 1 | `chase_director.gd:421` |
+| [ ] | `rivaux_elimines` | CONCURRENTS ÉLIMINÉS ! | Le camping-car part en fumée. Ta came est à toi. | Camping-car abattu au pistolet | `chase_director.gd` (`_on_rivals_eliminated`) |
+| [ ] | `police_eliminee` | FLICS AU TAPIS ! | Leur voiture brûle sur le bas-côté. D'autres vont venir... | Police abattue au pistolet | `chase_director.gd` (`_on_police_eliminated`) |
 
 
 ### 1.4 Livraisons (`world/delivery/delivery_manager.gd`, affichées via `_say`)
@@ -151,5 +153,6 @@ l'écran en continu.
 - Paquet « ROUTE LIBRE / FUMER TUE » (`interaction/cigarette_pack.gd:148-152`), feuilles « SLIM LIBRE / feuilles à rouler », « FILTRES » (`interaction/rolling/roll_dispenser.gd:112-125`), sachet de tabac (`interaction/rolling/tobacco_pouch.gd:89`), canettes « PILS DU BITUME » (`interaction/drinks/beer_can.gd:53`), sachets « :) x{n} » (`interaction/deal/dealer_bag.gd:29`).
 - Téléphone de l'intro : « APPEL ENTRANT », « NUMÉRO MASQUÉ », bouton « DÉCROCHER », « EN APPEL 00:12 », « APPEL TERMINÉ », « 1 APPEL MANQUÉ » (`interaction/phone.gd`) ; la conversation est la voix `intro_telephone`.
 - Voiture de police « POLICE » (`world/chase/pursuer.gd:692`).
+- Pistolet : compteur de balles au dos de la culasse (« 12 », « ... » pendant le rechargement) (`interaction/weapons/gun.gd`).
 - Points de livraison : carton « :) / ICI :) / FRAGILE / COLIS », numéro de boîte aux lettres, balise « :) x{n} » (`world/delivery/delivery_drop.gd:72-164`).
 - Enseignes et tags des lieux (supérette, motel, aire, camp, station-service : « SUP  RETTE », « FERMÉ », « MOTEL », « CHAMBRES LIBRES », « RÉCEPTION », « CARBU 24 », prix, « OUVERT 24/24 », « PILS », « NO LIMIT »…) (`world/start/start_site.gd`, appels à `label(...)`).
