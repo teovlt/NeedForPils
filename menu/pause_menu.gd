@@ -161,7 +161,7 @@ func _restart() -> void:
 	if Net.is_online():
 		Net.restart_game()
 	else:
-		get_tree().reload_current_scene()
+		SceneLoader.reload_current()
 
 
 func _quit() -> void:
@@ -169,7 +169,7 @@ func _quit() -> void:
 	if Net.is_online():
 		Net.leave_to_menu()
 	else:
-		get_tree().change_scene_to_file(MENU_SCENE)
+		SceneLoader.change_scene(MENU_SCENE)
 
 
 # --- Pause (seul) ------------------------------------------------------------------

@@ -262,7 +262,7 @@ func _fail(reason: String, voice := "") -> void:
 	last_message = reason
 	connection_lost.emit(reason)
 	if was_in_game:
-		get_tree().change_scene_to_file(MENU_SCENE)
+		SceneLoader.change_scene(MENU_SCENE)
 
 
 func _on_peer_connected(id: int) -> void:
@@ -327,7 +327,7 @@ func _check_command_line() -> void:
 func _rpc_start_game(seed_value: int) -> void:
 	game_seed = seed_value
 	state = State.IN_GAME
-	get_tree().change_scene_to_file(GAME_SCENE)
+	SceneLoader.change_scene(GAME_SCENE)
 
 
 ## Le conducteur relance la partie (rejouer) : le copilote recharge aussi.
@@ -335,7 +335,7 @@ func restart_game() -> void:
 	if is_online() and multiplayer.is_server():
 		_rpc_start_game.rpc(game_seed)
 	else:
-		get_tree().reload_current_scene()
+		SceneLoader.reload_current()
 
 
 ## Le copilote demande à rejouer (fin de partie) : c'est le conducteur qui relance.
@@ -347,7 +347,7 @@ func request_restart() -> void:
 ## Retour au menu : on quitte la partie à deux.
 func leave_to_menu() -> void:
 	cancel()
-	get_tree().change_scene_to_file(MENU_SCENE)
+	SceneLoader.change_scene(MENU_SCENE)
 
 
 # --- Messages de jeu (relayés à la NetSession) ---------------------------------------

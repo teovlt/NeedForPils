@@ -1343,7 +1343,7 @@ func _nature_mesh(mname: String) -> Dictionary:
 	else:
 		var inst := scene.instantiate()
 		for c in inst.find_children("*", "MeshInstance3D", true, false):
-			res = {"mesh": _tinted_mesh(c as MeshInstance3D), "xf": (c as MeshInstance3D).transform}
+			res = {"mesh": tinted_mesh(c as MeshInstance3D, nature_color_variation), "xf": (c as MeshInstance3D).transform}
 			break
 		inst.free()
 	_mesh_cache[mname] = res
@@ -1352,12 +1352,12 @@ func _nature_mesh(mname: String) -> Dictionary:
 
 ## Copie du maillage où chaque surface reçoit le shader de variation de couleur,
 ## réglé selon le type de matériau (feuillage, herbe, écorce, roche, fleur).
-func _tinted_mesh(mi: MeshInstance3D) -> Mesh:
+## `v` : force de la variation (voir nature_color_variation). Sert aussi au décor du menu.
+static func tinted_mesh(mi: MeshInstance3D, v: float) -> Mesh:
 	var src := mi.mesh
-	if not (src is ArrayMesh) or nature_color_variation <= 0.0:
+	if not (src is ArrayMesh) or v <= 0.0:
 		return src
 	var mesh: ArrayMesh = src.duplicate()
-	var v := nature_color_variation
 	for si in mesh.get_surface_count():
 		var orig := mi.get_active_material(si)
 		var std := orig as BaseMaterial3D

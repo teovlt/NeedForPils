@@ -6,53 +6,28 @@
 [ext_resource type="PackedScene" uid="uid://cqhw276realc" path="res://addons/godot-xr-tools/functions/function_pointer.tscn" id="4_ptr"]
 [ext_resource type="PackedScene" uid="uid://b4kad2kuba1yn" path="res://addons/godot-xr-tools/hands/scenes/lowpoly/left_hand_low.tscn" id="5_lh"]
 [ext_resource type="PackedScene" uid="uid://l2n30mpbkdyw" path="res://addons/godot-xr-tools/hands/scenes/lowpoly/right_hand_low.tscn" id="6_rh"]
-[ext_resource type="Script" uid="uid://bp3nd2gn0ool1" path="res://menu/forest_generator.gd" id="7_forest"]
+[ext_resource type="Script" uid="uid://bp3nd2gn0ool1" path="res://menu/menu_scenery.gd" id="7_forest"]
+[ext_resource type="PackedScene" path="res://weather/weather_system.tscn" id="11_weather"]
 [ext_resource type="AudioStream" uid="uid://coeny862jla1m" path="res://menu/audio/menu_music.ogg" id="8_music"]
 [ext_resource type="AudioStream" uid="uid://dg3656o53aipf" path="res://menu/audio/forest_ambience.ogg" id="9_amb"]
 [ext_resource type="PackedScene" uid="uid://d2hc5k4wugbvn" path="res://cars/SUV4x4/suv_4x4.glb" id="10_body"]
 
-[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_menu"]
-sky_top_color = Color(0.12, 0.2, 0.38, 1)
-sky_horizon_color = Color(0.85, 0.6, 0.4, 1)
-ground_bottom_color = Color(0.05, 0.08, 0.05, 1)
-ground_horizon_color = Color(0.45, 0.45, 0.38, 1)
-sun_angle_max = 20.0
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_butterfly"]
+shading_mode = 0
+vertex_color_use_as_albedo = true
+cull_mode = 2
 
-[sub_resource type="Sky" id="Sky_menu"]
-sky_material = SubResource("ProceduralSkyMaterial_menu")
+[sub_resource type="QuadMesh" id="QuadMesh_butterfly"]
+material = SubResource("StandardMaterial3D_butterfly")
+size = Vector2(0.07, 0.05)
 
-[sub_resource type="Environment" id="Environment_menu"]
-background_mode = 2
-sky = SubResource("Sky_menu")
-ambient_light_source = 3
-ambient_light_energy = 0.7
-tonemap_mode = 2
-fog_enabled = true
-fog_light_color = Color(0.48, 0.55, 0.5, 1)
-fog_density = 0.025
-fog_sky_affect = 0.3
+[sub_resource type="Gradient" id="Gradient_butterfly"]
+offsets = PackedFloat32Array(0, 0.3, 0.55, 0.8, 1)
+colors = PackedColorArray(1, 1, 1, 1, 1, 0.85, 0.2, 1, 0.95, 0.5, 0.15, 1, 0.55, 0.7, 1, 1, 1, 1, 0.95, 1)
 
-[sub_resource type="Gradient" id="Gradient_grass"]
-offsets = PackedFloat32Array(0, 0.5, 1)
-colors = PackedColorArray(0.12, 0.22, 0.08, 1, 0.2, 0.33, 0.12, 1, 0.3, 0.32, 0.16, 1)
-
-[sub_resource type="FastNoiseLite" id="FastNoiseLite_grass"]
-frequency = 0.02
-
-[sub_resource type="NoiseTexture2D" id="NoiseTexture2D_grass"]
-width = 256
-height = 256
-noise = SubResource("FastNoiseLite_grass")
-color_ramp = SubResource("Gradient_grass")
-seamless = true
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ground"]
-albedo_texture = SubResource("NoiseTexture2D_grass")
-uv1_scale = Vector3(30, 30, 30)
-
-[sub_resource type="PlaneMesh" id="PlaneMesh_ground"]
-material = SubResource("StandardMaterial3D_ground")
-size = Vector2(260, 260)
+[sub_resource type="Curve" id="Curve_flap"]
+_data = [Vector2(0, 0), 0.0, 0.0, 0, 0, Vector2(0.05, 1), 0.0, 0.0, 0, 0, Vector2(0.1, 0.35), 0.0, 0.0, 0, 0, Vector2(0.15, 1), 0.0, 0.0, 0, 0, Vector2(0.2, 0.35), 0.0, 0.0, 0, 0, Vector2(0.25, 1), 0.0, 0.0, 0, 0, Vector2(0.3, 0.35), 0.0, 0.0, 0, 0, Vector2(0.35, 1), 0.0, 0.0, 0, 0, Vector2(0.4, 0.35), 0.0, 0.0, 0, 0, Vector2(0.45, 1), 0.0, 0.0, 0, 0, Vector2(0.5, 0.35), 0.0, 0.0, 0, 0, Vector2(0.55, 1), 0.0, 0.0, 0, 0, Vector2(0.6, 0.35), 0.0, 0.0, 0, 0, Vector2(0.65, 1), 0.0, 0.0, 0, 0, Vector2(0.7, 0.35), 0.0, 0.0, 0, 0, Vector2(0.75, 1), 0.0, 0.0, 0, 0, Vector2(0.8, 0.35), 0.0, 0.0, 0, 0, Vector2(0.85, 1), 0.0, 0.0, 0, 0, Vector2(0.9, 0.35), 0.0, 0.0, 0, 0, Vector2(0.95, 1), 0.0, 0.0, 0, 0, Vector2(1, 0), 0.0, 0.0, 0, 0]
+point_count = 21
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_firefly"]
 shading_mode = 0
@@ -72,20 +47,17 @@ point_count = 3
 [node name="MainMenu" type="Node3D" unique_id=820694293]
 script = ExtResource("1_menu")
 
-[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=431877481]
-environment = SubResource("Environment_menu")
+[node name="Weather" parent="." unique_id=431877481 instance=ExtResource("11_weather")]
+hour = 18.5
+start_weather = "degage"
+event_interval_min = 45.0
+event_interval_max = 100.0
+transition_time = 15.0
+keyboard_debug = false
+debug_menu = false
+rain_volume = 0.25
 
-[node name="Sun" type="DirectionalLight3D" parent="." unique_id=1884586116]
-transform = Transform3D(-0.8660254, -0.23473582, 0.44147384, 0, 0.88294756, 0.46947157, -0.50000006, 0.4065743, -0.764655, 0, 0, 0)
-light_color = Color(1, 0.85, 0.65, 1)
-light_energy = 1.1
-shadow_enabled = true
-directional_shadow_max_distance = 40.0
-
-[node name="Ground" type="MeshInstance3D" parent="." unique_id=1107706563]
-mesh = SubResource("PlaneMesh_ground")
-
-[node name="Forest" type="Node3D" parent="." unique_id=2097058679]
+[node name="Scenery" type="Node3D" parent="." unique_id=2097058679]
 script = ExtResource("7_forest")
 
 [node name="XROrigin3D" type="XROrigin3D" parent="." unique_id=1350259011]
@@ -137,7 +109,7 @@ unshaded = true
 scene_properties_keys = PackedStringArray("main_menu_ui.gd")
 
 [node name="CarShowcase" type="Node3D" parent="." unique_id=1446053486]
-transform = Transform3D(-0.8660254, 0, 0.50000006, 0, 1, 0, -0.50000006, 0, -0.8660254, 0.3, 0.05, -5.8)
+transform = Transform3D(-0.9063078, 0, 0.4226183, 0, 1, 0, -0.4226183, 0, -0.9063078, 2.9, 0.0, -6.8)
 
 [node name="Body" parent="CarShowcase" unique_id=373975721 instance=ExtResource("10_body")]
 transform = Transform3D(-1, 0, -8.742278e-08, 0, 1, 0, 8.742278e-08, 0, -1, 0, 0, 0)
@@ -177,6 +149,25 @@ gravity = Vector3(0, 0, 0)
 initial_velocity_min = 0.05
 initial_velocity_max = 0.25
 scale_amount_curve = SubResource("Curve_firefly")
+
+[node name="Butterflies" type="CPUParticles3D" parent="." unique_id=1884586116]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, -6)
+cast_shadow = 0
+amount = 24
+lifetime = 7.0
+preprocess = 7.0
+mesh = SubResource("QuadMesh_butterfly")
+emission_shape = 3
+emission_box_extents = Vector3(12, 0.6, 12)
+direction = Vector3(1, 0.3, 0)
+spread = 180.0
+gravity = Vector3(0, 0, 0)
+initial_velocity_min = 0.3
+initial_velocity_max = 0.8
+angular_velocity_min = -40.0
+angular_velocity_max = 40.0
+scale_amount_curve = SubResource("Curve_flap")
+color_initial_ramp = SubResource("Gradient_butterfly")
 
 [node name="MusicPlayer" type="AudioStreamPlayer" parent="." unique_id=237418522]
 stream = ExtResource("8_music")

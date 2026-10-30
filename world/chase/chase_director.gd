@@ -340,7 +340,7 @@ func _process(delta: float) -> void:
 			if Net.is_online():
 				Net.leave_to_menu()
 			else:
-				get_tree().change_scene_to_file(menu_scene)
+				SceneLoader.change_scene(menu_scene)
 		return
 	if _pursuer and _addiction:
 		var close := clampf((70.0 - _pursuer.gap) / 60.0, 0.0, 1.0) if _pursuer.state == Pursuer.State.CHASE else 0.0
